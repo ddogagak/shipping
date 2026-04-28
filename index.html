@@ -656,11 +656,15 @@ function isSummaryCsvRow(r) {
   const summaryKeys = ["Ship To Name", "Total Price", "Shipping And Handling", "eBay Reference Value", "Buyer Name"];
   return summaryKeys.some(k => String(r[k] || "").trim() !== "");
 }
-function normalizeCsvTaxCode(summaryRow, countryCode) {
-  const ebayRefName = String(summaryRow["eBay Reference Name"] || "").trim();
-  const ebayRefValue = String(summaryRow["eBay Reference Value"] || "").trim();
-  const buyerTaxName = String(summaryRow["Buyer Tax Identifier Name"] || "").trim();
-  const buyerTaxValue = String(summaryRow["Buyer Tax Identifier Value"] || "").trim();
+function normalizeCsvTaxCode(summaryRow, allRows, countryCode) {
+  const source = [summaryRow, ...(allRows || [])].find(r =>
+    String(r?.["eBay Reference Value"] || "").trim() ||
+    String(r?.["Buyer Tax Identifier Value"] || "").trim()
+  ) || summaryRow;
+  const ebayRefName = String(source["eBay Reference Name"] || "").trim();
+  const ebayRefValue = String(source["eBay Reference Value"] || "").trim();
+  const buyerTaxName = String(source["Buyer Tax Identifier Name"] || "").trim();
+  const buyerTaxValue = String(source["Buyer Tax Identifier Value"] || "").trim();
 
   let raw = ebayRefValue || buyerTaxValue || "";
   if (/^RFC$/i.test(buyerTaxName) && buyerTaxValue) raw = buyerTaxValue;
@@ -691,7 +695,7 @@ function parseCsvGroupToOrder(orderNo, rows) {
   const shippingFee = numFromCsv(summary["Shipping And Handling"]);
   const taxAmount = numFromCsv(summary["eBay Collected Tax"]);
   const orderTotal = numFromCsv(summary["Total Price"]);
-  const taxCode = normalizeCsvTaxCode(summary, countryCode);
+  const taxCode = normalizeCsvTaxCode(summary, rows, countryCode);
   const exportPrice = calculateExportPrice(subtotal, taxCode, countryCode);
   const kpacket = KPACKET_COUNTRIES.has(countryCode);
   const processStatus = kpacket ? "ready" : "pending";
