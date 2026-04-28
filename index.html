@@ -1,967 +1,957 @@
- (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
-diff --git a/index.html b/index.html
-new file mode 100644
-index 0000000000000000000000000000000000000000..8ba93eae242f7df483ed4025cd175fa783f77ed8
---- /dev/null
-+++ b/index.html
-@@ -0,0 +1,957 @@
-+<!doctype html>
-+<html lang="ko">
-+<head>
-+  <meta charset="utf-8" />
-+  <meta name="viewport" content="width=device-width, initial-scale=1" />
-+  <title>K-Packet PDF → CSV/XLSX 테스트 v9</title>
-+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-+  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
-+  <style>
-+    :root { --bg:#f7f7fb; --card:#fff; --text:#1f2937; --muted:#6b7280; --line:#e5e7eb; --accent:#4f46e5; --good:#ecfdf5; --warn:#fffbeb; --bad:#fef2f2; }
-+    * { box-sizing:border-box; }
-+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:var(--bg); color:var(--text); }
-+    header { padding:28px 32px 18px; }
-+    h1 { margin:0 0 8px; font-size:24px; }
-+    p { margin:0; color:var(--muted); line-height:1.55; }
-+    main { padding:0 32px 40px; display:grid; gap:18px; }
-+    .card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:18px; box-shadow:0 8px 24px rgba(15,23,42,.04); }
-+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-+    label { font-size:13px; font-weight:700; color:#374151; display:block; margin-bottom:8px; }
-+    input[type=file], textarea, input, select { width:100%; border:1px solid var(--line); border-radius:12px; padding:10px 12px; background:#fff; font:inherit; }
-+    textarea { min-height:170px; resize:vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; }
-+    button { border:0; border-radius:12px; padding:10px 14px; font-weight:700; cursor:pointer; background:#e5e7eb; color:#111827; }
-+    button.primary { background:var(--accent); color:#fff; }
-+    button.green { background:#059669; color:#fff; }
-+    button.warn { background:#f59e0b; color:#111827; }
-+    button.red { background:#ef4444; color:#fff; }
-+    button:disabled { opacity:.45; cursor:not-allowed; }
-+    .note { font-size:12px; color:var(--muted); margin-top:8px; }
-+    .status { padding:4px 8px; border-radius:999px; font-size:12px; font-weight:800; display:inline-block; white-space:nowrap; }
-+    .ready { background:var(--good); color:#047857; }
-+    .pending { background:var(--warn); color:#92400e; }
-+    .refund { background:var(--bad); color:#b91c1c; }
-+    .contact { background:#eff6ff; color:#1d4ed8; }
-+    .done { background:#f3f4f6; color:#374151; }
-+    tr.combined-row td { background:#fffbeb !important; }
-+    .combined-box { display:grid; gap:10px; }
-+    .combined-item { border:1px solid #fcd34d; background:#fffbeb; border-radius:14px; padding:12px; display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap; }
-+    .combined-item strong { color:#92400e; }
-+    .table-wrap { overflow:auto; border:1px solid var(--line); border-radius:14px; }
-+    table { border-collapse:collapse; width:100%; min-width:1500px; font-size:12px; background:white; }
-+    th, td { border-bottom:1px solid var(--line); padding:8px; vertical-align:top; text-align:left; }
-+    th { position:sticky; top:0; background:#f9fafb; z-index:1; color:#374151; }
-+    td input, td select { padding:6px 8px; border-radius:8px; min-width:80px; font-size:12px; }
-+    .small { width:70px; }
-+    .med { width:120px; }
-+    .wide { width:220px; }
-+    .summary { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:10px; }
-+    .summary div { background:#f9fafb; border:1px solid var(--line); border-radius:14px; padding:12px; }
-+    .summary strong { display:block; font-size:22px; margin-top:4px; }
-+    .log { white-space:pre-wrap; background:#111827; color:#d1d5db; border-radius:14px; padding:12px; max-height:190px; overflow:auto; font-size:12px; }
-+    @media (max-width:900px){ .grid,.summary{grid-template-columns:1fr;} header,main{padding-left:16px;padding-right:16px;} }
-+  </style>
-+</head>
-+<body>
-+<header>
-+  <h1>K-Packet PDF → CSV/XLSX 테스트 v9</h1>
-+  <p>eBay packing slip PDF를 업로드하면 주문번호 기준으로 분리해서 기존 K-Packet CSV 70개 컬럼 포맷으로 출력합니다. 1차 버전이라 저장 DB는 없고, 화면에서 확인/수정 후 다운로드하는 방식입니다.</p>
-+</header>
-+<main>
-+  <section class="card grid">
-+    <div>
-+      <label>0) eBay Orders Report CSV 업로드 (기본)</label>
-+      <input id="csvFile" type="file" accept=".csv,text/csv" multiple />
-+      <div class="note">기본 입력 방식: eBay Orders Report CSV를 읽어 Order Number 기준으로 주문을 그룹화합니다.</div>
-+    </div>
-+    <div>
-+      <label>1) eBay PDF 업로드</label>
-+      <input id="pdfFile" type="file" accept="application/pdf" multiple />
-+      <div class="note">PDF import는 fallback입니다. 페이지 단위로 읽어서 여러 페이지에 걸친 주문도 이어 붙입니다.</div>
-+    </div>
-+    <div>
-+      <label>또는 eBay 텍스트 붙여넣기</label>
-+      <textarea id="rawText" placeholder="eBay packing slip 텍스트를 붙여넣고 [붙여넣은 텍스트 파싱]을 누르세요."></textarea>
-+      <div class="note">붙여넣기 방식은 PDF보다 레이아웃 정보가 적어서 금액 파싱이 덜 안정적일 수 있습니다.</div>
-+    </div>
-+  </section>
-+
-+  <section class="card">
-+    <div class="row">
-+      <button class="primary" id="parseCsvBtn">CSV 파싱(기본)</button>
-+      <button class="primary" id="parsePdfBtn">PDF 파싱</button>
-+      <button id="parseTextBtn">붙여넣은 텍스트 파싱</button>
-+      <button id="selectReadyBtn">바로처리만 선택</button>
-+      <button id="selectAllBtn">전체 선택</button>
-+      <button id="clearBtn">초기화</button>
-+      <button id="saveDbBtn" disabled>DB 저장(준비중)</button>
-+      <button class="green" id="downloadCsvBtn" disabled>CSV 다운로드</button>
-+      <button class="green" id="downloadXlsxBtn" disabled>XLSX 다운로드</button>
-+    </div>
-+    <div class="note">기본 규칙: Pipedream 규칙 이식 / 비영어권 특수문자 ASCII 변환 / 기존+추가 K-Packet 국가 반영 / TAX·IOSS 존재 시 subtotal 가격 사용, 없으면 비-US는 15 고정 / 개수는 Quantity 합산.</div>
-+  </section>
-+  <section class="card" id="combinedCard" style="display:none">
-+    <h2 style="margin:0 0 12px;font-size:18px">묶음배송 후보</h2>
-+    <div class="combined-box" id="combinedSuggestions"></div>
-+    <div class="note">수취인명과 국가코드가 같은 주문만 후보로 제안합니다. 버튼을 누를 때만 실제로 통합되며, 통합된 행은 연한 노랑색으로 표시됩니다.</div>
-+  </section>
-+
-+
-+  <section class="summary" id="summary" style="display:none">
-+    <div>총 주문<strong id="sumTotal">0</strong></div>
-+    <div>바로처리<strong id="sumReady">0</strong></div>
-+    <div>보류/확인<strong id="sumPending">0</strong></div>
-+    <div>K-Packet 가능<strong id="sumKpacket">0</strong></div>
-+    <div>선택됨<strong id="sumSelected">0</strong></div>
-+  </section>
-+
-+  <section class="card" id="ordersCard" style="display:none">
-+    <h2 style="margin:0 0 12px;font-size:18px">파싱 결과</h2>
-+    <div class="table-wrap">
-+      <table id="ordersTable">
-+        <thead>
-+          <tr>
-+            <th>선택</th><th>처리상태</th><th>주문번호</th><th>날짜</th><th>Username</th><th>수취인</th><th>국가</th><th>전화</th><th>우편번호</th><th>상세주소</th><th>도시</th><th>주/도</th><th>내용품</th><th>개수</th><th>가격</th><th>TAX/IOSS</th><th>메모</th>
-+          </tr>
-+        </thead>
-+        <tbody></tbody>
-+      </table>
-+    </div>
-+  </section>
-+
-+  <section class="card">
-+    <h2 style="margin:0 0 12px;font-size:18px">로그</h2>
-+    <div class="log" id="log">대기 중...</div>
-+  </section>
-+</main>
-+
-+<script>
-+const OUTPUT_HEADERS = [
-+  "★상품구분","★수취인명","수취인EMAIL","수취인전화국가번호(숫자4자리)","수취인전화지역번호(숫자4자리)","수취인전화전화번호(숫자4자리)","수취인전화국번(숫자4자리)","★14전화번호","★16국가코드","★16국가명","★15우편번호","★13상세주소","★12시/군/구","★11주/도/시","수취인 건물명미국행 k-packet 이용할 경우만 입력가능( 영문 공백포함 90자 이내 )","★총중량","★내용품","★개수","★순중량(g)[ = 품목 1종의 개당중량 * 개수 ](수출우편물 정보관세청 제공 동의시 필수)","★가격","단위","HSCODE(숫자만 10자리)","생산지","규격(모델명)","보험가입여부(Y/N)(미선택시공백가능, 음식물, 전자제품 불가)","보험가입금액(물품가액을 기입 원\\)","EMS : EEMS 프리미엄 : PK-Packet : K등기소형 :R","EMS 비서류 : em,     EMS 서류 : ee, K-Packet : rl, 소형포장물 : re","고객주문번호( 숫자,영문 30자이내)","주문인우편번호(숫자6자리)","주문인주소( 영문 140자이내 공백포함)","주문인명( 영문 35자이내 공백포함)","주문인전화국가번호(숫자4자리)","주문인전화지역번호(숫자4자리)","주문인전화국번호(숫자4자리)","주문인전화뒷번호(숫자4자리)","주문인 전화 전체번호국가번호-지역번호-국번-전화번호( 숫자, - 허용)ex. 86-062-678-1234","주문인휴대전화지역번호(숫자3자리)","주문인휴대전화뒷번호(숫자4자리)","주문인휴대전화국번호(숫자4자리)","주문인EMAIL( 영문 40자이내)","주문인 휴대전화 전체지역번호-국번-뒷번호(숫자, - 허용) ex. 010-1234-5678","수출우편물 정보 관세청 제공 여부(Y/N)","사업자번호(숫자10자리)","수출화주이름 또는 상호(수출우편물 정보 관세청 제공 동의시 필수)","수출화주 주소(수출우편물 정보 관세청 제공 동의시 필수)","수출이행등록여부(Y/N)","수출신고번호1(14~15자리)","전량분할발송여부(Y:전량,N:분할)","선기적포장개수","수출신고번호2(14~15자리)","전량분할발송여부(Y:전량,N:분할) 1","선기적포장개수 1","수출신고번호3(14~15자리)","전량분할발송여부(Y:전량,N:분할) 3","선기적포장개수 3","수출신고번호4(14~15자리)","선기적포장개수 2","전량분할발송여부(Y:전량,N:분할) 2","추천우체국코드(POSA만 사용)5자리숫자","수출면장여부(Y/N)","★브라질세금식별번호(* 브라질행 EMS, K-Packet의 경우 필수 입력)","가로(cm)","세로(cm)","높이(cm)","부피중량 적용 제외 여부(Y/N)","★IOSS/EORI/TAX NUMBER식별 번호","상태","물품","생성 일시"
-+];
-+
-+const KPACKET_COUNTRIES = new Set([
-+  "NZ", "MY", "VN", "BR", "SG", "GB", "AU", "ID", "JP", "CN", "CA", "TH", "TW", "FR", "PH", "HK", "RU", "DE", "ES",
-+  "AR", "AT", "BY", "BE", "KH", "CL", "EG", "FI", "HN", "IN", "IE", "IL", "IT", "KZ", "KG", "MX", "MN", "NP", "NL", "NO", "PK", "PE", "PL", "SA", "ZA", "SE", "CH", "TR", "UA", "AE", "UZ"
-+]);
-+const EU_IOSS_COUNTRIES = new Set(["SE","DE","ES","PL","FR","IE","IT"]);
-+const COUNTRY_CODES = {
-+  "United States":"US","USA":"US","Canada":"CA","Italy":"IT","Germany":"DE","New Zealand":"NZ","Australia":"AU","United Kingdom":"GB","UK":"GB","France":"FR","Spain":"ES","Mexico":"MX","Colombia":"CO","Brazil":"BR","Japan":"JP","China":"CN","Singapore":"SG","Malaysia":"MY","Vietnam":"VN","Thailand":"TH","Taiwan":"TW","Hong Kong":"HK","Russia":"RU","Netherlands":"NL","Norway":"NO","Sweden":"SE","Switzerland":"CH","Turkey":"TR","United Arab Emirates":"AE","India":"IN","Ireland":"IE","Israel":"IL","Belgium":"BE","Austria":"AT","Poland":"PL","Finland":"FI","South Africa":"ZA","Chile":"CL","Argentina":"AR","Peru":"PE","Saudi Arabia":"SA","Ukraine":"UA","Uzbekistan":"UZ","Kazakhstan":"KZ","Kyrgyzstan":"KG","Mongolia":"MN","Nepal":"NP","Pakistan":"PK","Cambodia":"KH","Egypt":"EG","Honduras":"HN","Belarus":"BY","Indonesia":"ID","Philippines":"PH"
-+};
-+const CALLING_CODES = { US:"1", CA:"1", IT:"39", NZ:"64", DE:"49", CO:"57", MX:"52", GB:"44", AU:"61", FR:"33", ES:"34", BR:"55", JP:"81", CN:"86", SG:"65", MY:"60", VN:"84", TH:"66", TW:"886", HK:"852", NL:"31", SE:"46", CH:"41", TR:"90", AE:"971", IE:"353", IL:"972", PL:"48", AT:"43", BE:"32", FI:"358", NO:"47", RU:"7", ID:"62", PH:"63" };
-+let orders = [];
-+
-+if (window.pdfjsLib) {
-+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-+}
-+
-+function log(msg) {
-+  const el = document.getElementById("log");
-+  el.textContent = `[${new Date().toLocaleTimeString()}] ${msg}\n` + (el.textContent === "대기 중..." ? "" : el.textContent);
-+}
-+function money(n) { const x = Number(n || 0); return Number.isFinite(x) ? x.toFixed(2).replace(/\.00$/, "") : "0"; }
-+function replaceSpecialChars(text) {
-+  if (!text || typeof text !== "string") return "";
-+  const digraph = {"ß":"ss","Ä":"Ae","Ö":"Oe","Ü":"Ue","ä":"ae","ö":"oe","ü":"ue","Æ":"Ae","æ":"ae","Œ":"Oe","œ":"oe"};
-+  text = text.replace(/[ßÄÖÜäöüÆæŒœ]/g, ch => digraph[ch] || ch);
-+  text = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-+  const single = {"Ø":"O","ø":"o","Å":"A","å":"a","Č":"C","č":"c","Ć":"C","ć":"c","Š":"S","š":"s","Ž":"Z","ž":"z","Đ":"D","đ":"d","Ł":"L","ł":"l","Ğ":"G","ğ":"g","Ş":"S","ş":"s","İ":"I","ı":"i"};
-+  return text.replace(/[ØøÅåČčĆćŠšŽžĐđŁłĞğŞşİı]/g, ch => single[ch] || ch).replace(/[^\x00-\x7F]/g, "").trim();
-+}
-+function normalizeLines(text) {
-+  return (text || "").replace(/\r/g, "\n").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
-+}
-+function parseDollar(v) { return Number(String(v || "").replace(/[^0-9.-]/g, "")) || 0; }
-+function parseCsvText(csvText) {
-+  const rows = [];
-+  let row = [];
-+  let cell = "";
-+  let inQuotes = false;
-+  const text = String(csvText || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-+  for (let i = 0; i < text.length; i++) {
-+    const ch = text[i];
-+    const next = text[i + 1];
-+    if (inQuotes) {
-+      if (ch === "\"" && next === "\"") { cell += "\""; i++; }
-+      else if (ch === "\"") inQuotes = false;
-+      else cell += ch;
-+      continue;
-+    }
-+    if (ch === "\"") { inQuotes = true; continue; }
-+    if (ch === ",") { row.push(cell); cell = ""; continue; }
-+    if (ch === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; continue; }
-+    cell += ch;
-+  }
-+  row.push(cell);
-+  rows.push(row);
-+  return rows;
-+}
-+function getCsvHeaderAndRows(csvText) {
-+  const rows = parseCsvText(csvText)
-+    .map(r => r.map(v => String(v || "").trim()))
-+    .filter(r => r.some(v => v !== ""));
-+  const headerIdx = rows.findIndex(r => r.some(v => String(v).toLowerCase() === "order number"));
-+  if (headerIdx < 0) return { headers: [], records: [] };
-+  const headers = rows[headerIdx];
-+  const records = rows.slice(headerIdx + 1)
-+    .filter(r => !r.some(v => /record\(s\)\s+downloaded/i.test(v)));
-+  return { headers, records };
-+}
-+function rowToObj(headers, row) {
-+  const o = {};
-+  headers.forEach((h, i) => { o[h] = row[i] ?? ""; });
-+  return o;
-+}
-+function numFromCsv(value) {
-+  return parseDollar(String(value ?? "").replace(/,/g, ""));
-+}
-+function countryCodeFromName(name) { return COUNTRY_CODES[replaceSpecialChars(name).trim()] || replaceSpecialChars(name).trim().toUpperCase(); }
-+function isKnownCountryName(name) { return Boolean(COUNTRY_CODES[replaceSpecialChars(name).trim()]); }
-+function normalizePostcode(postcode, countryCode) {
-+  let p = String(postcode || "").replace(/[\s-]/g, "").trim();
-+  if (countryCode === "US") p = p.substring(0, 5);
-+  return p;
-+}
-+function normalizePhone(phone, countryCode) {
-+  let digits = String(phone || "").replace(/[^0-9]/g, "");
-+  const cc = CALLING_CODES[countryCode];
-+  if (cc && digits.startsWith(cc) && digits.length > cc.length + 5) digits = digits.slice(cc.length);
-+  return digits;
-+}
-+function normalizeTaxCode(taxText, countryCode) {
-+  let t = (taxText || "").trim();
-+  if (t.includes(",")) t = t.split(",")[0].trim();
-+  const rfcMatch = t.match(/RFC\s*[:\-]?\s*([A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3})/i);
-+  if (rfcMatch) t = rfcMatch[1].toUpperCase().replace(/Ñ/g, "N");
-+  if (/IM2760000742/.test(t)) t = "IM2760000742";
-+  else if (/64652016681/.test(t)) t = "ABN64652016681";
-+  else if (/36560857/.test(t)) t = "GB365608576000";
-+  if (!t || t.length < 4 || t === "-") {
-+    if (EU_IOSS_COUNTRIES.has(countryCode)) t = "IM2760000742";
-+    else if (countryCode === "AU") t = "ABN64652016681";
-+    else if (countryCode === "GB") t = "GB365608576000";
-+    else t = "-";
-+  }
-+  return t;
-+}
-+function detectContent(itemText) {
-+  const t = (itemText || "").toLowerCase();
-+  if (t.includes("plush")) return { content:"toy", hscode:"9503003411", height:"8" };
-+  return { content:"photocard", hscode:"4909000000", height:"1" };
-+}
-+function hasUsableTaxCode(taxCode) {
-+  return Boolean(taxCode && taxCode !== "-" && String(taxCode).trim().length >= 4);
-+}
-+function calculateExportPrice(subtotalPrice, taxCode, countryCode) {
-+  if (!hasUsableTaxCode(taxCode) && countryCode !== "US") return "15";
-+  return money(subtotalPrice);
-+}
-+function sumItemQuantities(items) {
-+  return (items || []).map(it => Number(it.quantity) || 0).reduce((a, b) => a + b, 0);
-+}
-+function sumItemTotals(items) {
-+  return (items || []).map(it => Number(it.item_total) || 0).reduce((a, b) => a + b, 0);
-+}
-+function extractTaxLine(text) {
-+  const raw = String(text || "");
-+  const patterns = [
-+    /VAT\s*Paid\s*:\s*IOSS\s*-\s*[^\n]+/i,
-+    /IRD#\s*[^\n]+/i,
-+    /Buyer\s*Tax\s*ID\s*:\s*[^\n]+/i,
-+    /ABN\s*[^\n]+/i,
-+    /EORI\s*[^\n]+/i,
-+  ];
-+  for (const re of patterns) {
-+    const m = raw.match(re);
-+    if (m) return m[0].replace(/KTEMSkr|PACKING SLIP|Ship from|Ship to/gi, "").trim();
-+  }
-+  return "";
-+}
-+
-+function formatKoreanDateNow() {
-+  const d = new Date();
-+  const ampm = d.getHours() < 12 ? "오전" : "오후";
-+  const hour = d.getHours() % 12 || 12;
-+  const minute = String(d.getMinutes()).padStart(2, "0");
-+  return `${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일 ${ampm} ${hour}:${minute}`;
-+}
-+async function pageToText(page) {
-+  const content = await page.getTextContent();
-+  const items = content.items.map(it => ({ str: it.str, x: it.transform[4], y: it.transform[5] })).filter(it => it.str && it.str.trim());
-+  items.sort((a,b) => Math.abs(b.y-a.y) > 2 ? b.y-a.y : a.x-b.x);
-+  const lines = [];
-+  for (const it of items) {
-+    const last = lines[lines.length-1];
-+    if (last && Math.abs(last.y - it.y) <= 2) last.parts.push(it);
-+    else lines.push({ y: it.y, parts: [it] });
-+  }
-+  return lines.map(line => line.parts.sort((a,b)=>a.x-b.x).map(p=>p.str).join(" ").replace(/\s+/g," ").trim()).join("\n");
-+}
-+async function extractPdfPages(file) {
-+  const buffer = await file.arrayBuffer();
-+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
-+  const pages = [];
-+  for (let i=1; i<=pdf.numPages; i++) {
-+    const page = await pdf.getPage(i);
-+    pages.push(await pageToText(page));
-+  }
-+  return pages;
-+}
-+function makeSegmentsFromPages(pages) {
-+  const segments = [];
-+  let cur = null;
-+  pages.forEach((pageText, idx) => {
-+    const text = normalizeLines(pageText);
-+    const hasOrder = /Order:\s*\d{2}-\d{5}-\d{5}/.test(text);
-+    if (hasOrder) {
-+      if (cur) segments.push(cur);
-+      cur = { text, pages: [idx+1] };
-+    } else if (cur) {
-+      cur.text += "\n" + text;
-+      cur.pages.push(idx+1);
-+    }
-+  });
-+  if (cur) segments.push(cur);
-+  return segments;
-+}
-+function makeSegmentsFromRawText(raw) {
-+  const text = normalizeLines(raw);
-+  const re = /Order:\s*\d{2}-\d{5}-\d{5}/g;
-+  const hits = [...text.matchAll(re)].map(m => m.index);
-+  if (!hits.length) return [];
-+  const segs = [];
-+  for (let i=0; i<hits.length; i++) {
-+    const start = i === 0 ? 0 : hits[i];
-+    const end = i+1 < hits.length ? hits[i+1] : text.length;
-+    segs.push({ text: text.slice(start, end), pages: [] });
-+  }
-+  return segs;
-+}
-+function parseAmounts(text) {
-+  const raw = String(text || "");
-+  const out = { subtotal:0, shipping_fee:0, tax_amount:0, refund_amount:0, order_total:0 };
-+  const start = raw.search(/\bSubtotal\b/i);
-+  if (start < 0) return out;
-+  const tail = raw.slice(start, start + 1800);
-+  const orderTotalMatch = tail.match(/Order total\*\*[\s\S]{0,400}|Order total[\s\S]{0,400}/i);
-+  const block = orderTotalMatch ? tail.slice(0, orderTotalMatch.index + orderTotalMatch[0].length) : tail;
-+  const hasTax = /\b(?:VAT|GST|Sales tax)\s*\(eBay collected\)/i.test(block);
-+  const hasRefund = /\bRefund\b/i.test(block);
-+  const labels = ["subtotal", "shipping_fee"];
-+  if (hasTax) labels.push("tax_amount");
-+  if (hasRefund) labels.push("refund_amount");
-+  labels.push("order_total");
-+  const amounts = [...block.matchAll(/-?\$\s*[0-9]+(?:\.[0-9]{2})?/g)].map(m => parseDollar(m[0]));
-+  if (amounts.length < labels.length) return out;
-+  function mapValues(values) {
-+    const obj = { subtotal:0, shipping_fee:0, tax_amount:0, refund_amount:0, order_total:0 };
-+    labels.forEach((label, i) => { obj[label] = values[i] || 0; });
-+    return obj;
-+  }
-+  function score(obj) {
-+    const expected = (obj.subtotal || 0) + (obj.shipping_fee || 0) + (obj.tax_amount || 0) + (obj.refund_amount || 0);
-+    return Math.abs(expected - (obj.order_total || 0));
-+  }
-+  const values = amounts.slice(0, labels.length);
-+  const direct = mapValues(values);
-+  const reversed = mapValues([...values].reverse());
-+  const best = score(direct) <= score(reversed) ? direct : reversed;
-+  return { ...out, ...best };
-+}
-+
-+function parseShippingService(text) {
-+  return (text.match(/Buyer selected shipping service\s*:\s*([^\n]+)/i)?.[1] || "").trim();
-+}
-+function cleanShipToLine(line) {
-+  let s = String(line || "").replace(/\s+/g, " ").trim();
-+  if (!s) return "";
-+
-+  const rightTailTokens = ["Ship from", "2171 Lakeview Dr", "Apt 79", "Ypsilanti, MI, 48198-6712", "Sy"];
-+  for (const token of rightTailTokens) {
-+    if (s === token) return "";
-+    if (s.endsWith(" " + token)) s = s.slice(0, -(token.length + 1)).trim();
-+  }
-+
-+  if (s !== "United States" && s.endsWith(" United States")) {
-+    s = s.slice(0, -" United States".length).trim();
-+  }
-+  return s.trim();
-+}
-+
-+function parseShipTo(text) {
-+  const result = { recipient_name:"", address1:"", city:"", state:"", postal_code:"", country:"", country_code:"" };
-+  const lines = String(text || "").split("\n").map(s => s.trim()).filter(Boolean);
-+  const start = lines.findIndex(l => /^Ship to\b/i.test(l));
-+  if (start < 0) return result;
-+
-+  const captured = [];
-+  for (let i = start + 1; i < lines.length; i++) {
-+    let line = cleanShipToLine(lines[i]);
-+    if (!line) continue;
-+    if (/^\+\d/.test(line)) break;
-+    if (/@members\.ebay\.com/i.test(line)) break;
-+    if (/^Username:/i.test(line)) break;
-+    if (/^Order:\s*\d{2}-\d{5}-\d{5}/i.test(line)) break;
-+    if (/^Sales record/i.test(line)) break;
-+    if (/^Item\b/i.test(line)) break;
-+    if (/^Buyer selected shipping service/i.test(line)) break;
-+    if (/^Subtotal\b/i.test(line)) break;
-+    if (line === "United States" && captured.length && isKnownCountryName(captured[captured.length - 1])) continue;
-+    if (/^(VAT Paid|IRD#|Buyer Tax ID|KTEMSkr|PACKING SLIP|This is not an invoice\.)/i.test(line)) continue;
-+    if (/^Ship from$/i.test(line)) continue;
-+    if (/^Ship to$/i.test(line)) continue;
-+
-+    line = line.replace(/^Ship to\s+Ship from$/i, "").trim();
-+    if (line) captured.push(replaceSpecialChars(line));
-+  }
-+
-+  if (!captured.length) return result;
-+  result.recipient_name = captured[0] || "";
-+  result.country = captured[captured.length - 1] || "";
-+  result.country_code = countryCodeFromName(result.country);
-+
-+  const addr = captured.slice(1, -1).filter(Boolean);
-+  const cityLine = addr[addr.length - 1] || "";
-+  const streetLines = addr.slice(0, -1);
-+  result.address1 = streetLines.join(" ").trim();
-+
-+  if (cityLine.includes(",")) {
-+    const parts = cityLine.split(",").map(s => s.trim()).filter(Boolean);
-+    if (parts.length >= 3) {
-+      result.city = parts[0];
-+      result.state = parts[1];
-+      result.postal_code = parts.slice(2).join(" ");
-+    } else if (parts.length === 2) {
-+      result.city = parts[0];
-+      result.state = parts[0];
-+      result.postal_code = parts[1];
-+    } else {
-+      result.city = parts[0] || "";
-+    }
-+  } else {
-+    result.city = cityLine;
-+    result.state = cityLine;
-+  }
-+
-+  if (!result.state && result.city) result.state = result.city;
-+  if (!result.city && result.state) result.city = result.state;
-+  result.postal_code = normalizePostcode(result.postal_code, result.country_code);
-+
-+  return result;
-+}
-+
-+function parseItems(text) {
-+  const raw = String(text || "");
-+  let section = raw;
-+  const itemHeader = raw.search(/\bItem\s+Quantity\b|\bItem\b[\s\S]{0,80}\bQuantity\b/i);
-+  const packing = raw.search(/\bPACKING SLIP\b/i);
-+  const start = itemHeader >= 0 ? itemHeader : (packing >= 0 ? packing : 0);
-+  section = raw.slice(start);
-+  const endCandidates = [
-+    section.search(/\n\s*Buyer selected shipping service\b/i),
-+    section.search(/\n\s*Subtotal\b/i),
-+    section.search(/\n\s*\*\*Order total includes\b/i)
-+  ].filter(i => i > 0);
-+  if (endCandidates.length) section = section.slice(0, Math.min(...endCandidates));
-+
-+  const moneyRows = [];
-+  const seen = new Set();
-+
-+  function addRow(quantity, item_price, item_total, index) {
-+    const q = Number(quantity) || 0;
-+    const ip = parseDollar(item_price);
-+    const it = parseDollar(item_total);
-+    const key = String(index) + ":" + q + ":" + ip + ":" + it;
-+    if (!q || !it || seen.has(key)) return;
-+    seen.add(key);
-+    moneyRows.push({ quantity:q, item_price:ip, item_total:it, index:index || 0 });
-+  }
-+
-+  const rowRe = /(?:^|\s)(\d{1,3})\s+\$\s*([0-9]+(?:\.[0-9]{2})?)\s+\$\s*([0-9]+(?:\.[0-9]{2})?)(?=\s|$)/g;
-+  for (const m of section.matchAll(rowRe)) {
-+    addRow(m[1], m[2], m[3], m.index);
-+  }
-+
-+  if (!moneyRows.length) {
-+    const lines = section.split("\n").map(s => s.replace(/\s+/g, " ").trim()).filter(Boolean);
-+    for (let i = 0; i < lines.length - 2; i++) {
-+      if (/^\d{1,3}$/.test(lines[i]) && /^\$\s*[0-9]+(?:\.[0-9]{2})?$/.test(lines[i+1]) && /^\$\s*[0-9]+(?:\.[0-9]{2})?$/.test(lines[i+2])) {
-+        addRow(lines[i], lines[i+1], lines[i+2], i);
-+        i += 2;
-+      }
-+    }
-+  }
-+
-+  const itemIdMatches = [...section.matchAll(/\(Item ID:\s*([0-9]+)\)/g)];
-+  if (!moneyRows.length && itemIdMatches.length) {
-+    itemIdMatches.forEach((m, i) => moneyRows.push({ quantity:1, item_price:0, item_total:0, index:m.index || i }));
-+  }
-+
-+  moneyRows.sort((a,b) => (a.index || 0) - (b.index || 0));
-+  const itemIds = itemIdMatches.map(m => m[1]);
-+  return moneyRows.map((row, i) => ({
-+    item_id: itemIds[i] || "",
-+    title: "",
-+    option_text: "",
-+    quantity: row.quantity,
-+    item_price: row.item_price,
-+    item_total: row.item_total,
-+  }));
-+}
-+function rawItemTextForDetection(text) {
-+  const raw = String(text || "");
-+  const start = raw.search(/\bItem\b/i);
-+  if (start < 0) return raw;
-+  let end = raw.search(/Buyer selected shipping service|\bSubtotal\b/i);
-+  if (end < 0 || end <= start) end = Math.min(raw.length, start + 2500);
-+  return replaceSpecialChars(raw.slice(start, end));
-+}
-+
-+function combinedGroupKey(o) {
-+  const name = replaceSpecialChars(o.recipient_name || "").toLowerCase().replace(/\s+/g, " ").trim();
-+  const country = String(o.country_code || "").toUpperCase().trim();
-+  if (!name || !country) return "";
-+  return `${name}|${country}`;
-+}
-+function getSourceOrderNumbers(o) {
-+  if (Array.isArray(o.source_order_nos) && o.source_order_nos.length) return o.source_order_nos;
-+  return String(o.order_no || "").split("/").map(v => v.trim()).filter(Boolean);
-+}
-+function getGroupTaxCode(group) {
-+  for (const o of group) {
-+    const t = normalizeTaxCode(o.tax_code, o.country_code);
-+    if (hasUsableTaxCode(t)) return t;
-+  }
-+  return normalizeTaxCode("", group[0]?.country_code || "");
-+}
-+function combinedPriceForGroup(group) {
-+  const countryCode = group[0]?.country_code || "";
-+  const taxCode = getGroupTaxCode(group);
-+  const subtotalSum = group.reduce((sum, o) => sum + (Number(o.subtotal) || Number(o.price) || sumItemTotals(o.items)), 0);
-+  return calculateExportPrice(subtotalSum, taxCode, countryCode);
-+}
-+function getCombinedSuggestions() {
-+  const map = new Map();
-+  orders.forEach((o, idx) => {
-+    const key = combinedGroupKey(o);
-+    if (!key) return;
-+    if (!map.has(key)) map.set(key, []);
-+    map.get(key).push(idx);
-+  });
-+  return [...map.entries()]
-+    .map(([key, idxs]) => ({ key, idxs, group: idxs.map(i => orders[i]) }))
-+    .filter(g => g.idxs.length > 1);
-+}
-+function renderCombinedSuggestions() {
-+  const card = document.getElementById("combinedCard");
-+  const box = document.getElementById("combinedSuggestions");
-+  if (!card || !box) return;
-+  const suggestions = getCombinedSuggestions();
-+  if (!suggestions.length) {
-+    card.style.display = "none";
-+    box.innerHTML = "";
-+    return;
-+  }
-+  card.style.display = "block";
-+  box.innerHTML = suggestions.map(s => {
-+    const first = s.group[0];
-+    const orderNos = s.group.flatMap(getSourceOrderNumbers);
-+    const totalCount = s.group.reduce((sum, o) => sum + (Number(o.count) || 0), 0);
-+    const price = combinedPriceForGroup(s.group);
-+    return `<div class="combined-item">
-+      <div>
-+        <strong>${esc(first.recipient_name)} / ${esc(first.country_code)}</strong>
-+        <div class="note">주문 ${esc(orderNos.join(" / "))}</div>
-+        <div class="note">통합 후 개수 ${totalCount}개 · 가격 ${esc(price)}</div>
-+      </div>
-+      <button class="warn" data-combine-key="${esc(encodeURIComponent(s.key))}">combined shipping</button>
-+    </div>`;
-+  }).join("");
-+}
-+function combineOrdersByKey(encodedKey) {
-+  const key = decodeURIComponent(encodedKey);
-+  const idxs = orders.map((o, idx) => ({ o, idx })).filter(x => combinedGroupKey(x.o) === key).map(x => x.idx);
-+  if (idxs.length < 2) return;
-+  const group = idxs.map(i => orders[i]);
-+  const first = group[0];
-+  const sourceNos = group.flatMap(getSourceOrderNumbers);
-+  const countryCode = first.country_code;
-+  const taxCode = getGroupTaxCode(group);
-+  const subtotalSum = group.reduce((sum, o) => sum + (Number(o.subtotal) || Number(o.price) || sumItemTotals(o.items)), 0);
-+  const combined = {
-+    ...first,
-+    isCombined: true,
-+    source_order_nos: sourceNos,
-+    order_no: sourceNos.join("/"),
-+    selected: group.some(o => o.selected),
-+    process_status: group.some(o => o.process_status === "refund") ? "refund" : (group.every(o => o.process_status === "ready") ? "ready" : "pending"),
-+    buyer_username: [...new Set(group.map(o => o.buyer_username).filter(Boolean))].join(" / "),
-+    buyer_email: first.buyer_email || "-",
-+    count: group.reduce((sum, o) => sum + (Number(o.count) || 0), 0),
-+    subtotal: subtotalSum,
-+    shipping_fee: group.reduce((sum, o) => sum + (Number(o.shipping_fee) || 0), 0),
-+    tax_amount: group.reduce((sum, o) => sum + (Number(o.tax_amount) || 0), 0),
-+    refund_amount: group.reduce((sum, o) => sum + (Number(o.refund_amount) || 0), 0),
-+    order_total: group.reduce((sum, o) => sum + (Number(o.order_total) || 0), 0),
-+    tax_code: taxCode,
-+    price: calculateExportPrice(subtotalSum, taxCode, countryCode),
-+    items: group.flatMap(o => o.items || []),
-+    itemText: group.map(o => o.itemText || "").filter(Boolean).join("\n---\n"),
-+    memo: ["combined shipping", ...group.map(o => o.memo).filter(Boolean)].join(" / "),
-+    raw_text: group.map(o => o.raw_text || "").join("\n\n--- combined source ---\n\n"),
-+    pages: group.flatMap(o => o.pages || [])
-+  };
-+  const remove = new Set(idxs);
-+  const firstIdx = Math.min(...idxs);
-+  const next = [];
-+  orders.forEach((o, idx) => {
-+    if (idx === firstIdx) next.push(combined);
-+    else if (!remove.has(idx)) next.push(o);
-+  });
-+  orders = next;
-+  renderOrders();
-+  log(`combined shipping 통합: ${sourceNos.join(" / ")}`);
-+}
-+
-+function parseOneOrder(segment) {
-+  const text = segment.text;
-+  const order_no = text.match(/Order:\s*(\d{2}-\d{5}-\d{5})/)?.[1] || "";
-+  const order_date = text.match(/Order date:\s*([A-Za-z]{3}\s+\d{1,2},\s+\d{4})/)?.[1] || "";
-+  const sales_record_no = text.match(/Sales record #:\s*(\d+)/)?.[1] || "";
-+  const email = text.match(/[A-Za-z0-9._%+-]+@members\.ebay\.com/i)?.[0] || "-";
-+  const username = text.match(/Username:\s*([^\n]+)/i)?.[1]?.trim() || "";
-+  const phoneRaw = text.match(/\n\s*(\+\d[0-9\s().-]{6,})\s*\n\s*[A-Za-z0-9._%+-]+@members\.ebay\.com/i)?.[1] || "";
-+  const ship = parseShipTo(text);
-+  const phone = normalizePhone(phoneRaw, ship.country_code);
-+  const amounts = parseAmounts(text);
-+  const items = parseItems(text);
-+  const itemText = rawItemTextForDetection(text);
-+  const detected = detectContent(itemText);
-+  const taxLine = extractTaxLine(text);
-+  const tax = normalizeTaxCode(taxLine, ship.country_code);
-+  const count = sumItemQuantities(items);
-+  const itemSubtotal = sumItemTotals(items);
-+  const subtotalForExport = amounts.subtotal || itemSubtotal;
-+  const kpacket = KPACKET_COUNTRIES.has(ship.country_code);
-+  let status = kpacket ? "ready" : "pending";
-+  let memo = kpacket ? "" : `K-Packet 국가리스트 없음: ${ship.country_code || ship.country}`;
-+  if (amounts.refund_amount) { status = "refund"; memo = `Refund detected: ${amounts.refund_amount}`; }
-+  const price = calculateExportPrice(subtotalForExport, tax, ship.country_code);
-+  return {
-+    selected: status === "ready",
-+    process_status: status,
-+    order_no, order_date, sales_record_no,
-+    buyer_username: username, buyer_email: email,
-+    recipient_name: ship.recipient_name,
-+    phone, country: ship.country, country_code: ship.country_code,
-+    postal_code: ship.postal_code, state: replaceSpecialChars(ship.state), city: replaceSpecialChars(ship.city), address1: replaceSpecialChars(ship.address1),
-+    tax_code: tax, raw_tax_line: taxLine,
-+    shipping_service: parseShippingService(text),
-+    subtotal: amounts.subtotal, shipping_fee: amounts.shipping_fee, tax_amount: amounts.tax_amount, refund_amount: amounts.refund_amount, order_total: amounts.order_total,
-+    items, itemText: replaceSpecialChars(itemText), count, content: detected.content, hscode: detected.hscode, height: detected.height,
-+    price, memo, kpacket, raw_text: text, pages: segment.pages || []
-+  };
-+}
-+function isSummaryCsvRow(r) {
-+  const summaryKeys = ["Ship To Name", "Total Price", "Shipping And Handling", "eBay Reference Value", "Buyer Name"];
-+  return summaryKeys.some(k => String(r[k] || "").trim() !== "");
-+}
-+function normalizeCsvTaxCode(summaryRow, allRows, countryCode) {
-+  const source = [summaryRow, ...(allRows || [])].find(r =>
-+    String(r?.["eBay Reference Value"] || "").trim() ||
-+    String(r?.["Buyer Tax Identifier Value"] || "").trim()
-+  ) || summaryRow;
-+  const ebayRefName = String(source["eBay Reference Name"] || "").trim();
-+  const ebayRefValue = String(source["eBay Reference Value"] || "").trim();
-+  const buyerTaxName = String(source["Buyer Tax Identifier Name"] || "").trim();
-+  const buyerTaxValue = String(source["Buyer Tax Identifier Value"] || "").trim();
-+
-+  let raw = ebayRefValue || buyerTaxValue || "";
-+  if (/^RFC$/i.test(buyerTaxName) && buyerTaxValue) raw = buyerTaxValue;
-+  if (/^GST$/i.test(ebayRefName) && /IRD#/i.test(ebayRefValue)) raw = ebayRefValue;
-+  return normalizeTaxCode(raw, countryCode);
-+}
-+function parseCsvGroupToOrder(orderNo, rows) {
-+  const summary = rows.find(isSummaryCsvRow) || rows[0] || {};
-+  let itemRows = rows.filter(r => String(r["Item Number"] || "").trim() || String(r["Item Title"] || "").trim());
-+  if (!itemRows.length && (String(summary["Item Number"] || "").trim() || String(summary["Item Title"] || "").trim())) {
-+    itemRows = [summary];
-+  }
-+  const items = itemRows.map(r => ({
-+    item_id: String(r["Item Number"] || "").trim(),
-+    title: replaceSpecialChars(String(r["Item Title"] || "").trim()),
-+    option_text: replaceSpecialChars(String(r["Variation Details"] || "").trim()),
-+    quantity: Number(String(r["Quantity"] || "").replace(/[^0-9.-]/g, "")) || 0,
-+    item_price: numFromCsv(r["Sold For"]),
-+    item_total: numFromCsv(r["Sold For"]),
-+    transaction_id: String(r["Transaction ID"] || "").trim()
-+  }));
-+  const shipCountry = String(summary["Ship To Country"] || "").trim();
-+  const countryCode = countryCodeFromName(shipCountry);
-+  const summaryQty = Number(String(summary["Quantity"] || "").replace(/[^0-9.-]/g, "")) || 0;
-+  const qtyTotal = summaryQty || items.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
-+  const summarySoldFor = numFromCsv(summary["Sold For"]);
-+  const subtotal = summarySoldFor || items.reduce((s, it) => s + (Number(it.item_total) || 0), 0);
-+  const shippingFee = numFromCsv(summary["Shipping And Handling"]);
-+  const taxAmount = numFromCsv(summary["eBay Collected Tax"]);
-+  const orderTotal = numFromCsv(summary["Total Price"]);
-+  const taxCode = normalizeCsvTaxCode(summary, rows, countryCode);
-+  const exportPrice = calculateExportPrice(subtotal, taxCode, countryCode);
-+  const kpacket = KPACKET_COUNTRIES.has(countryCode);
-+  const processStatus = kpacket ? "ready" : "pending";
-+  const shippingStatus = "not_exported";
-+  const itemText = items.map(it => `${it.title} ${it.option_text}`.trim()).join(" ").trim();
-+  const detected = detectContent(itemText);
-+
-+  return {
-+    selected: processStatus === "ready",
-+    process_status: processStatus,
-+    shipping_status: shippingStatus,
-+    order_no: orderNo,
-+    sales_record_no: String(summary["Sales Record Number"] || "").trim(),
-+    order_date: String(summary["Sale Date"] || "").trim(),
-+    buyer_username: String(summary["Buyer Username"] || "").trim(),
-+    buyer_email: String(summary["Buyer Email"] || "").trim() || "-",
-+    recipient_name: replaceSpecialChars(String(summary["Ship To Name"] || "").trim()),
-+    phone: normalizePhone(String(summary["Ship To Phone"] || "").trim(), countryCode),
-+    address1: replaceSpecialChars([summary["Ship To Address 1"], summary["Ship To Address 2"]].filter(Boolean).join(" ").trim()),
-+    city: replaceSpecialChars(String(summary["Ship To City"] || "").trim()),
-+    state: replaceSpecialChars(String(summary["Ship To State"] || "").trim()),
-+    postal_code: normalizePostcode(String(summary["Ship To Zip"] || "").trim(), countryCode),
-+    country: replaceSpecialChars(shipCountry),
-+    country_code: countryCode,
-+    address_key: [
-+      replaceSpecialChars(String(summary["Ship To Name"] || "").trim()).toLowerCase(),
-+      countryCode.toUpperCase(),
-+      normalizePostcode(String(summary["Ship To Zip"] || "").trim(), countryCode).replace(/[\s-]/g, ""),
-+      replaceSpecialChars([summary["Ship To Address 1"], summary["Ship To Address 2"]].filter(Boolean).join(" ").trim()).toLowerCase().replace(/\s+/g, " ").trim()
-+    ].join("|"),
-+    shipping_service: String(summary["Shipping Service"] || "").trim(),
-+    tracking_number: String(summary["Tracking Number"] || "").trim(),
-+    tax_code: taxCode,
-+    subtotal,
-+    shipping_fee: shippingFee,
-+    tax_amount: taxAmount,
-+    refund_amount: 0,
-+    order_total: orderTotal,
-+    count: qtyTotal || 0,
-+    content: detected.content,
-+    hscode: detected.hscode,
-+    height: detected.height,
-+    price: exportPrice,
-+    itemText: replaceSpecialChars(itemText),
-+    items,
-+    memo: kpacket ? "" : `K-Packet 국가리스트 없음: ${countryCode || shipCountry}`,
-+    raw_text: "",
-+    pages: []
-+  };
-+}
-+function renderOrders() {
-+  const tbody = document.querySelector("#ordersTable tbody");
-+  tbody.innerHTML = "";
-+  orders.forEach((o, idx) => {
-+    const tr = document.createElement("tr");
-+    if (o.isCombined) tr.className = "combined-row";
-+    tr.innerHTML = `
-+      <td><input type="checkbox" data-field="selected" data-idx="${idx}" ${o.selected ? "checked" : ""}></td>
-+      <td><select data-field="process_status" data-idx="${idx}">
-+        ${statusOptions(o.process_status)}
-+      </select><div class="status ${statusClass(o.process_status)}" style="margin-top:4px">${statusLabel(o.process_status)}</div></td>
-+      <td><input class="med" data-field="order_no" data-idx="${idx}" value="${esc(o.order_no)}"></td>
-+      <td><input class="med" data-field="order_date" data-idx="${idx}" value="${esc(o.order_date)}"></td>
-+      <td><input class="med" data-field="buyer_username" data-idx="${idx}" value="${esc(o.buyer_username)}"></td>
-+      <td><input class="med" data-field="recipient_name" data-idx="${idx}" value="${esc(o.recipient_name)}"></td>
-+      <td><input class="small" data-field="country_code" data-idx="${idx}" value="${esc(o.country_code)}"><div class="note">${esc(o.country)}</div></td>
-+      <td><input class="med" data-field="phone" data-idx="${idx}" value="${esc(o.phone)}"></td>
-+      <td><input class="med" data-field="postal_code" data-idx="${idx}" value="${esc(o.postal_code)}"></td>
-+      <td><input class="wide" data-field="address1" data-idx="${idx}" value="${esc(o.address1)}"></td>
-+      <td><input class="med" data-field="city" data-idx="${idx}" value="${esc(o.city)}"></td>
-+      <td><input class="med" data-field="state" data-idx="${idx}" value="${esc(o.state)}"></td>
-+      <td><select data-field="content" data-idx="${idx}"><option value="photocard" ${o.content==='photocard'?'selected':''}>photocard</option><option value="toy" ${o.content==='toy'?'selected':''}>toy</option></select></td>
-+      <td><input class="small" type="number" data-field="count" data-idx="${idx}" value="${esc(o.count)}"></td>
-+      <td><input class="small" data-field="price" data-idx="${idx}" value="${esc(o.price)}"></td>
-+      <td><input class="med" data-field="tax_code" data-idx="${idx}" value="${esc(o.tax_code)}"></td>
-+      <td><input class="wide" data-field="memo" data-idx="${idx}" value="${esc(o.memo)}"></td>`;
-+    tbody.appendChild(tr);
-+  });
-+  tbody.querySelectorAll("input,select").forEach(el => el.addEventListener("change", onCellChange));
-+  document.getElementById("ordersCard").style.display = orders.length ? "block" : "none";
-+  document.getElementById("summary").style.display = orders.length ? "grid" : "none";
-+  document.getElementById("downloadCsvBtn").disabled = !orders.length;
-+  document.getElementById("downloadXlsxBtn").disabled = !orders.length;
-+  updateSummary();
-+  renderCombinedSuggestions();
-+}
-+function statusOptions(current) {
-+  const opts = [["ready","바로처리"],["pending","보류"],["refund","환불필요"],["contact","문의중"],["cancelled","취소완료"],["completed","처리완료"]];
-+  return opts.map(([v,l]) => `<option value="${v}" ${v===current?'selected':''}>${l}</option>`).join("");
-+}
-+function statusLabel(v) { return ({ready:"바로처리",pending:"보류",refund:"환불필요",contact:"문의중",cancelled:"취소완료",completed:"처리완료"})[v] || v; }
-+function statusClass(v) { return v === "ready" ? "ready" : v === "refund" ? "refund" : v === "contact" ? "contact" : v === "completed" || v === "cancelled" ? "done" : "pending"; }
-+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[ch])); }
-+function onCellChange(e) {
-+  const idx = Number(e.target.dataset.idx);
-+  const field = e.target.dataset.field;
-+  if (!Number.isInteger(idx) || !field) return;
-+  if (field === "selected") orders[idx][field] = e.target.checked;
-+  else orders[idx][field] = e.target.value;
-+  if (field === "tax_code") {
-+    const normalized = normalizeTaxCode(orders[idx].tax_code, orders[idx].country_code);
-+    orders[idx].tax_code = normalized;
-+    orders[idx].price = calculateExportPrice(orders[idx].subtotal || sumItemTotals(orders[idx].items), normalized, orders[idx].country_code);
-+    renderOrders();
-+    return;
-+  }
-+  if (field === "country_code") {
-+    const normalized = normalizeTaxCode(orders[idx].tax_code, orders[idx].country_code);
-+    orders[idx].tax_code = normalized;
-+    orders[idx].price = calculateExportPrice(orders[idx].subtotal || sumItemTotals(orders[idx].items), normalized, orders[idx].country_code);
-+  }
-+  if (field === "content") {
-+    if (e.target.value === "toy") { orders[idx].hscode = "9503003411"; orders[idx].height = "8"; }
-+    else { orders[idx].hscode = "4909000000"; orders[idx].height = "1"; }
-+  }
-+  updateSummary();
-+  if (field === "process_status") renderOrders();
-+}
-+function updateSummary() {
-+  document.getElementById("sumTotal").textContent = orders.length;
-+  document.getElementById("sumReady").textContent = orders.filter(o=>o.process_status==="ready").length;
-+  document.getElementById("sumPending").textContent = orders.filter(o=>!["ready","completed"].includes(o.process_status)).length;
-+  document.getElementById("sumKpacket").textContent = orders.filter(o=>KPACKET_COUNTRIES.has(o.country_code)).length;
-+  document.getElementById("sumSelected").textContent = orders.filter(o=>o.selected).length;
-+}
-+function buildOutputRow(o) {
-+  const row = Object.fromEntries(OUTPUT_HEADERS.map(h => [h, ""]));
-+  const content = o.content || "photocard";
-+  const hscode = content === "toy" ? "9503003411" : "4909000000";
-+  const height = content === "toy" ? "8" : "1";
-+  row["★상품구분"] = "Merchandise";
-+  row["★수취인명"] = replaceSpecialChars(o.recipient_name);
-+  row["수취인EMAIL"] = o.buyer_email || "-";
-+  row["★14전화번호"] = normalizePhone(o.phone, o.country_code);
-+  row["★16국가코드"] = o.country_code;
-+  row["★16국가명"] = o.country_code;
-+  row["★15우편번호"] = normalizePostcode(o.postal_code, o.country_code);
-+  row["★13상세주소"] = replaceSpecialChars(o.address1);
-+  row["★12시/군/구"] = replaceSpecialChars(o.city || o.state);
-+  row["★11주/도/시"] = replaceSpecialChars(o.state || o.city);
-+  row["★총중량"] = "100";
-+  row["★내용품"] = content;
-+  row["★개수"] = String(o.count || 0);
-+  row["★순중량(g)[ = 품목 1종의 개당중량 * 개수 ](수출우편물 정보관세청 제공 동의시 필수)"] = "50";
-+  row["★가격"] = String(o.price || "0");
-+  row["단위"] = "USD";
-+  row["HSCODE(숫자만 10자리)"] = hscode;
-+  row["생산지"] = "KR";
-+  row["EMS : EEMS 프리미엄 : PK-Packet : K등기소형 :R"] = "K";
-+  row["EMS 비서류 : em,     EMS 서류 : ee, K-Packet : rl, 소형포장물 : re"] = "rl";
-+  row["고객주문번호( 숫자,영문 30자이내)"] = o.order_no;
-+  row["수출우편물 정보 관세청 제공 여부(Y/N)"] = "Y";
-+  row["사업자번호(숫자10자리)"] = "7764800598";
-+  row["수출화주이름 또는 상호(수출우편물 정보 관세청 제공 동의시 필수)"] = "KTEMS";
-+  row["수출화주 주소(수출우편물 정보 관세청 제공 동의시 필수)"] = "104-150515 Dunsan-ro Seo-gu Daejeon Republic of Korea";
-+  row["수출이행등록여부(Y/N)"] = "N";
-+  row["★브라질세금식별번호(* 브라질행 EMS, K-Packet의 경우 필수 입력)"] = o.country_code === "BR" ? "" : "";
-+  row["가로(cm)"] = "20";
-+  row["세로(cm)"] = "30";
-+  row["높이(cm)"] = height;
-+  row["부피중량 적용 제외 여부(Y/N)"] = "Y";
-+  row["★IOSS/EORI/TAX NUMBER식별 번호"] = normalizeTaxCode(o.tax_code, o.country_code);
-+  row["상태"] = "order";
-+  row["물품"] = replaceSpecialChars(o.itemText || o.items?.map(it => `${it.title} ${it.option_text}`).join(" ") || "");
-+  row["생성 일시"] = formatKoreanDateNow();
-+  return OUTPUT_HEADERS.map(h => row[h] ?? "");
-+}
-+function selectedRows() { return orders.filter(o => o.selected); }
-+function downloadCsv() {
-+  const rows = selectedRows();
-+  if (!rows.length) return alert("선택된 주문이 없어.");
-+  const matrix = [OUTPUT_HEADERS, ...rows.map(buildOutputRow)];
-+  const csv = "\uFEFF" + matrix.map(r => r.map(csvEscape).join(",")).join("\r\n");
-+  downloadBlob(csv, `kpacket_export_${dateStamp()}.csv`, "text/csv;charset=utf-8");
-+}
-+function downloadXlsx() {
-+  const rows = selectedRows();
-+  if (!rows.length) return alert("선택된 주문이 없어.");
-+  const matrix = [OUTPUT_HEADERS, ...rows.map(buildOutputRow)];
-+  const ws = XLSX.utils.aoa_to_sheet(matrix);
-+  const wb = XLSX.utils.book_new();
-+  XLSX.utils.book_append_sheet(wb, ws, "K-Packet");
-+  XLSX.writeFile(wb, `kpacket_export_${dateStamp()}.xlsx`);
-+}
-+function csvEscape(v) {
-+  const s = String(v ?? "");
-+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-+}
-+function downloadBlob(content, filename, mime) {
-+  const blob = new Blob([content], { type:mime });
-+  const a = document.createElement("a");
-+  a.href = URL.createObjectURL(blob); a.download = filename; a.click();
-+  URL.revokeObjectURL(a.href);
-+}
-+function dateStamp() { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}`; }
-+async function parseCsvFiles() {
-+  const files = [...document.getElementById("csvFile").files];
-+  if (!files.length) return alert("CSV 파일을 먼저 선택해줘.");
-+  orders = [];
-+  log(`CSV ${files.length}개 파싱 시작`);
-+  for (const file of files) {
-+    const text = await file.text();
-+    const { headers, records } = getCsvHeaderAndRows(text);
-+    if (!headers.length) {
-+      log(`${file.name}: Order Number 헤더 행을 찾지 못해 건너뜀`);
-+      continue;
-+    }
-+    const groups = new Map();
-+    records.forEach(row => {
-+      const obj = rowToObj(headers, row);
-+      const orderNo = String(obj["Order Number"] || "").trim();
-+      if (!orderNo) return;
-+      if (!groups.has(orderNo)) groups.set(orderNo, []);
-+      groups.get(orderNo).push(obj);
-+    });
-+    const parsed = [...groups.entries()].map(([orderNo, rows]) => parseCsvGroupToOrder(orderNo, rows));
-+    orders.push(...parsed);
-+    log(`${file.name}: raw row ${records.length} / grouped order ${parsed.length}`);
-+  }
-+  renderOrders();
-+}
-+async function parsePdfFiles() {
-+  const files = [...document.getElementById("pdfFile").files];
-+  if (!files.length) return alert("PDF 파일을 먼저 선택해줘.");
-+  orders = [];
-+  log(`PDF ${files.length}개 파싱 시작`);
-+  for (const file of files) {
-+    const pages = await extractPdfPages(file);
-+    const segments = makeSegmentsFromPages(pages);
-+    const parsed = segments.map(parseOneOrder).filter(o => o.order_no);
-+    orders.push(...parsed);
-+    log(`${file.name}: ${pages.length}페이지 / 주문 ${parsed.length}건`);
-+  }
-+  renderOrders();
-+}
-+function parseText() {
-+  const raw = document.getElementById("rawText").value;
-+  const segments = makeSegmentsFromRawText(raw);
-+  orders = segments.map(parseOneOrder).filter(o => o.order_no);
-+  log(`붙여넣기 텍스트 주문 ${orders.length}건 파싱`);
-+  renderOrders();
-+}
-+
-+document.getElementById("parseCsvBtn").addEventListener("click", () => parseCsvFiles().catch(err => { console.error(err); log(`오류: ${err.message}`); alert(err.message); }));
-+document.getElementById("parsePdfBtn").addEventListener("click", () => parsePdfFiles().catch(err => { console.error(err); log(`오류: ${err.message}`); alert(err.message); }));
-+document.getElementById("parseTextBtn").addEventListener("click", parseText);
-+document.getElementById("downloadCsvBtn").addEventListener("click", downloadCsv);
-+document.getElementById("combinedSuggestions").addEventListener("click", (e) => {
-+  const btn = e.target.closest("button[data-combine-key]");
-+  if (!btn) return;
-+  combineOrdersByKey(btn.dataset.combineKey);
-+});
-+document.getElementById("downloadXlsxBtn").addEventListener("click", downloadXlsx);
-+document.getElementById("selectReadyBtn").addEventListener("click", () => { orders.forEach(o => o.selected = o.process_status === "ready"); renderOrders(); });
-+document.getElementById("selectAllBtn").addEventListener("click", () => { orders.forEach(o => o.selected = true); renderOrders(); });
-+document.getElementById("clearBtn").addEventListener("click", () => { orders = []; document.getElementById("rawText").value = ""; document.getElementById("pdfFile").value = ""; document.getElementById("csvFile").value = ""; renderOrders(); log("초기화 완료"); });
-+</script>
-+</body>
-+</html>
- 
-EOF
-)
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>K-Packet PDF → CSV/XLSX 테스트 v9</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+  <style>
+    :root { --bg:#f7f7fb; --card:#fff; --text:#1f2937; --muted:#6b7280; --line:#e5e7eb; --accent:#4f46e5; --good:#ecfdf5; --warn:#fffbeb; --bad:#fef2f2; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:var(--bg); color:var(--text); }
+    header { padding:28px 32px 18px; }
+    h1 { margin:0 0 8px; font-size:24px; }
+    p { margin:0; color:var(--muted); line-height:1.55; }
+    main { padding:0 32px 40px; display:grid; gap:18px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:18px; box-shadow:0 8px 24px rgba(15,23,42,.04); }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    label { font-size:13px; font-weight:700; color:#374151; display:block; margin-bottom:8px; }
+    input[type=file], textarea, input, select { width:100%; border:1px solid var(--line); border-radius:12px; padding:10px 12px; background:#fff; font:inherit; }
+    textarea { min-height:170px; resize:vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; }
+    button { border:0; border-radius:12px; padding:10px 14px; font-weight:700; cursor:pointer; background:#e5e7eb; color:#111827; }
+    button.primary { background:var(--accent); color:#fff; }
+    button.green { background:#059669; color:#fff; }
+    button.warn { background:#f59e0b; color:#111827; }
+    button.red { background:#ef4444; color:#fff; }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    .note { font-size:12px; color:var(--muted); margin-top:8px; }
+    .status { padding:4px 8px; border-radius:999px; font-size:12px; font-weight:800; display:inline-block; white-space:nowrap; }
+    .ready { background:var(--good); color:#047857; }
+    .pending { background:var(--warn); color:#92400e; }
+    .refund { background:var(--bad); color:#b91c1c; }
+    .contact { background:#eff6ff; color:#1d4ed8; }
+    .done { background:#f3f4f6; color:#374151; }
+    tr.combined-row td { background:#fffbeb !important; }
+    .combined-box { display:grid; gap:10px; }
+    .combined-item { border:1px solid #fcd34d; background:#fffbeb; border-radius:14px; padding:12px; display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap; }
+    .combined-item strong { color:#92400e; }
+    .table-wrap { overflow:auto; border:1px solid var(--line); border-radius:14px; }
+    table { border-collapse:collapse; width:100%; min-width:1500px; font-size:12px; background:white; }
+    th, td { border-bottom:1px solid var(--line); padding:8px; vertical-align:top; text-align:left; }
+    th { position:sticky; top:0; background:#f9fafb; z-index:1; color:#374151; }
+    td input, td select { padding:6px 8px; border-radius:8px; min-width:80px; font-size:12px; }
+    .small { width:70px; }
+    .med { width:120px; }
+    .wide { width:220px; }
+    .summary { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:10px; }
+    .summary div { background:#f9fafb; border:1px solid var(--line); border-radius:14px; padding:12px; }
+    .summary strong { display:block; font-size:22px; margin-top:4px; }
+    .log { white-space:pre-wrap; background:#111827; color:#d1d5db; border-radius:14px; padding:12px; max-height:190px; overflow:auto; font-size:12px; }
+    @media (max-width:900px){ .grid,.summary{grid-template-columns:1fr;} header,main{padding-left:16px;padding-right:16px;} }
+  </style>
+</head>
+<body>
+<header>
+  <h1>K-Packet PDF → CSV/XLSX 테스트 v9</h1>
+  <p>eBay packing slip PDF를 업로드하면 주문번호 기준으로 분리해서 기존 K-Packet CSV 70개 컬럼 포맷으로 출력합니다. 1차 버전이라 저장 DB는 없고, 화면에서 확인/수정 후 다운로드하는 방식입니다.</p>
+</header>
+<main>
+  <section class="card grid">
+    <div>
+      <label>0) eBay Orders Report CSV 업로드 (기본)</label>
+      <input id="csvFile" type="file" accept=".csv,text/csv" multiple />
+      <div class="note">기본 입력 방식: eBay Orders Report CSV를 읽어 Order Number 기준으로 주문을 그룹화합니다.</div>
+    </div>
+    <div>
+      <label>1) eBay PDF 업로드</label>
+      <input id="pdfFile" type="file" accept="application/pdf" multiple />
+      <div class="note">PDF import는 fallback입니다. 페이지 단위로 읽어서 여러 페이지에 걸친 주문도 이어 붙입니다.</div>
+    </div>
+    <div>
+      <label>또는 eBay 텍스트 붙여넣기</label>
+      <textarea id="rawText" placeholder="eBay packing slip 텍스트를 붙여넣고 [붙여넣은 텍스트 파싱]을 누르세요."></textarea>
+      <div class="note">붙여넣기 방식은 PDF보다 레이아웃 정보가 적어서 금액 파싱이 덜 안정적일 수 있습니다.</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="row">
+      <button class="primary" id="parseCsvBtn">CSV 파싱(기본)</button>
+      <button class="primary" id="parsePdfBtn">PDF 파싱</button>
+      <button id="parseTextBtn">붙여넣은 텍스트 파싱</button>
+      <button id="selectReadyBtn">바로처리만 선택</button>
+      <button id="selectAllBtn">전체 선택</button>
+      <button id="clearBtn">초기화</button>
+      <button id="saveDbBtn" disabled>DB 저장(준비중)</button>
+      <button class="green" id="downloadCsvBtn" disabled>CSV 다운로드</button>
+      <button class="green" id="downloadXlsxBtn" disabled>XLSX 다운로드</button>
+    </div>
+    <div class="note">기본 규칙: Pipedream 규칙 이식 / 비영어권 특수문자 ASCII 변환 / 기존+추가 K-Packet 국가 반영 / TAX·IOSS 존재 시 subtotal 가격 사용, 없으면 비-US는 15 고정 / 개수는 Quantity 합산.</div>
+  </section>
+  <section class="card" id="combinedCard" style="display:none">
+    <h2 style="margin:0 0 12px;font-size:18px">묶음배송 후보</h2>
+    <div class="combined-box" id="combinedSuggestions"></div>
+    <div class="note">수취인명과 국가코드가 같은 주문만 후보로 제안합니다. 버튼을 누를 때만 실제로 통합되며, 통합된 행은 연한 노랑색으로 표시됩니다.</div>
+  </section>
+
+
+  <section class="summary" id="summary" style="display:none">
+    <div>총 주문<strong id="sumTotal">0</strong></div>
+    <div>바로처리<strong id="sumReady">0</strong></div>
+    <div>보류/확인<strong id="sumPending">0</strong></div>
+    <div>K-Packet 가능<strong id="sumKpacket">0</strong></div>
+    <div>선택됨<strong id="sumSelected">0</strong></div>
+  </section>
+
+  <section class="card" id="ordersCard" style="display:none">
+    <h2 style="margin:0 0 12px;font-size:18px">파싱 결과</h2>
+    <div class="table-wrap">
+      <table id="ordersTable">
+        <thead>
+          <tr>
+            <th>선택</th><th>처리상태</th><th>주문번호</th><th>날짜</th><th>Username</th><th>수취인</th><th>국가</th><th>전화</th><th>우편번호</th><th>상세주소</th><th>도시</th><th>주/도</th><th>내용품</th><th>개수</th><th>가격</th><th>TAX/IOSS</th><th>메모</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 style="margin:0 0 12px;font-size:18px">로그</h2>
+    <div class="log" id="log">대기 중...</div>
+  </section>
+</main>
+
+<script>
+const OUTPUT_HEADERS = [
+  "★상품구분","★수취인명","수취인EMAIL","수취인전화국가번호(숫자4자리)","수취인전화지역번호(숫자4자리)","수취인전화전화번호(숫자4자리)","수취인전화국번(숫자4자리)","★14전화번호","★16국가코드","★16국가명","★15우편번호","★13상세주소","★12시/군/구","★11주/도/시","수취인 건물명미국행 k-packet 이용할 경우만 입력가능( 영문 공백포함 90자 이내 )","★총중량","★내용품","★개수","★순중량(g)[ = 품목 1종의 개당중량 * 개수 ](수출우편물 정보관세청 제공 동의시 필수)","★가격","단위","HSCODE(숫자만 10자리)","생산지","규격(모델명)","보험가입여부(Y/N)(미선택시공백가능, 음식물, 전자제품 불가)","보험가입금액(물품가액을 기입 원\\)","EMS : EEMS 프리미엄 : PK-Packet : K등기소형 :R","EMS 비서류 : em,     EMS 서류 : ee, K-Packet : rl, 소형포장물 : re","고객주문번호( 숫자,영문 30자이내)","주문인우편번호(숫자6자리)","주문인주소( 영문 140자이내 공백포함)","주문인명( 영문 35자이내 공백포함)","주문인전화국가번호(숫자4자리)","주문인전화지역번호(숫자4자리)","주문인전화국번호(숫자4자리)","주문인전화뒷번호(숫자4자리)","주문인 전화 전체번호국가번호-지역번호-국번-전화번호( 숫자, - 허용)ex. 86-062-678-1234","주문인휴대전화지역번호(숫자3자리)","주문인휴대전화뒷번호(숫자4자리)","주문인휴대전화국번호(숫자4자리)","주문인EMAIL( 영문 40자이내)","주문인 휴대전화 전체지역번호-국번-뒷번호(숫자, - 허용) ex. 010-1234-5678","수출우편물 정보 관세청 제공 여부(Y/N)","사업자번호(숫자10자리)","수출화주이름 또는 상호(수출우편물 정보 관세청 제공 동의시 필수)","수출화주 주소(수출우편물 정보 관세청 제공 동의시 필수)","수출이행등록여부(Y/N)","수출신고번호1(14~15자리)","전량분할발송여부(Y:전량,N:분할)","선기적포장개수","수출신고번호2(14~15자리)","전량분할발송여부(Y:전량,N:분할) 1","선기적포장개수 1","수출신고번호3(14~15자리)","전량분할발송여부(Y:전량,N:분할) 3","선기적포장개수 3","수출신고번호4(14~15자리)","선기적포장개수 2","전량분할발송여부(Y:전량,N:분할) 2","추천우체국코드(POSA만 사용)5자리숫자","수출면장여부(Y/N)","★브라질세금식별번호(* 브라질행 EMS, K-Packet의 경우 필수 입력)","가로(cm)","세로(cm)","높이(cm)","부피중량 적용 제외 여부(Y/N)","★IOSS/EORI/TAX NUMBER식별 번호","상태","물품","생성 일시"
+];
+
+const KPACKET_COUNTRIES = new Set([
+  "NZ", "MY", "VN", "BR", "SG", "GB", "AU", "ID", "JP", "CN", "CA", "TH", "TW", "FR", "PH", "HK", "RU", "DE", "ES",
+  "AR", "AT", "BY", "BE", "KH", "CL", "EG", "FI", "HN", "IN", "IE", "IL", "IT", "KZ", "KG", "MX", "MN", "NP", "NL", "NO", "PK", "PE", "PL", "SA", "ZA", "SE", "CH", "TR", "UA", "AE", "UZ"
+]);
+const EU_IOSS_COUNTRIES = new Set(["SE","DE","ES","PL","FR","IE","IT"]);
+const COUNTRY_CODES = {
+  "United States":"US","USA":"US","Canada":"CA","Italy":"IT","Germany":"DE","New Zealand":"NZ","Australia":"AU","United Kingdom":"GB","UK":"GB","France":"FR","Spain":"ES","Mexico":"MX","Colombia":"CO","Brazil":"BR","Japan":"JP","China":"CN","Singapore":"SG","Malaysia":"MY","Vietnam":"VN","Thailand":"TH","Taiwan":"TW","Hong Kong":"HK","Russia":"RU","Netherlands":"NL","Norway":"NO","Sweden":"SE","Switzerland":"CH","Turkey":"TR","United Arab Emirates":"AE","India":"IN","Ireland":"IE","Israel":"IL","Belgium":"BE","Austria":"AT","Poland":"PL","Finland":"FI","South Africa":"ZA","Chile":"CL","Argentina":"AR","Peru":"PE","Saudi Arabia":"SA","Ukraine":"UA","Uzbekistan":"UZ","Kazakhstan":"KZ","Kyrgyzstan":"KG","Mongolia":"MN","Nepal":"NP","Pakistan":"PK","Cambodia":"KH","Egypt":"EG","Honduras":"HN","Belarus":"BY","Indonesia":"ID","Philippines":"PH"
+};
+const CALLING_CODES = { US:"1", CA:"1", IT:"39", NZ:"64", DE:"49", CO:"57", MX:"52", GB:"44", AU:"61", FR:"33", ES:"34", BR:"55", JP:"81", CN:"86", SG:"65", MY:"60", VN:"84", TH:"66", TW:"886", HK:"852", NL:"31", SE:"46", CH:"41", TR:"90", AE:"971", IE:"353", IL:"972", PL:"48", AT:"43", BE:"32", FI:"358", NO:"47", RU:"7", ID:"62", PH:"63" };
+let orders = [];
+
+if (window.pdfjsLib) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+}
+
+function log(msg) {
+  const el = document.getElementById("log");
+  el.textContent = `[${new Date().toLocaleTimeString()}] ${msg}\n` + (el.textContent === "대기 중..." ? "" : el.textContent);
+}
+function money(n) { const x = Number(n || 0); return Number.isFinite(x) ? x.toFixed(2).replace(/\.00$/, "") : "0"; }
+function replaceSpecialChars(text) {
+  if (!text || typeof text !== "string") return "";
+  const digraph = {"ß":"ss","Ä":"Ae","Ö":"Oe","Ü":"Ue","ä":"ae","ö":"oe","ü":"ue","Æ":"Ae","æ":"ae","Œ":"Oe","œ":"oe"};
+  text = text.replace(/[ßÄÖÜäöüÆæŒœ]/g, ch => digraph[ch] || ch);
+  text = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const single = {"Ø":"O","ø":"o","Å":"A","å":"a","Č":"C","č":"c","Ć":"C","ć":"c","Š":"S","š":"s","Ž":"Z","ž":"z","Đ":"D","đ":"d","Ł":"L","ł":"l","Ğ":"G","ğ":"g","Ş":"S","ş":"s","İ":"I","ı":"i"};
+  return text.replace(/[ØøÅåČčĆćŠšŽžĐđŁłĞğŞşİı]/g, ch => single[ch] || ch).replace(/[^\x00-\x7F]/g, "").trim();
+}
+function normalizeLines(text) {
+  return (text || "").replace(/\r/g, "\n").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+}
+function parseDollar(v) { return Number(String(v || "").replace(/[^0-9.-]/g, "")) || 0; }
+function parseCsvText(csvText) {
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let inQuotes = false;
+  const text = String(csvText || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    const next = text[i + 1];
+    if (inQuotes) {
+      if (ch === "\"" && next === "\"") { cell += "\""; i++; }
+      else if (ch === "\"") inQuotes = false;
+      else cell += ch;
+      continue;
+    }
+    if (ch === "\"") { inQuotes = true; continue; }
+    if (ch === ",") { row.push(cell); cell = ""; continue; }
+    if (ch === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; continue; }
+    cell += ch;
+  }
+  row.push(cell);
+  rows.push(row);
+  return rows;
+}
+function getCsvHeaderAndRows(csvText) {
+  const rows = parseCsvText(csvText)
+    .map(r => r.map(v => String(v || "").trim()))
+    .filter(r => r.some(v => v !== ""));
+  const headerIdx = rows.findIndex(r => r.some(v => String(v).toLowerCase() === "order number"));
+  if (headerIdx < 0) return { headers: [], records: [] };
+  const headers = rows[headerIdx];
+  const records = rows.slice(headerIdx + 1)
+    .filter(r => !r.some(v => /record\(s\)\s+downloaded/i.test(v)));
+  return { headers, records };
+}
+function rowToObj(headers, row) {
+  const o = {};
+  headers.forEach((h, i) => { o[h] = row[i] ?? ""; });
+  return o;
+}
+function numFromCsv(value) {
+  return parseDollar(String(value ?? "").replace(/,/g, ""));
+}
+function countryCodeFromName(name) { return COUNTRY_CODES[replaceSpecialChars(name).trim()] || replaceSpecialChars(name).trim().toUpperCase(); }
+function isKnownCountryName(name) { return Boolean(COUNTRY_CODES[replaceSpecialChars(name).trim()]); }
+function normalizePostcode(postcode, countryCode) {
+  let p = String(postcode || "").replace(/[\s-]/g, "").trim();
+  if (countryCode === "US") p = p.substring(0, 5);
+  return p;
+}
+function normalizePhone(phone, countryCode) {
+  let digits = String(phone || "").replace(/[^0-9]/g, "");
+  const cc = CALLING_CODES[countryCode];
+  if (cc && digits.startsWith(cc) && digits.length > cc.length + 5) digits = digits.slice(cc.length);
+  return digits;
+}
+function normalizeTaxCode(taxText, countryCode) {
+  let t = (taxText || "").trim();
+  if (t.includes(",")) t = t.split(",")[0].trim();
+  const rfcMatch = t.match(/RFC\s*[:\-]?\s*([A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3})/i);
+  if (rfcMatch) t = rfcMatch[1].toUpperCase().replace(/Ñ/g, "N");
+  if (/IM2760000742/.test(t)) t = "IM2760000742";
+  else if (/64652016681/.test(t)) t = "ABN64652016681";
+  else if (/36560857/.test(t)) t = "GB365608576000";
+  if (!t || t.length < 4 || t === "-") {
+    if (EU_IOSS_COUNTRIES.has(countryCode)) t = "IM2760000742";
+    else if (countryCode === "AU") t = "ABN64652016681";
+    else if (countryCode === "GB") t = "GB365608576000";
+    else t = "-";
+  }
+  return t;
+}
+function detectContent(itemText) {
+  const t = (itemText || "").toLowerCase();
+  if (t.includes("plush")) return { content:"toy", hscode:"9503003411", height:"8" };
+  return { content:"photocard", hscode:"4909000000", height:"1" };
+}
+function hasUsableTaxCode(taxCode) {
+  return Boolean(taxCode && taxCode !== "-" && String(taxCode).trim().length >= 4);
+}
+function calculateExportPrice(subtotalPrice, taxCode, countryCode) {
+  if (!hasUsableTaxCode(taxCode) && countryCode !== "US") return "15";
+  return money(subtotalPrice);
+}
+function sumItemQuantities(items) {
+  return (items || []).map(it => Number(it.quantity) || 0).reduce((a, b) => a + b, 0);
+}
+function sumItemTotals(items) {
+  return (items || []).map(it => Number(it.item_total) || 0).reduce((a, b) => a + b, 0);
+}
+function extractTaxLine(text) {
+  const raw = String(text || "");
+  const patterns = [
+    /VAT\s*Paid\s*:\s*IOSS\s*-\s*[^\n]+/i,
+    /IRD#\s*[^\n]+/i,
+    /Buyer\s*Tax\s*ID\s*:\s*[^\n]+/i,
+    /ABN\s*[^\n]+/i,
+    /EORI\s*[^\n]+/i,
+  ];
+  for (const re of patterns) {
+    const m = raw.match(re);
+    if (m) return m[0].replace(/KTEMSkr|PACKING SLIP|Ship from|Ship to/gi, "").trim();
+  }
+  return "";
+}
+
+function formatKoreanDateNow() {
+  const d = new Date();
+  const ampm = d.getHours() < 12 ? "오전" : "오후";
+  const hour = d.getHours() % 12 || 12;
+  const minute = String(d.getMinutes()).padStart(2, "0");
+  return `${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일 ${ampm} ${hour}:${minute}`;
+}
+async function pageToText(page) {
+  const content = await page.getTextContent();
+  const items = content.items.map(it => ({ str: it.str, x: it.transform[4], y: it.transform[5] })).filter(it => it.str && it.str.trim());
+  items.sort((a,b) => Math.abs(b.y-a.y) > 2 ? b.y-a.y : a.x-b.x);
+  const lines = [];
+  for (const it of items) {
+    const last = lines[lines.length-1];
+    if (last && Math.abs(last.y - it.y) <= 2) last.parts.push(it);
+    else lines.push({ y: it.y, parts: [it] });
+  }
+  return lines.map(line => line.parts.sort((a,b)=>a.x-b.x).map(p=>p.str).join(" ").replace(/\s+/g," ").trim()).join("\n");
+}
+async function extractPdfPages(file) {
+  const buffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  const pages = [];
+  for (let i=1; i<=pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    pages.push(await pageToText(page));
+  }
+  return pages;
+}
+function makeSegmentsFromPages(pages) {
+  const segments = [];
+  let cur = null;
+  pages.forEach((pageText, idx) => {
+    const text = normalizeLines(pageText);
+    const hasOrder = /Order:\s*\d{2}-\d{5}-\d{5}/.test(text);
+    if (hasOrder) {
+      if (cur) segments.push(cur);
+      cur = { text, pages: [idx+1] };
+    } else if (cur) {
+      cur.text += "\n" + text;
+      cur.pages.push(idx+1);
+    }
+  });
+  if (cur) segments.push(cur);
+  return segments;
+}
+function makeSegmentsFromRawText(raw) {
+  const text = normalizeLines(raw);
+  const re = /Order:\s*\d{2}-\d{5}-\d{5}/g;
+  const hits = [...text.matchAll(re)].map(m => m.index);
+  if (!hits.length) return [];
+  const segs = [];
+  for (let i=0; i<hits.length; i++) {
+    const start = i === 0 ? 0 : hits[i];
+    const end = i+1 < hits.length ? hits[i+1] : text.length;
+    segs.push({ text: text.slice(start, end), pages: [] });
+  }
+  return segs;
+}
+function parseAmounts(text) {
+  const raw = String(text || "");
+  const out = { subtotal:0, shipping_fee:0, tax_amount:0, refund_amount:0, order_total:0 };
+  const start = raw.search(/\bSubtotal\b/i);
+  if (start < 0) return out;
+  const tail = raw.slice(start, start + 1800);
+  const orderTotalMatch = tail.match(/Order total\*\*[\s\S]{0,400}|Order total[\s\S]{0,400}/i);
+  const block = orderTotalMatch ? tail.slice(0, orderTotalMatch.index + orderTotalMatch[0].length) : tail;
+  const hasTax = /\b(?:VAT|GST|Sales tax)\s*\(eBay collected\)/i.test(block);
+  const hasRefund = /\bRefund\b/i.test(block);
+  const labels = ["subtotal", "shipping_fee"];
+  if (hasTax) labels.push("tax_amount");
+  if (hasRefund) labels.push("refund_amount");
+  labels.push("order_total");
+  const amounts = [...block.matchAll(/-?\$\s*[0-9]+(?:\.[0-9]{2})?/g)].map(m => parseDollar(m[0]));
+  if (amounts.length < labels.length) return out;
+  function mapValues(values) {
+    const obj = { subtotal:0, shipping_fee:0, tax_amount:0, refund_amount:0, order_total:0 };
+    labels.forEach((label, i) => { obj[label] = values[i] || 0; });
+    return obj;
+  }
+  function score(obj) {
+    const expected = (obj.subtotal || 0) + (obj.shipping_fee || 0) + (obj.tax_amount || 0) + (obj.refund_amount || 0);
+    return Math.abs(expected - (obj.order_total || 0));
+  }
+  const values = amounts.slice(0, labels.length);
+  const direct = mapValues(values);
+  const reversed = mapValues([...values].reverse());
+  const best = score(direct) <= score(reversed) ? direct : reversed;
+  return { ...out, ...best };
+}
+
+function parseShippingService(text) {
+  return (text.match(/Buyer selected shipping service\s*:\s*([^\n]+)/i)?.[1] || "").trim();
+}
+function cleanShipToLine(line) {
+  let s = String(line || "").replace(/\s+/g, " ").trim();
+  if (!s) return "";
+
+  const rightTailTokens = ["Ship from", "2171 Lakeview Dr", "Apt 79", "Ypsilanti, MI, 48198-6712", "Sy"];
+  for (const token of rightTailTokens) {
+    if (s === token) return "";
+    if (s.endsWith(" " + token)) s = s.slice(0, -(token.length + 1)).trim();
+  }
+
+  if (s !== "United States" && s.endsWith(" United States")) {
+    s = s.slice(0, -" United States".length).trim();
+  }
+  return s.trim();
+}
+
+function parseShipTo(text) {
+  const result = { recipient_name:"", address1:"", city:"", state:"", postal_code:"", country:"", country_code:"" };
+  const lines = String(text || "").split("\n").map(s => s.trim()).filter(Boolean);
+  const start = lines.findIndex(l => /^Ship to\b/i.test(l));
+  if (start < 0) return result;
+
+  const captured = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    let line = cleanShipToLine(lines[i]);
+    if (!line) continue;
+    if (/^\+\d/.test(line)) break;
+    if (/@members\.ebay\.com/i.test(line)) break;
+    if (/^Username:/i.test(line)) break;
+    if (/^Order:\s*\d{2}-\d{5}-\d{5}/i.test(line)) break;
+    if (/^Sales record/i.test(line)) break;
+    if (/^Item\b/i.test(line)) break;
+    if (/^Buyer selected shipping service/i.test(line)) break;
+    if (/^Subtotal\b/i.test(line)) break;
+    if (line === "United States" && captured.length && isKnownCountryName(captured[captured.length - 1])) continue;
+    if (/^(VAT Paid|IRD#|Buyer Tax ID|KTEMSkr|PACKING SLIP|This is not an invoice\.)/i.test(line)) continue;
+    if (/^Ship from$/i.test(line)) continue;
+    if (/^Ship to$/i.test(line)) continue;
+
+    line = line.replace(/^Ship to\s+Ship from$/i, "").trim();
+    if (line) captured.push(replaceSpecialChars(line));
+  }
+
+  if (!captured.length) return result;
+  result.recipient_name = captured[0] || "";
+  result.country = captured[captured.length - 1] || "";
+  result.country_code = countryCodeFromName(result.country);
+
+  const addr = captured.slice(1, -1).filter(Boolean);
+  const cityLine = addr[addr.length - 1] || "";
+  const streetLines = addr.slice(0, -1);
+  result.address1 = streetLines.join(" ").trim();
+
+  if (cityLine.includes(",")) {
+    const parts = cityLine.split(",").map(s => s.trim()).filter(Boolean);
+    if (parts.length >= 3) {
+      result.city = parts[0];
+      result.state = parts[1];
+      result.postal_code = parts.slice(2).join(" ");
+    } else if (parts.length === 2) {
+      result.city = parts[0];
+      result.state = parts[0];
+      result.postal_code = parts[1];
+    } else {
+      result.city = parts[0] || "";
+    }
+  } else {
+    result.city = cityLine;
+    result.state = cityLine;
+  }
+
+  if (!result.state && result.city) result.state = result.city;
+  if (!result.city && result.state) result.city = result.state;
+  result.postal_code = normalizePostcode(result.postal_code, result.country_code);
+
+  return result;
+}
+
+function parseItems(text) {
+  const raw = String(text || "");
+  let section = raw;
+  const itemHeader = raw.search(/\bItem\s+Quantity\b|\bItem\b[\s\S]{0,80}\bQuantity\b/i);
+  const packing = raw.search(/\bPACKING SLIP\b/i);
+  const start = itemHeader >= 0 ? itemHeader : (packing >= 0 ? packing : 0);
+  section = raw.slice(start);
+  const endCandidates = [
+    section.search(/\n\s*Buyer selected shipping service\b/i),
+    section.search(/\n\s*Subtotal\b/i),
+    section.search(/\n\s*\*\*Order total includes\b/i)
+  ].filter(i => i > 0);
+  if (endCandidates.length) section = section.slice(0, Math.min(...endCandidates));
+
+  const moneyRows = [];
+  const seen = new Set();
+
+  function addRow(quantity, item_price, item_total, index) {
+    const q = Number(quantity) || 0;
+    const ip = parseDollar(item_price);
+    const it = parseDollar(item_total);
+    const key = String(index) + ":" + q + ":" + ip + ":" + it;
+    if (!q || !it || seen.has(key)) return;
+    seen.add(key);
+    moneyRows.push({ quantity:q, item_price:ip, item_total:it, index:index || 0 });
+  }
+
+  const rowRe = /(?:^|\s)(\d{1,3})\s+\$\s*([0-9]+(?:\.[0-9]{2})?)\s+\$\s*([0-9]+(?:\.[0-9]{2})?)(?=\s|$)/g;
+  for (const m of section.matchAll(rowRe)) {
+    addRow(m[1], m[2], m[3], m.index);
+  }
+
+  if (!moneyRows.length) {
+    const lines = section.split("\n").map(s => s.replace(/\s+/g, " ").trim()).filter(Boolean);
+    for (let i = 0; i < lines.length - 2; i++) {
+      if (/^\d{1,3}$/.test(lines[i]) && /^\$\s*[0-9]+(?:\.[0-9]{2})?$/.test(lines[i+1]) && /^\$\s*[0-9]+(?:\.[0-9]{2})?$/.test(lines[i+2])) {
+        addRow(lines[i], lines[i+1], lines[i+2], i);
+        i += 2;
+      }
+    }
+  }
+
+  const itemIdMatches = [...section.matchAll(/\(Item ID:\s*([0-9]+)\)/g)];
+  if (!moneyRows.length && itemIdMatches.length) {
+    itemIdMatches.forEach((m, i) => moneyRows.push({ quantity:1, item_price:0, item_total:0, index:m.index || i }));
+  }
+
+  moneyRows.sort((a,b) => (a.index || 0) - (b.index || 0));
+  const itemIds = itemIdMatches.map(m => m[1]);
+  return moneyRows.map((row, i) => ({
+    item_id: itemIds[i] || "",
+    title: "",
+    option_text: "",
+    quantity: row.quantity,
+    item_price: row.item_price,
+    item_total: row.item_total,
+  }));
+}
+function rawItemTextForDetection(text) {
+  const raw = String(text || "");
+  const start = raw.search(/\bItem\b/i);
+  if (start < 0) return raw;
+  let end = raw.search(/Buyer selected shipping service|\bSubtotal\b/i);
+  if (end < 0 || end <= start) end = Math.min(raw.length, start + 2500);
+  return replaceSpecialChars(raw.slice(start, end));
+}
+
+function combinedGroupKey(o) {
+  const name = replaceSpecialChars(o.recipient_name || "").toLowerCase().replace(/\s+/g, " ").trim();
+  const country = String(o.country_code || "").toUpperCase().trim();
+  if (!name || !country) return "";
+  return `${name}|${country}`;
+}
+function getSourceOrderNumbers(o) {
+  if (Array.isArray(o.source_order_nos) && o.source_order_nos.length) return o.source_order_nos;
+  return String(o.order_no || "").split("/").map(v => v.trim()).filter(Boolean);
+}
+function getGroupTaxCode(group) {
+  for (const o of group) {
+    const t = normalizeTaxCode(o.tax_code, o.country_code);
+    if (hasUsableTaxCode(t)) return t;
+  }
+  return normalizeTaxCode("", group[0]?.country_code || "");
+}
+function combinedPriceForGroup(group) {
+  const countryCode = group[0]?.country_code || "";
+  const taxCode = getGroupTaxCode(group);
+  const subtotalSum = group.reduce((sum, o) => sum + (Number(o.subtotal) || Number(o.price) || sumItemTotals(o.items)), 0);
+  return calculateExportPrice(subtotalSum, taxCode, countryCode);
+}
+function getCombinedSuggestions() {
+  const map = new Map();
+  orders.forEach((o, idx) => {
+    const key = combinedGroupKey(o);
+    if (!key) return;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(idx);
+  });
+  return [...map.entries()]
+    .map(([key, idxs]) => ({ key, idxs, group: idxs.map(i => orders[i]) }))
+    .filter(g => g.idxs.length > 1);
+}
+function renderCombinedSuggestions() {
+  const card = document.getElementById("combinedCard");
+  const box = document.getElementById("combinedSuggestions");
+  if (!card || !box) return;
+  const suggestions = getCombinedSuggestions();
+  if (!suggestions.length) {
+    card.style.display = "none";
+    box.innerHTML = "";
+    return;
+  }
+  card.style.display = "block";
+  box.innerHTML = suggestions.map(s => {
+    const first = s.group[0];
+    const orderNos = s.group.flatMap(getSourceOrderNumbers);
+    const totalCount = s.group.reduce((sum, o) => sum + (Number(o.count) || 0), 0);
+    const price = combinedPriceForGroup(s.group);
+    return `<div class="combined-item">
+      <div>
+        <strong>${esc(first.recipient_name)} / ${esc(first.country_code)}</strong>
+        <div class="note">주문 ${esc(orderNos.join(" / "))}</div>
+        <div class="note">통합 후 개수 ${totalCount}개 · 가격 ${esc(price)}</div>
+      </div>
+      <button class="warn" data-combine-key="${esc(encodeURIComponent(s.key))}">combined shipping</button>
+    </div>`;
+  }).join("");
+}
+function combineOrdersByKey(encodedKey) {
+  const key = decodeURIComponent(encodedKey);
+  const idxs = orders.map((o, idx) => ({ o, idx })).filter(x => combinedGroupKey(x.o) === key).map(x => x.idx);
+  if (idxs.length < 2) return;
+  const group = idxs.map(i => orders[i]);
+  const first = group[0];
+  const sourceNos = group.flatMap(getSourceOrderNumbers);
+  const countryCode = first.country_code;
+  const taxCode = getGroupTaxCode(group);
+  const subtotalSum = group.reduce((sum, o) => sum + (Number(o.subtotal) || Number(o.price) || sumItemTotals(o.items)), 0);
+  const combined = {
+    ...first,
+    isCombined: true,
+    source_order_nos: sourceNos,
+    order_no: sourceNos.join("/"),
+    selected: group.some(o => o.selected),
+    process_status: group.some(o => o.process_status === "refund") ? "refund" : (group.every(o => o.process_status === "ready") ? "ready" : "pending"),
+    buyer_username: [...new Set(group.map(o => o.buyer_username).filter(Boolean))].join(" / "),
+    buyer_email: first.buyer_email || "-",
+    count: group.reduce((sum, o) => sum + (Number(o.count) || 0), 0),
+    subtotal: subtotalSum,
+    shipping_fee: group.reduce((sum, o) => sum + (Number(o.shipping_fee) || 0), 0),
+    tax_amount: group.reduce((sum, o) => sum + (Number(o.tax_amount) || 0), 0),
+    refund_amount: group.reduce((sum, o) => sum + (Number(o.refund_amount) || 0), 0),
+    order_total: group.reduce((sum, o) => sum + (Number(o.order_total) || 0), 0),
+    tax_code: taxCode,
+    price: calculateExportPrice(subtotalSum, taxCode, countryCode),
+    items: group.flatMap(o => o.items || []),
+    itemText: group.map(o => o.itemText || "").filter(Boolean).join("\n---\n"),
+    memo: ["combined shipping", ...group.map(o => o.memo).filter(Boolean)].join(" / "),
+    raw_text: group.map(o => o.raw_text || "").join("\n\n--- combined source ---\n\n"),
+    pages: group.flatMap(o => o.pages || [])
+  };
+  const remove = new Set(idxs);
+  const firstIdx = Math.min(...idxs);
+  const next = [];
+  orders.forEach((o, idx) => {
+    if (idx === firstIdx) next.push(combined);
+    else if (!remove.has(idx)) next.push(o);
+  });
+  orders = next;
+  renderOrders();
+  log(`combined shipping 통합: ${sourceNos.join(" / ")}`);
+}
+
+function parseOneOrder(segment) {
+  const text = segment.text;
+  const order_no = text.match(/Order:\s*(\d{2}-\d{5}-\d{5})/)?.[1] || "";
+  const order_date = text.match(/Order date:\s*([A-Za-z]{3}\s+\d{1,2},\s+\d{4})/)?.[1] || "";
+  const sales_record_no = text.match(/Sales record #:\s*(\d+)/)?.[1] || "";
+  const email = text.match(/[A-Za-z0-9._%+-]+@members\.ebay\.com/i)?.[0] || "-";
+  const username = text.match(/Username:\s*([^\n]+)/i)?.[1]?.trim() || "";
+  const phoneRaw = text.match(/\n\s*(\+\d[0-9\s().-]{6,})\s*\n\s*[A-Za-z0-9._%+-]+@members\.ebay\.com/i)?.[1] || "";
+  const ship = parseShipTo(text);
+  const phone = normalizePhone(phoneRaw, ship.country_code);
+  const amounts = parseAmounts(text);
+  const items = parseItems(text);
+  const itemText = rawItemTextForDetection(text);
+  const detected = detectContent(itemText);
+  const taxLine = extractTaxLine(text);
+  const tax = normalizeTaxCode(taxLine, ship.country_code);
+  const count = sumItemQuantities(items);
+  const itemSubtotal = sumItemTotals(items);
+  const subtotalForExport = amounts.subtotal || itemSubtotal;
+  const kpacket = KPACKET_COUNTRIES.has(ship.country_code);
+  let status = kpacket ? "ready" : "pending";
+  let memo = kpacket ? "" : `K-Packet 국가리스트 없음: ${ship.country_code || ship.country}`;
+  if (amounts.refund_amount) { status = "refund"; memo = `Refund detected: ${amounts.refund_amount}`; }
+  const price = calculateExportPrice(subtotalForExport, tax, ship.country_code);
+  return {
+    selected: status === "ready",
+    process_status: status,
+    order_no, order_date, sales_record_no,
+    buyer_username: username, buyer_email: email,
+    recipient_name: ship.recipient_name,
+    phone, country: ship.country, country_code: ship.country_code,
+    postal_code: ship.postal_code, state: replaceSpecialChars(ship.state), city: replaceSpecialChars(ship.city), address1: replaceSpecialChars(ship.address1),
+    tax_code: tax, raw_tax_line: taxLine,
+    shipping_service: parseShippingService(text),
+    subtotal: amounts.subtotal, shipping_fee: amounts.shipping_fee, tax_amount: amounts.tax_amount, refund_amount: amounts.refund_amount, order_total: amounts.order_total,
+    items, itemText: replaceSpecialChars(itemText), count, content: detected.content, hscode: detected.hscode, height: detected.height,
+    price, memo, kpacket, raw_text: text, pages: segment.pages || []
+  };
+}
+function isSummaryCsvRow(r) {
+  const summaryKeys = ["Ship To Name", "Total Price", "Shipping And Handling", "eBay Reference Value", "Buyer Name"];
+  return summaryKeys.some(k => String(r[k] || "").trim() !== "");
+}
+function normalizeCsvTaxCode(summaryRow, allRows, countryCode) {
+  const source = [summaryRow, ...(allRows || [])].find(r =>
+    String(r?.["eBay Reference Value"] || "").trim() ||
+    String(r?.["Buyer Tax Identifier Value"] || "").trim()
+  ) || summaryRow;
+  const ebayRefName = String(source["eBay Reference Name"] || "").trim();
+  const ebayRefValue = String(source["eBay Reference Value"] || "").trim();
+  const buyerTaxName = String(source["Buyer Tax Identifier Name"] || "").trim();
+  const buyerTaxValue = String(source["Buyer Tax Identifier Value"] || "").trim();
+
+  let raw = ebayRefValue || buyerTaxValue || "";
+  if (/^RFC$/i.test(buyerTaxName) && buyerTaxValue) raw = buyerTaxValue;
+  if (/^GST$/i.test(ebayRefName) && /IRD#/i.test(ebayRefValue)) raw = ebayRefValue;
+  return normalizeTaxCode(raw, countryCode);
+}
+function parseCsvGroupToOrder(orderNo, rows) {
+  const summary = rows.find(isSummaryCsvRow) || rows[0] || {};
+  let itemRows = rows.filter(r => String(r["Item Number"] || "").trim() || String(r["Item Title"] || "").trim());
+  if (!itemRows.length && (String(summary["Item Number"] || "").trim() || String(summary["Item Title"] || "").trim())) {
+    itemRows = [summary];
+  }
+  const items = itemRows.map(r => ({
+    item_id: String(r["Item Number"] || "").trim(),
+    title: replaceSpecialChars(String(r["Item Title"] || "").trim()),
+    option_text: replaceSpecialChars(String(r["Variation Details"] || "").trim()),
+    quantity: Number(String(r["Quantity"] || "").replace(/[^0-9.-]/g, "")) || 0,
+    item_price: numFromCsv(r["Sold For"]),
+    item_total: numFromCsv(r["Sold For"]),
+    transaction_id: String(r["Transaction ID"] || "").trim()
+  }));
+  const shipCountry = String(summary["Ship To Country"] || "").trim();
+  const countryCode = countryCodeFromName(shipCountry);
+  const summaryQty = Number(String(summary["Quantity"] || "").replace(/[^0-9.-]/g, "")) || 0;
+  const qtyTotal = summaryQty || items.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
+  const summarySoldFor = numFromCsv(summary["Sold For"]);
+  const subtotal = summarySoldFor || items.reduce((s, it) => s + (Number(it.item_total) || 0), 0);
+  const shippingFee = numFromCsv(summary["Shipping And Handling"]);
+  const taxAmount = numFromCsv(summary["eBay Collected Tax"]);
+  const orderTotal = numFromCsv(summary["Total Price"]);
+  const taxCode = normalizeCsvTaxCode(summary, rows, countryCode);
+  const exportPrice = calculateExportPrice(subtotal, taxCode, countryCode);
+  const kpacket = KPACKET_COUNTRIES.has(countryCode);
+  const processStatus = kpacket ? "ready" : "pending";
+  const shippingStatus = "not_exported";
+  const itemText = items.map(it => `${it.title} ${it.option_text}`.trim()).join(" ").trim();
+  const detected = detectContent(itemText);
+
+  return {
+    selected: processStatus === "ready",
+    process_status: processStatus,
+    shipping_status: shippingStatus,
+    order_no: orderNo,
+    sales_record_no: String(summary["Sales Record Number"] || "").trim(),
+    order_date: String(summary["Sale Date"] || "").trim(),
+    buyer_username: String(summary["Buyer Username"] || "").trim(),
+    buyer_email: String(summary["Buyer Email"] || "").trim() || "-",
+    recipient_name: replaceSpecialChars(String(summary["Ship To Name"] || "").trim()),
+    phone: normalizePhone(String(summary["Ship To Phone"] || "").trim(), countryCode),
+    address1: replaceSpecialChars([summary["Ship To Address 1"], summary["Ship To Address 2"]].filter(Boolean).join(" ").trim()),
+    city: replaceSpecialChars(String(summary["Ship To City"] || "").trim()),
+    state: replaceSpecialChars(String(summary["Ship To State"] || "").trim()),
+    postal_code: normalizePostcode(String(summary["Ship To Zip"] || "").trim(), countryCode),
+    country: replaceSpecialChars(shipCountry),
+    country_code: countryCode,
+    address_key: [
+      replaceSpecialChars(String(summary["Ship To Name"] || "").trim()).toLowerCase(),
+      countryCode.toUpperCase(),
+      normalizePostcode(String(summary["Ship To Zip"] || "").trim(), countryCode).replace(/[\s-]/g, ""),
+      replaceSpecialChars([summary["Ship To Address 1"], summary["Ship To Address 2"]].filter(Boolean).join(" ").trim()).toLowerCase().replace(/\s+/g, " ").trim()
+    ].join("|"),
+    shipping_service: String(summary["Shipping Service"] || "").trim(),
+    tracking_number: String(summary["Tracking Number"] || "").trim(),
+    tax_code: taxCode,
+    subtotal,
+    shipping_fee: shippingFee,
+    tax_amount: taxAmount,
+    refund_amount: 0,
+    order_total: orderTotal,
+    count: qtyTotal || 0,
+    content: detected.content,
+    hscode: detected.hscode,
+    height: detected.height,
+    price: exportPrice,
+    itemText: replaceSpecialChars(itemText),
+    items,
+    memo: kpacket ? "" : `K-Packet 국가리스트 없음: ${countryCode || shipCountry}`,
+    raw_text: "",
+    pages: []
+  };
+}
+function renderOrders() {
+  const tbody = document.querySelector("#ordersTable tbody");
+  tbody.innerHTML = "";
+  orders.forEach((o, idx) => {
+    const tr = document.createElement("tr");
+    if (o.isCombined) tr.className = "combined-row";
+    tr.innerHTML = `
+      <td><input type="checkbox" data-field="selected" data-idx="${idx}" ${o.selected ? "checked" : ""}></td>
+      <td><select data-field="process_status" data-idx="${idx}">
+        ${statusOptions(o.process_status)}
+      </select><div class="status ${statusClass(o.process_status)}" style="margin-top:4px">${statusLabel(o.process_status)}</div></td>
+      <td><input class="med" data-field="order_no" data-idx="${idx}" value="${esc(o.order_no)}"></td>
+      <td><input class="med" data-field="order_date" data-idx="${idx}" value="${esc(o.order_date)}"></td>
+      <td><input class="med" data-field="buyer_username" data-idx="${idx}" value="${esc(o.buyer_username)}"></td>
+      <td><input class="med" data-field="recipient_name" data-idx="${idx}" value="${esc(o.recipient_name)}"></td>
+      <td><input class="small" data-field="country_code" data-idx="${idx}" value="${esc(o.country_code)}"><div class="note">${esc(o.country)}</div></td>
+      <td><input class="med" data-field="phone" data-idx="${idx}" value="${esc(o.phone)}"></td>
+      <td><input class="med" data-field="postal_code" data-idx="${idx}" value="${esc(o.postal_code)}"></td>
+      <td><input class="wide" data-field="address1" data-idx="${idx}" value="${esc(o.address1)}"></td>
+      <td><input class="med" data-field="city" data-idx="${idx}" value="${esc(o.city)}"></td>
+      <td><input class="med" data-field="state" data-idx="${idx}" value="${esc(o.state)}"></td>
+      <td><select data-field="content" data-idx="${idx}"><option value="photocard" ${o.content==='photocard'?'selected':''}>photocard</option><option value="toy" ${o.content==='toy'?'selected':''}>toy</option></select></td>
+      <td><input class="small" type="number" data-field="count" data-idx="${idx}" value="${esc(o.count)}"></td>
+      <td><input class="small" data-field="price" data-idx="${idx}" value="${esc(o.price)}"></td>
+      <td><input class="med" data-field="tax_code" data-idx="${idx}" value="${esc(o.tax_code)}"></td>
+      <td><input class="wide" data-field="memo" data-idx="${idx}" value="${esc(o.memo)}"></td>`;
+    tbody.appendChild(tr);
+  });
+  tbody.querySelectorAll("input,select").forEach(el => el.addEventListener("change", onCellChange));
+  document.getElementById("ordersCard").style.display = orders.length ? "block" : "none";
+  document.getElementById("summary").style.display = orders.length ? "grid" : "none";
+  document.getElementById("downloadCsvBtn").disabled = !orders.length;
+  document.getElementById("downloadXlsxBtn").disabled = !orders.length;
+  updateSummary();
+  renderCombinedSuggestions();
+}
+function statusOptions(current) {
+  const opts = [["ready","바로처리"],["pending","보류"],["refund","환불필요"],["contact","문의중"],["cancelled","취소완료"],["completed","처리완료"]];
+  return opts.map(([v,l]) => `<option value="${v}" ${v===current?'selected':''}>${l}</option>`).join("");
+}
+function statusLabel(v) { return ({ready:"바로처리",pending:"보류",refund:"환불필요",contact:"문의중",cancelled:"취소완료",completed:"처리완료"})[v] || v; }
+function statusClass(v) { return v === "ready" ? "ready" : v === "refund" ? "refund" : v === "contact" ? "contact" : v === "completed" || v === "cancelled" ? "done" : "pending"; }
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[ch])); }
+function onCellChange(e) {
+  const idx = Number(e.target.dataset.idx);
+  const field = e.target.dataset.field;
+  if (!Number.isInteger(idx) || !field) return;
+  if (field === "selected") orders[idx][field] = e.target.checked;
+  else orders[idx][field] = e.target.value;
+  if (field === "tax_code") {
+    const normalized = normalizeTaxCode(orders[idx].tax_code, orders[idx].country_code);
+    orders[idx].tax_code = normalized;
+    orders[idx].price = calculateExportPrice(orders[idx].subtotal || sumItemTotals(orders[idx].items), normalized, orders[idx].country_code);
+    renderOrders();
+    return;
+  }
+  if (field === "country_code") {
+    const normalized = normalizeTaxCode(orders[idx].tax_code, orders[idx].country_code);
+    orders[idx].tax_code = normalized;
+    orders[idx].price = calculateExportPrice(orders[idx].subtotal || sumItemTotals(orders[idx].items), normalized, orders[idx].country_code);
+  }
+  if (field === "content") {
+    if (e.target.value === "toy") { orders[idx].hscode = "9503003411"; orders[idx].height = "8"; }
+    else { orders[idx].hscode = "4909000000"; orders[idx].height = "1"; }
+  }
+  updateSummary();
+  if (field === "process_status") renderOrders();
+}
+function updateSummary() {
+  document.getElementById("sumTotal").textContent = orders.length;
+  document.getElementById("sumReady").textContent = orders.filter(o=>o.process_status==="ready").length;
+  document.getElementById("sumPending").textContent = orders.filter(o=>!["ready","completed"].includes(o.process_status)).length;
+  document.getElementById("sumKpacket").textContent = orders.filter(o=>KPACKET_COUNTRIES.has(o.country_code)).length;
+  document.getElementById("sumSelected").textContent = orders.filter(o=>o.selected).length;
+}
+function buildOutputRow(o) {
+  const row = Object.fromEntries(OUTPUT_HEADERS.map(h => [h, ""]));
+  const content = o.content || "photocard";
+  const hscode = content === "toy" ? "9503003411" : "4909000000";
+  const height = content === "toy" ? "8" : "1";
+  row["★상품구분"] = "Merchandise";
+  row["★수취인명"] = replaceSpecialChars(o.recipient_name);
+  row["수취인EMAIL"] = o.buyer_email || "-";
+  row["★14전화번호"] = normalizePhone(o.phone, o.country_code);
+  row["★16국가코드"] = o.country_code;
+  row["★16국가명"] = o.country_code;
+  row["★15우편번호"] = normalizePostcode(o.postal_code, o.country_code);
+  row["★13상세주소"] = replaceSpecialChars(o.address1);
+  row["★12시/군/구"] = replaceSpecialChars(o.city || o.state);
+  row["★11주/도/시"] = replaceSpecialChars(o.state || o.city);
+  row["★총중량"] = "100";
+  row["★내용품"] = content;
+  row["★개수"] = String(o.count || 0);
+  row["★순중량(g)[ = 품목 1종의 개당중량 * 개수 ](수출우편물 정보관세청 제공 동의시 필수)"] = "50";
+  row["★가격"] = String(o.price || "0");
+  row["단위"] = "USD";
+  row["HSCODE(숫자만 10자리)"] = hscode;
+  row["생산지"] = "KR";
+  row["EMS : EEMS 프리미엄 : PK-Packet : K등기소형 :R"] = "K";
+  row["EMS 비서류 : em,     EMS 서류 : ee, K-Packet : rl, 소형포장물 : re"] = "rl";
+  row["고객주문번호( 숫자,영문 30자이내)"] = o.order_no;
+  row["수출우편물 정보 관세청 제공 여부(Y/N)"] = "Y";
+  row["사업자번호(숫자10자리)"] = "7764800598";
+  row["수출화주이름 또는 상호(수출우편물 정보 관세청 제공 동의시 필수)"] = "KTEMS";
+  row["수출화주 주소(수출우편물 정보 관세청 제공 동의시 필수)"] = "104-150515 Dunsan-ro Seo-gu Daejeon Republic of Korea";
+  row["수출이행등록여부(Y/N)"] = "N";
+  row["★브라질세금식별번호(* 브라질행 EMS, K-Packet의 경우 필수 입력)"] = o.country_code === "BR" ? "" : "";
+  row["가로(cm)"] = "20";
+  row["세로(cm)"] = "30";
+  row["높이(cm)"] = height;
+  row["부피중량 적용 제외 여부(Y/N)"] = "Y";
+  row["★IOSS/EORI/TAX NUMBER식별 번호"] = normalizeTaxCode(o.tax_code, o.country_code);
+  row["상태"] = "order";
+  row["물품"] = replaceSpecialChars(o.itemText || o.items?.map(it => `${it.title} ${it.option_text}`).join(" ") || "");
+  row["생성 일시"] = formatKoreanDateNow();
+  return OUTPUT_HEADERS.map(h => row[h] ?? "");
+}
+function selectedRows() { return orders.filter(o => o.selected); }
+function downloadCsv() {
+  const rows = selectedRows();
+  if (!rows.length) return alert("선택된 주문이 없어.");
+  const matrix = [OUTPUT_HEADERS, ...rows.map(buildOutputRow)];
+  const csv = "\uFEFF" + matrix.map(r => r.map(csvEscape).join(",")).join("\r\n");
+  downloadBlob(csv, `kpacket_export_${dateStamp()}.csv`, "text/csv;charset=utf-8");
+}
+function downloadXlsx() {
+  const rows = selectedRows();
+  if (!rows.length) return alert("선택된 주문이 없어.");
+  const matrix = [OUTPUT_HEADERS, ...rows.map(buildOutputRow)];
+  const ws = XLSX.utils.aoa_to_sheet(matrix);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "K-Packet");
+  XLSX.writeFile(wb, `kpacket_export_${dateStamp()}.xlsx`);
+}
+function csvEscape(v) {
+  const s = String(v ?? "");
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+function downloadBlob(content, filename, mime) {
+  const blob = new Blob([content], { type:mime });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+  URL.revokeObjectURL(a.href);
+}
+function dateStamp() { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}`; }
+async function parseCsvFiles() {
+  const files = [...document.getElementById("csvFile").files];
+  if (!files.length) return alert("CSV 파일을 먼저 선택해줘.");
+  orders = [];
+  log(`CSV ${files.length}개 파싱 시작`);
+  for (const file of files) {
+    const text = await file.text();
+    const { headers, records } = getCsvHeaderAndRows(text);
+    if (!headers.length) {
+      log(`${file.name}: Order Number 헤더 행을 찾지 못해 건너뜀`);
+      continue;
+    }
+    const groups = new Map();
+    records.forEach(row => {
+      const obj = rowToObj(headers, row);
+      const orderNo = String(obj["Order Number"] || "").trim();
+      if (!orderNo) return;
+      if (!groups.has(orderNo)) groups.set(orderNo, []);
+      groups.get(orderNo).push(obj);
+    });
+    const parsed = [...groups.entries()].map(([orderNo, rows]) => parseCsvGroupToOrder(orderNo, rows));
+    orders.push(...parsed);
+    log(`${file.name}: raw row ${records.length} / grouped order ${parsed.length}`);
+  }
+  renderOrders();
+}
+async function parsePdfFiles() {
+  const files = [...document.getElementById("pdfFile").files];
+  if (!files.length) return alert("PDF 파일을 먼저 선택해줘.");
+  orders = [];
+  log(`PDF ${files.length}개 파싱 시작`);
+  for (const file of files) {
+    const pages = await extractPdfPages(file);
+    const segments = makeSegmentsFromPages(pages);
+    const parsed = segments.map(parseOneOrder).filter(o => o.order_no);
+    orders.push(...parsed);
+    log(`${file.name}: ${pages.length}페이지 / 주문 ${parsed.length}건`);
+  }
+  renderOrders();
+}
+function parseText() {
+  const raw = document.getElementById("rawText").value;
+  const segments = makeSegmentsFromRawText(raw);
+  orders = segments.map(parseOneOrder).filter(o => o.order_no);
+  log(`붙여넣기 텍스트 주문 ${orders.length}건 파싱`);
+  renderOrders();
+}
+
+document.getElementById("parseCsvBtn").addEventListener("click", () => parseCsvFiles().catch(err => { console.error(err); log(`오류: ${err.message}`); alert(err.message); }));
+document.getElementById("parsePdfBtn").addEventListener("click", () => parsePdfFiles().catch(err => { console.error(err); log(`오류: ${err.message}`); alert(err.message); }));
+document.getElementById("parseTextBtn").addEventListener("click", parseText);
+document.getElementById("downloadCsvBtn").addEventListener("click", downloadCsv);
+document.getElementById("combinedSuggestions").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-combine-key]");
+  if (!btn) return;
+  combineOrdersByKey(btn.dataset.combineKey);
+});
+document.getElementById("downloadXlsxBtn").addEventListener("click", downloadXlsx);
+document.getElementById("selectReadyBtn").addEventListener("click", () => { orders.forEach(o => o.selected = o.process_status === "ready"); renderOrders(); });
+document.getElementById("selectAllBtn").addEventListener("click", () => { orders.forEach(o => o.selected = true); renderOrders(); });
+document.getElementById("clearBtn").addEventListener("click", () => { orders = []; document.getElementById("rawText").value = ""; document.getElementById("pdfFile").value = ""; document.getElementById("csvFile").value = ""; renderOrders(); log("초기화 완료"); });
+</script>
+</body>
+</html>
