@@ -29,6 +29,7 @@ npm run dev
 
 기본 페이지:
 - `/` : 안내 페이지
+- `/domestic` : Domestic Order 입력/조회/상태변경
 - `/orders` : orders 목록 화면
 - `/import` : eBay Orders Report CSV 미리보기 + DB 저장
 
