@@ -1,1 +1,880 @@
 
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Domestic Order Input</title>
+  <style>
+    :root {
+      --bg: #f7f7fb;
+      --card: #ffffff;
+      --text: #222;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --accent: #111827;
+      --soft: #f3f4f6;
+      --yellow: #fff8d7;
+      --danger: #b91c1c;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    header {
+      padding: 24px 32px;
+      background: #fff;
+      border-bottom: 1px solid var(--line);
+    }
+
+    header a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 14px;
+    }
+
+    header h1 {
+      margin: 10px 0 4px;
+      font-size: 28px;
+    }
+
+    header p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+
+    .step {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 22px;
+      margin-bottom: 18px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+    }
+
+    .step-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .badge {
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      background: var(--accent);
+      color: white;
+      display: grid;
+      place-items: center;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 20px;
+    }
+
+    .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    button {
+      border: 1px solid var(--line);
+      background: white;
+      padding: 11px 16px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    button:hover {
+      background: var(--soft);
+    }
+
+    button.active {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+    }
+
+    button.primary {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+    }
+
+    button.danger {
+      color: var(--danger);
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .method-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .method-card {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 18px;
+      cursor: pointer;
+      background: white;
+    }
+
+    .method-card.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(17, 24, 39, 0.08);
+    }
+
+    .method-card h3 {
+      margin: 0 0 6px;
+    }
+
+    .method-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .input-area {
+      margin-top: 16px;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 190px;
+      resize: vertical;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      font-family: inherit;
+      font-size: 14px;
+    }
+
+    .dropzone {
+      border: 2px dashed #cbd5e1;
+      border-radius: 18px;
+      min-height: 220px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      background: #fafafa;
+      padding: 20px;
+      color: var(--muted);
+    }
+
+    .preview-img {
+      max-width: 100%;
+      max-height: 260px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      display: none;
+      margin-top: 12px;
+    }
+
+    .notice {
+      margin-top: 12px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: var(--yellow);
+      color: #6b4e00;
+      font-size: 14px;
+    }
+
+    .orders {
+      display: grid;
+      gap: 14px;
+    }
+
+    .order-card {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 16px;
+      background: #fff;
+    }
+
+    .order-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+
+    .order-card h3 {
+      margin: 0;
+      font-size: 17px;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    label {
+      display: grid;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    input {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      font-size: 14px;
+      color: var(--text);
+    }
+
+    .full {
+      grid-column: 1 / -1;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      overflow: hidden;
+      border-radius: 14px;
+    }
+
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px;
+      font-size: 13px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f9fafb;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .footer-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    @media (max-width: 800px) {
+      .method-grid,
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+
+      main {
+        padding: 18px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/domestic">← Domestic Order</a>
+    <h1>국내 주문 입력</h1>
+    <p>와이스, 번개장터, X 주문을 텍스트 또는 이미지로 입력하고 확인합니다.</p>
+  </header>
+
+  <main>
+    <section class="step">
+      <div class="step-title">
+        <div class="badge">1</div>
+        <h2>주문 플랫폼 선택</h2>
+      </div>
+
+      <div class="button-row">
+        <button class="platform active" data-platform="wise">와이스</button>
+        <button class="platform" data-platform="bunjang">번개장터</button>
+        <button class="platform" data-platform="x">X</button>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-title">
+        <div class="badge">2</div>
+        <h2>입력 방식 선택</h2>
+      </div>
+
+      <div class="method-grid">
+        <div class="method-card active" data-method="text">
+          <h3>텍스트 붙여넣기</h3>
+          <p>주문 내용을 통째로 붙여넣고 가능한 값만 자동 분리합니다.</p>
+        </div>
+
+        <div class="method-card" data-method="image">
+          <h3>스크린샷/이미지</h3>
+          <p>이미지를 업로드하거나 붙여넣습니다. OCR은 다음 단계에서 연결합니다.</p>
+        </div>
+      </div>
+
+      <div id="textInput" class="input-area">
+        <textarea id="rawText" placeholder="와이스 예시:
+배송 정보
+정영인(누리너울)
+[18491] 경기 화성시 동탄구 동탄신리천로3길 71, 3719동 106호
+연락처
+0507-0268-0040(안심번호)
+배송비
+5,000원"></textarea>
+
+        <div class="footer-actions">
+          <button id="parseText" class="primary">텍스트 파싱</button>
+        </div>
+      </div>
+
+      <div id="imageInput" class="input-area" style="display:none;">
+        <div class="dropzone" id="dropzone">
+          <div>
+            <strong>이미지를 드래그하거나 붙여넣기</strong>
+            <p>또는 아래에서 파일을 선택하세요.</p>
+            <input type="file" id="imageFile" accept="image/*" />
+          </div>
+        </div>
+
+        <img id="imagePreview" class="preview-img" />
+
+        <div class="notice">
+          이미지 OCR 파싱은 다음 단계에서 연결 예정입니다. 지금은 미리보기만 지원합니다.
+        </div>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-title">
+        <div class="badge">3</div>
+        <h2>주문 확인 및 수정</h2>
+      </div>
+
+      <div class="orders" id="orders"></div>
+
+      <div class="footer-actions">
+        <button id="addOrder">주문 추가</button>
+        <button id="showTable" class="primary">정렬해서 보기</button>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-title">
+        <div class="badge">4</div>
+        <h2>확정 전 데이터 미리보기</h2>
+      </div>
+
+      <div id="tableWrap">
+        <p style="color: var(--muted);">아직 정렬된 데이터가 없습니다.</p>
+      </div>
+
+      <div class="footer-actions">
+        <button disabled>DB 저장은 다음 단계에서 연결 예정</button>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    let selectedPlatform = "wise";
+    let selectedMethod = "text";
+
+    const today = getToday();
+
+    let orders = [
+      createEmptyOrder()
+    ];
+
+    const platformLabels = {
+      wise: "와이스",
+      bunjang: "번개장터",
+      x: "X"
+    };
+
+    function createEmptyOrder() {
+      return {
+        order_date: today,
+        customer_nickname: "",
+        item_summary: "",
+        recipient_name: "",
+        phone: "",
+        postal_code: "",
+        address: "",
+        domestic_memo: "",
+        workflow_status: "order_input"
+      };
+    }
+
+    function getToday() {
+      const now = new Date();
+      const yyyy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, "0");
+      const dd = String(now.getDate()).padStart(2, "0");
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    document.querySelectorAll(".platform").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".platform").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        selectedPlatform = btn.dataset.platform;
+        renderOrders();
+        renderTable();
+      });
+    });
+
+    document.querySelectorAll(".method-card").forEach(card => {
+      card.addEventListener("click", () => {
+        document.querySelectorAll(".method-card").forEach(c => c.classList.remove("active"));
+        card.classList.add("active");
+        selectedMethod = card.dataset.method;
+
+        document.getElementById("textInput").style.display =
+          selectedMethod === "text" ? "block" : "none";
+
+        document.getElementById("imageInput").style.display =
+          selectedMethod === "image" ? "block" : "none";
+      });
+    });
+
+    function normalizeSpaces(text) {
+      return String(text || "")
+        .replaceAll("：", ":")
+        .replaceAll(String.fromCharCode(160), " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function splitLines(raw) {
+      return String(raw || "")
+        .replace(/\r/g, "")
+        .split("\n")
+        .map(normalizeSpaces)
+        .filter(Boolean);
+    }
+
+    function guessValue(text, patterns) {
+      for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match) return (match[1] || "").trim();
+      }
+      return "";
+    }
+
+    function parseDate(text) {
+      const patterns = [
+        /주문일(?:자)?[:\s]+(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})/,
+        /(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})/,
+        /(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/
+      ];
+
+      for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match) {
+          const yyyy = match[1];
+          const mm = String(match[2]).padStart(2, "0");
+          const dd = String(match[3]).padStart(2, "0");
+          return `${yyyy}-${mm}-${dd}`;
+        }
+      }
+
+      return today;
+    }
+
+    function normalizePhone(phone) {
+      return String(phone || "")
+        .replace(/\(안심번호\)/g, "")
+        .replace(/（안심번호）/g, "")
+        .trim();
+    }
+
+    function parseWiseText(text) {
+      const blocks = splitWiseBlocks(text);
+
+      return blocks.map(block => {
+        const lines = splitLines(block);
+        const joined = lines.join("\n");
+
+        const orderDate = parseDate(joined);
+
+        let recipientName = "";
+        let nickname = "";
+
+        const nameLine = lines.find(line => {
+          if (line.includes("배송")) return false;
+          if (line.includes("연락처")) return false;
+          if (line.includes("배송비")) return false;
+          return /^.+\(.+\)$/.test(line);
+        });
+
+        if (nameLine) {
+          const match = nameLine.match(/^(.+?)\((.+?)\)$/);
+          if (match) {
+            recipientName = normalizeSpaces(match[1]);
+            nickname = normalizeSpaces(match[2]);
+          }
+        }
+
+        let postalCode = "";
+        let address = "";
+
+        const addressLine = lines.find(line => /^\[\d{5}\]/.test(line));
+        if (addressLine) {
+          const match = addressLine.match(/^\[(\d{5})\]\s*(.+)$/);
+          if (match) {
+            postalCode = match[1].trim();
+            address = normalizeSpaces(match[2]);
+          }
+        }
+
+        let phone = "";
+        const contactIndex = lines.findIndex(line => line.includes("연락처"));
+
+        if (contactIndex >= 0 && lines[contactIndex + 1]) {
+          phone = normalizePhone(lines[contactIndex + 1]);
+        }
+
+        if (!phone) {
+          const phoneLine = lines.find(line => /0\d{1,3}[-\s]?\d{3,4}[-\s]?\d{4}/.test(line));
+          phone = phoneLine ? normalizePhone(phoneLine) : "";
+        }
+
+        const memo = guessValue(joined, [
+          /메모[:\s]+(.+)/i,
+          /배송메모[:\s]+(.+)/i,
+          /요청사항[:\s]+(.+)/i
+        ]);
+
+        const hasAddress = Boolean(recipientName && phone && address);
+
+        return {
+          order_date: orderDate,
+          customer_nickname: nickname,
+          item_summary: "",
+          recipient_name: recipientName,
+          phone,
+          postal_code: postalCode,
+          address,
+          domestic_memo: memo,
+          workflow_status: hasAddress ? "address_input" : "order_input"
+        };
+      });
+    }
+
+    function splitWiseBlocks(text) {
+      const raw = String(text || "").replace(/\r/g, "").trim();
+
+      if (!raw) return [];
+
+      const parts = raw
+        .split(/(?=배송 정보\s*\n)/g)
+        .map(v => v.trim())
+        .filter(Boolean);
+
+      if (parts.length > 1) return parts;
+
+      return [raw];
+    }
+
+    function parseGenericDomesticText(text) {
+      const chunks = text
+        .split(/\n\s*\n|---+/)
+        .map(v => v.trim())
+        .filter(Boolean);
+
+      const targets = chunks.length ? chunks : [text];
+
+      return targets.map(chunk => {
+        const orderDate = parseDate(chunk);
+
+        const nickname = guessValue(chunk, [
+          /닉네임[:\s]+(.+)/i,
+          /구매자[:\s]+(.+)/i,
+          /주문자[:\s]+(.+)/i
+        ]);
+
+        const itemSummary = guessValue(chunk, [
+          /상품[:\s]+(.+)/i,
+          /주문상품[:\s]+(.+)/i,
+          /물품[:\s]+(.+)/i,
+          /제품[:\s]+(.+)/i
+        ]);
+
+        const recipient = guessValue(chunk, [
+          /수취인[:\s]+(.+)/i,
+          /받는\s*분[:\s]+(.+)/i,
+          /받는사람[:\s]+(.+)/i,
+          /이름[:\s]+(.+)/i
+        ]);
+
+        const phoneRaw = guessValue(chunk, [
+          /전화번호[:\s]+([\d\-\s]+)/i,
+          /연락처[:\s]+([\d\-\s]+)/i,
+          /(01[016789][\d\-\s]{7,})/
+        ]);
+
+        const phone = normalizePhone(phoneRaw);
+
+        const postal = guessValue(chunk, [
+          /\[(\d{5})\]/,
+          /우편번호[:\s]+(\d{5})/,
+          /(?:^|\s)(\d{5})(?:\s|$)/
+        ]);
+
+        const memo = guessValue(chunk, [
+          /메모[:\s]+(.+)/i,
+          /배송메모[:\s]+(.+)/i,
+          /요청사항[:\s]+(.+)/i
+        ]);
+
+        const lines = splitLines(chunk);
+
+        const addressLine = lines.find(line => {
+          if (/전화|연락처|상품|닉네임|주문일|주문자|구매자|수취인|받는/.test(line)) return false;
+          return /시|군|구|동|읍|면|로|길|번길|아파트|빌라|호|층|[0-9]{5}/.test(line);
+        }) || "";
+
+        const hasAddress = Boolean(recipient && phone && addressLine);
+
+        return {
+          order_date: orderDate,
+          customer_nickname: nickname,
+          item_summary: itemSummary,
+          recipient_name: recipient,
+          phone,
+          postal_code: postal,
+          address: addressLine,
+          domestic_memo: memo,
+          workflow_status: hasAddress ? "address_input" : "order_input"
+        };
+      });
+    }
+
+    function parseDomesticText(text) {
+      if (selectedPlatform === "wise") {
+        return parseWiseText(text);
+      }
+
+      return parseGenericDomesticText(text);
+    }
+
+    document.getElementById("parseText").addEventListener("click", () => {
+      const text = document.getElementById("rawText").value.trim();
+
+      if (!text) {
+        alert("텍스트를 먼저 붙여넣어 주세요.");
+        return;
+      }
+
+      orders = parseDomesticText(text);
+
+      if (!orders.length) {
+        orders = [createEmptyOrder()];
+      }
+
+      renderOrders();
+      renderTable();
+    });
+
+    document.getElementById("addOrder").addEventListener("click", () => {
+      orders.push(createEmptyOrder());
+      renderOrders();
+      renderTable();
+    });
+
+    document.getElementById("showTable").addEventListener("click", renderTable);
+
+    function updateOrder(index, key, value) {
+      orders[index][key] = value;
+
+      const order = orders[index];
+
+      if (order.recipient_name && order.phone && order.address) {
+        order.workflow_status = "address_input";
+      } else {
+        order.workflow_status = "order_input";
+      }
+
+      renderOrders();
+      renderTable();
+    }
+
+    function removeOrder(index) {
+      orders.splice(index, 1);
+      renderOrders();
+      renderTable();
+    }
+
+    function renderOrders() {
+      const wrap = document.getElementById("orders");
+      wrap.innerHTML = "";
+
+      if (!orders.length) {
+        wrap.innerHTML = '<p style="color: var(--muted);">주문이 없습니다. 주문을 추가해 주세요.</p>';
+        return;
+      }
+
+      orders.forEach((order, index) => {
+        const card = document.createElement("div");
+        card.className = "order-card";
+
+        card.innerHTML = `
+          <div class="order-card-header">
+            <h3>${index + 1}번 주문 · ${platformLabels[selectedPlatform]}</h3>
+            <button class="danger" onclick="removeOrder(${index})">삭제</button>
+          </div>
+
+          <div class="form-grid">
+            <label>주문일
+              <input type="date" value="${escapeHtml(order.order_date)}" onchange="updateOrder(${index}, 'order_date', this.value)" />
+            </label>
+
+            <label>닉네임
+              <input value="${escapeHtml(order.customer_nickname)}" onchange="updateOrder(${index}, 'customer_nickname', this.value)" />
+            </label>
+
+            <label>수취인명
+              <input value="${escapeHtml(order.recipient_name)}" onchange="updateOrder(${index}, 'recipient_name', this.value)" />
+            </label>
+
+            <label>전화번호
+              <input value="${escapeHtml(order.phone)}" onchange="updateOrder(${index}, 'phone', this.value)" />
+            </label>
+
+            <label>우편번호
+              <input value="${escapeHtml(order.postal_code)}" onchange="updateOrder(${index}, 'postal_code', this.value)" />
+            </label>
+
+            <label>상태
+              <input value="${order.workflow_status === "address_input" ? "주소입력" : "주문 입력"}" disabled />
+            </label>
+
+            <label class="full">상품요약
+              <input value="${escapeHtml(order.item_summary)}" placeholder="확실할 때만 입력" onchange="updateOrder(${index}, 'item_summary', this.value)" />
+            </label>
+
+            <label class="full">주소
+              <input value="${escapeHtml(order.address)}" onchange="updateOrder(${index}, 'address', this.value)" />
+            </label>
+
+            <label class="full">메모
+              <input value="${escapeHtml(order.domestic_memo)}" onchange="updateOrder(${index}, 'domestic_memo', this.value)" />
+            </label>
+          </div>
+        `;
+
+        wrap.appendChild(card);
+      });
+    }
+
+    function renderTable() {
+      const wrap = document.getElementById("tableWrap");
+
+      if (!orders.length) {
+        wrap.innerHTML = '<p style="color: var(--muted);">정렬할 주문이 없습니다.</p>';
+        return;
+      }
+
+      const rows = orders.map(order => `
+        <tr>
+          <td>${escapeHtml(order.order_date)}</td>
+          <td>${platformLabels[selectedPlatform]}</td>
+          <td>${escapeHtml(order.customer_nickname)}</td>
+          <td>${escapeHtml(order.item_summary)}</td>
+          <td>${escapeHtml(order.recipient_name)}</td>
+          <td>${escapeHtml(order.phone)}</td>
+          <td>${escapeHtml(order.postal_code)}</td>
+          <td>${escapeHtml(order.address)}</td>
+          <td>${escapeHtml(order.domestic_memo)}</td>
+          <td>${order.workflow_status === "address_input" ? "주소입력" : "주문 입력"}</td>
+        </tr>
+      `).join("");
+
+      wrap.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>주문일</th>
+              <th>플랫폼</th>
+              <th>닉네임</th>
+              <th>상품요약</th>
+              <th>수취인명</th>
+              <th>전화번호</th>
+              <th>우편번호</th>
+              <th>주소</th>
+              <th>메모</th>
+              <th>상태</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    }
+
+    function escapeHtml(value) {
+      return String(value || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    const imageFile = document.getElementById("imageFile");
+    const imagePreview = document.getElementById("imagePreview");
+
+    imageFile.addEventListener("change", event => {
+      const file = event.target.files[0];
+      if (file) showImage(file);
+    });
+
+    document.addEventListener("paste", event => {
+      if (selectedMethod !== "image") return;
+
+      const items = event.clipboardData?.items || [];
+
+      for (const item of items) {
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          showImage(file);
+          break;
+        }
+      }
+    });
+
+    function showImage(file) {
+      const reader = new FileReader();
+
+      reader.onload = event => {
+        imagePreview.src = event.target.result;
+        imagePreview.style.display = "block";
+      };
+
+      reader.readAsDataURL(file);
+    }
+
+    renderOrders();
+  </script>
+</body>
+</html>
