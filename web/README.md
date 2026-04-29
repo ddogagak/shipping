@@ -29,7 +29,14 @@ npm run dev
 
 기본 페이지:
 - `/` : 안내 페이지
+- `/domestic` : Domestic Order 입력/조회/상태변경
 - `/orders` : orders 목록 화면
+- `/import` : eBay Orders Report CSV 미리보기 + DB 저장
+
+Domestic Order 기본 동작:
+- 플랫폼: `wise` / `bunjang` / `x`
+- 상태 필터: 주문 입력(`order_input`) / 주소입력(`address_input`) / 운송장입력(`tracking_input`) / 배송완료(`delivered`)
+- 기본 목록에서는 `delivered` 상태를 숨기고, 배송완료 필터 선택 시에만 표시
 
 
 ## 범위
