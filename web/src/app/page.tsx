@@ -5,13 +5,15 @@ export default function HomePage() {
     <main>
       <div className="card">
         <h1 style={{ marginTop: 0 }}>Shipping Admin (Web)</h1>
-        <p>이 앱은 Supabase DB 기반 주문관리 사이트의 기초 구조입니다.</p>
-        <p>
-          주문 목록은 <Link href="/orders">/orders</Link> 페이지에서 확인할 수 있습니다.
-        </p>
-        <p>
-          CSV 가져오기는 <Link href="/import">/import</Link> 페이지에서 실행할 수 있습니다.
-        </p>
+        <p>메뉴를 선택하세요.</p>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <Link href="/domestic" className="card" style={{ textDecoration: "none", fontSize: 24, fontWeight: 700, textAlign: "center" }}>
+            Domestic Order
+          </Link>
+          <Link href="/orders" className="card" style={{ textDecoration: "none", fontSize: 24, fontWeight: 700, textAlign: "center" }}>
+            Overseas Order
+          </Link>
+        </div>
       </div>
     </main>
   );
