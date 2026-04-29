@@ -16,6 +16,7 @@ type ImportItem = {
 type ImportOrder = {
   selected?: boolean;
   order_no?: string;
+  source_order_nos?: string[];
   sales_record_no?: string;
   order_date?: string;
 
@@ -24,17 +25,8 @@ type ImportOrder = {
   phone?: string;
 
   recipient_name?: string;
-  address1?: string;
-  address2?: string;
-  city?: string;
-  state?: string;
-  postal_code?: string;
   country?: string;
   country_code?: string;
-  address_key?: string;
-
-  tax_code?: string;
-  shipping_service?: string;
 
   subtotal?: number;
   shipping_fee?: number;
@@ -49,37 +41,25 @@ type ImportOrder = {
   export_price?: number;
   price?: number | string;
 
-  process_status?: string;
-  shipping_status?: string;
+  shipping_method?: string;
+  shipping_export?: Record<string, string>;
 
-  memo?: string;
-  raw_text?: string;
-
-  content?: string;
-  hscode?: string;
-
+  itemText?: string;
   items?: ImportItem[];
 };
 
-function normalizeDate(value?: string): string | null {
-  if (!value) return null;
+const KPACKET_COUNTRIES = new Set([
+  "NZ", "MY", "VN", "BR", "SG", "GB", "AU", "ID", "JP", "CN", "CA", "TH", "TW", "FR", "PH", "HK", "RU", "DE", "ES",
+  "AR", "AT", "BY", "BE", "KH", "CL", "EG", "FI", "HN", "IN", "IE", "IL", "IT", "KZ", "KG", "MX", "MN", "NP", "NL", "NO", "PK", "PE", "PL", "SA", "ZA", "SE", "CH", "TR", "UA", "AE", "UZ"
+]);
 
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return null;
-
-  return d.toISOString();
+function text(value: unknown): string {
+  return String(value ?? "").trim();
 }
 
-function text(value: unknown): string | null {
-  const v = String(value ?? "").trim();
+function nullableText(value: unknown): string | null {
+  const v = text(value);
   return v ? v : null;
-}
-
-function numberValue(value: unknown): number | null {
-  if (value === null || value === undefined || value === "") return null;
-
-  const n = Number(String(value).replace(/[^0-9.-]/g, ""));
-  return Number.isFinite(n) ? n : null;
 }
 
 function intValue(value: unknown): number {
@@ -87,46 +67,53 @@ function intValue(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function normalizeProcessStatus(value: unknown) {
-  const allowed = new Set([
-    "ready",
-    "pending",
-    "refund",
-    "contact",
-    "cancelled",
-    "completed",
-  ]);
+function normalizeDate(value?: string): string | null {
+  const raw = text(value);
+  if (!raw) return null;
 
-  const v = String(value || "pending").trim();
-  return allowed.has(v) ? v : "pending";
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+
+  return d.toISOString();
 }
 
-function normalizeShippingStatus(value: unknown) {
-  const allowed = new Set([
-    "not_exported",
-    "exported",
-    "reserved",
-    "accepted",
-    "tracking_added",
-    "shipped",
-    "issue",
-  ]);
+function getShippingMethod(order: ImportOrder): "k-packet" | "egs" | "check" {
+  const countryCode = text(order.country_code).toUpperCase();
 
-  const v = String(value || "not_exported").trim();
-  return allowed.has(v) ? v : "not_exported";
+  if (countryCode === "US") return "egs";
+  if (KPACKET_COUNTRIES.has(countryCode)) return "k-packet";
+
+  return "check";
 }
 
-function buildAddressKey(order: ImportOrder) {
-  return [
-    order.recipient_name || "",
-    order.country_code || "",
-    order.postal_code || "",
-    order.address1 || "",
-  ]
-    .join("|")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
+function getSourceOrderNumbers(order: ImportOrder): string[] {
+  if (Array.isArray(order.source_order_nos) && order.source_order_nos.length) {
+    return order.source_order_nos.map(text).filter(Boolean);
+  }
+
+  return text(order.order_no)
+    .split("/")
+    .map(text)
+    .filter(Boolean);
+}
+
+function getItemList(order: ImportOrder): string {
+  const items = Array.isArray(order.items) ? order.items : [];
+
+  const names = items
+    .map((item) => {
+      return [
+        text(item.title || item.item_title),
+        text(item.option_text),
+      ]
+        .filter(Boolean)
+        .join(" ");
+    })
+    .filter(Boolean);
+
+  if (names.length) return names.join("|");
+
+  return text(order.itemText);
 }
 
 export async function POST(req: Request) {
@@ -142,130 +129,105 @@ export async function POST(req: Request) {
 
   const supabase = createServiceRoleClient();
 
-  let savedOrders = 0;
-  let savedItems = 0;
+  const validOrders = orders.filter((order) => text(order.order_no));
 
-  for (const order of orders) {
-    if (!order.order_no) {
-      continue;
-    }
+  if (!validOrders.length) {
+    return NextResponse.json(
+      { error: "저장 가능한 order_no가 없습니다." },
+      { status: 400 }
+    );
+  }
 
-    const orderPayload = {
-      order_no: order.order_no,
-      sales_record_no: text(order.sales_record_no),
-      order_date: normalizeDate(order.order_date),
+  const ebayOrderRows = validOrders.map((order) => {
+    const saleDate = normalizeDate(order.order_date);
+    const shippingMethod = getShippingMethod(order);
 
-      buyer_username: text(order.buyer_username),
-      buyer_email: text(order.buyer_email),
-      phone: text(order.phone),
+    return {
+      sale_date: saleDate,
+      order_number: text(order.order_no),
+      source_order_numbers: getSourceOrderNumbers(order),
 
-      recipient_name: text(order.recipient_name),
-      address1: text(
-        [order.address1, order.address2].filter(Boolean).join(" ")
-      ),
-      city: text(order.city),
-      state: text(order.state),
-      postal_code: text(order.postal_code),
-      country: text(order.country),
-      country_code: text(order.country_code),
+      username: nullableText(order.buyer_username),
+      name: nullableText(order.recipient_name),
+      country: nullableText(order.country),
+      country_code: nullableText(order.country_code),
 
-      address_key: text(order.address_key) || buildAddressKey(order),
+      quantity: intValue(order.total_quantity ?? order.quantity_total ?? order.count),
 
-      tax_code: text(order.tax_code),
-      shipping_service: text(order.shipping_service),
-
-      subtotal: numberValue(order.subtotal),
-      shipping_fee: numberValue(order.shipping_fee),
-      tax_amount: numberValue(order.tax_amount),
-      refund_amount: numberValue(order.refund_amount),
-      order_total: numberValue(order.order_total),
-
-      total_quantity: intValue(
-        order.total_quantity ?? order.quantity_total ?? order.count
-      ),
-
-      export_price: numberValue(order.export_price ?? order.price),
-
-      process_status: normalizeProcessStatus(order.process_status),
-      shipping_status: normalizeShippingStatus(order.shipping_status),
-
-      memo: text(order.memo),
-      raw_text: text(order.raw_text),
+      shipping_method: shippingMethod,
     };
+  });
 
-    const { data: upserted, error: upsertError } = await supabase
-      .from("orders")
-      .upsert(orderPayload, { onConflict: "order_no" })
-      .select("id")
-      .single();
+  const ebayShippingRows = validOrders.map((order) => {
+    const saleDate = normalizeDate(order.order_date);
+    const shippingMethod = getShippingMethod(order);
+    const exportData =
+      order.shipping_export && typeof order.shipping_export === "object"
+        ? order.shipping_export
+        : {};
 
-    if (upsertError || !upserted?.id) {
-      return NextResponse.json(
-        {
-          error: `주문 저장 실패: ${order.order_no}`,
-          detail: upsertError?.message,
-        },
-        { status: 500 }
-      );
-    }
+    return {
+      sale_date: saleDate,
+      order_number: text(order.order_no),
+      username: nullableText(order.buyer_username),
 
-    savedOrders += 1;
+      shipping_method: shippingMethod,
+      export_data: exportData,
 
-    const orderId = upserted.id;
+      receipt_status: "not_submitted",
+    };
+  });
 
-    const { error: deleteError } = await supabase
-      .from("order_items")
-      .delete()
-      .eq("order_id", orderId);
+  const ebayItemRows = validOrders.map((order) => {
+    const saleDate = normalizeDate(order.order_date);
 
-    if (deleteError) {
-      return NextResponse.json(
-        {
-          error: `기존 item 삭제 실패: ${order.order_no}`,
-          detail: deleteError.message,
-        },
-        { status: 500 }
-      );
-    }
+    return {
+      sale_date: saleDate,
+      order_number: text(order.order_no),
+      username: nullableText(order.buyer_username),
 
-    const items = Array.isArray(order.items) ? order.items : [];
+      quantity: intValue(order.total_quantity ?? order.quantity_total ?? order.count),
+      item_list: nullableText(getItemList(order)),
+    };
+  });
 
-    if (items.length) {
-      const itemPayload = items.map((item) => ({
-        order_id: orderId,
-        item_id: text(item.item_id),
-        title: text(item.title || item.item_title),
-        option_text: text(item.option_text),
+  const { error: orderError } = await supabase
+    .from("ebay_order")
+    .upsert(ebayOrderRows, { onConflict: "order_number" });
 
-        quantity: intValue(item.quantity) || 1,
-        item_price: numberValue(item.item_price),
-        item_total: numberValue(item.item_total),
+  if (orderError) {
+    return NextResponse.json(
+      { error: "ebay_order 저장 실패", detail: orderError.message },
+      { status: 500 }
+    );
+  }
 
-        content_type: text(order.content),
-        hscode: text(order.hscode),
-      }));
+  const { error: shippingError } = await supabase
+    .from("ebay_shipping")
+    .upsert(ebayShippingRows, { onConflict: "order_number" });
 
-      const { error: insertError } = await supabase
-        .from("order_items")
-        .insert(itemPayload);
+  if (shippingError) {
+    return NextResponse.json(
+      { error: "ebay_shipping 저장 실패", detail: shippingError.message },
+      { status: 500 }
+    );
+  }
 
-      if (insertError) {
-        return NextResponse.json(
-          {
-            error: `item 저장 실패: ${order.order_no}`,
-            detail: insertError.message,
-          },
-          { status: 500 }
-        );
-      }
+  const { error: itemError } = await supabase
+    .from("ebay_order_item")
+    .upsert(ebayItemRows, { onConflict: "order_number" });
 
-      savedItems += itemPayload.length;
-    }
+  if (itemError) {
+    return NextResponse.json(
+      { error: "ebay_order_item 저장 실패", detail: itemError.message },
+      { status: 500 }
+    );
   }
 
   return NextResponse.json({
     ok: true,
-    saved: savedOrders,
-    saved_items: savedItems,
+    saved_orders: ebayOrderRows.length,
+    saved_shipping: ebayShippingRows.length,
+    saved_items: ebayItemRows.length,
   });
 }
