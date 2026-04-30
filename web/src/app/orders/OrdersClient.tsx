@@ -421,7 +421,7 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
             {rows.length ? (
               rows.map((row) => {
                 const checked = selectedOrderNumbers.has(row.order_number);
-                const itemText = formatItemList(row.item_list);
+                const itemList = formatItemList(row.item_list);
 
                 return (
                   <tr
@@ -475,18 +475,75 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
 
                     <td style={tdStyle}>{row.tracking_number || "-"}</td>
 
-                    <td
-                      style={{
-                        ...tdStyle,
-                        maxWidth: 520,
-                        whiteSpace: "pre-wrap",
-                        wordBreak: "break-word",
-                        lineHeight: 1.45,
-                      }}
-                      title={row.item_list || ""}
-                    >
-                      {itemText}
-                    </td>
+<td
+  style={{
+    ...tdStyle,
+    maxWidth: 620,
+  }}
+  title={row.item_list || ""}
+>
+  {itemList.length ? (
+    <div
+      style={{
+        background: "#f3f4f6",
+        borderRadius: 8,
+        overflow: "hidden",
+      }}
+    >
+      {itemList.map((item, itemIndex) => {
+        const parts = splitItemParts(item);
+
+        return (
+          <div
+            key={`${row.order_number}-${itemIndex}`}
+            style={{
+              display: "flex",
+              gap: 8,
+              padding: "8px 10px",
+              borderTop: itemIndex === 0 ? "none" : "1px solid #ffffff",
+              lineHeight: 1.45,
+            }}
+          >
+            <div
+              style={{
+                width: 22,
+                flex: "0 0 22px",
+                fontWeight: 800,
+                color: "#374151",
+              }}
+            >
+              {itemIndex + 1}.
+            </div>
+
+            <div
+              style={{
+                flex: 1,
+                minWidth: 0,
+                wordBreak: "break-word",
+              }}
+            >
+              {parts.map((part, partIndex) => (
+                <span
+                  key={partIndex}
+                  style={{
+                    display: part.isOption ? "block" : "inline",
+                    fontWeight: part.isOption ? 800 : 400,
+                    color: part.isOption ? "#111827" : "#111827",
+                    marginTop: part.isOption ? 2 : 0,
+                  }}
+                >
+                  {part.text}
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  ) : (
+    "-"
+  )}
+</td>
                   </tr>
                 );
               })
