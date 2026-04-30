@@ -223,7 +223,7 @@ export default async function HomePage() {
           </Link>
 
           <Link
-            href="/domestic/input"
+            href="/domestic"
             className="card"
             style={{
               textDecoration: "none",
