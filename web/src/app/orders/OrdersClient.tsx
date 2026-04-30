@@ -33,6 +33,14 @@ type RowDraftKey =
 
 type RowDraft = Partial<Record<RowDraftKey, string>>;
 
+type SaveRowResponse = {
+  ok: boolean;
+  order_number: string;
+  shipping_method: string;
+  order_status: string;
+  shipping_label_status: string;
+};
+
 const SHIPPING_METHOD_OPTIONS = [
   { value: "k-packet", label: "K-Packet" },
   { value: "egs", label: "EGS" },
@@ -116,15 +124,21 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
 
   const [rowDrafts, setRowDrafts] = useState<Record<string, RowDraft>>({});
 
+  const [stockoutTouchedOrderNumbers, setStockoutTouchedOrderNumbers] =
+    useState<Set<string>>(() => new Set());
+
   const [savingRowOrderNumber, setSavingRowOrderNumber] = useState<
     string | null
   >(null);
+
+  const [savingAll, setSavingAll] = useState(false);
 
   const selectAllRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setLocalRows(rows);
     setRowDrafts({});
+    setStockoutTouchedOrderNumbers(new Set());
   }, [rows]);
 
   const visibleOrderNumbers = useMemo(
@@ -229,7 +243,7 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
     return row.shipping_label_status || "start";
   }
 
-  function isRowChanged(row: OrderListRow): boolean {
+  function isRowSelectChanged(row: OrderListRow): boolean {
     const draft = rowDrafts[row.order_number];
 
     if (!draft) return false;
@@ -256,6 +270,14 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
     );
   }
 
+  function isRowStockoutTouched(row: OrderListRow): boolean {
+    return stockoutTouchedOrderNumbers.has(row.order_number);
+  }
+
+  function isRowSaveEnabled(row: OrderListRow): boolean {
+    return isRowSelectChanged(row) || isRowStockoutTouched(row);
+  }
+
   function changeRowDraft(
     orderNumber: string,
     key: RowDraftKey,
@@ -270,63 +292,73 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
     }));
   }
 
-  async function saveRow(row: OrderListRow) {
-    if (!isRowChanged(row)) return;
-
+  async function saveRowToServer(row: OrderListRow): Promise<SaveRowResponse> {
     const shippingMethod = getRowDraftValue(row, "shipping_method");
     const orderStatus = getRowDraftValue(row, "order_status");
-    const shippingLabelStatus = getRowDraftValue(
-      row,
-      "shipping_label_status"
+    const shippingLabelStatus = getRowDraftValue(row, "shipping_label_status");
+
+    const response = await fetch("/api/ebay/order-row", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        order_number: row.order_number,
+        shipping_method: shippingMethod,
+        order_status: orderStatus,
+        shipping_label_status: shippingLabelStatus,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorResult = await response.json().catch(() => null);
+
+      throw new Error(
+        errorResult?.detail || errorResult?.error || "주문 행 저장 실패"
+      );
+    }
+
+    return (await response.json()) as SaveRowResponse;
+  }
+
+  function applySavedRow(result: SaveRowResponse) {
+    setLocalRows((prevRows) =>
+      prevRows.map((targetRow) => {
+        if (targetRow.order_number !== result.order_number) {
+          return targetRow;
+        }
+
+        return {
+          ...targetRow,
+          shipping_method: result.shipping_method,
+          label_shipping_method: result.shipping_method,
+          order_status: result.order_status,
+          shipping_label_status: result.shipping_label_status,
+        };
+      })
     );
+
+    setRowDrafts((prev) => {
+      const next = { ...prev };
+      delete next[result.order_number];
+      return next;
+    });
+
+    setStockoutTouchedOrderNumbers((prev) => {
+      const next = new Set(prev);
+      next.delete(result.order_number);
+      return next;
+    });
+  }
+
+  async function saveRow(row: OrderListRow) {
+    if (!isRowSaveEnabled(row)) return;
 
     setSavingRowOrderNumber(row.order_number);
 
     try {
-      const response = await fetch("/api/ebay/order-row", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          order_number: row.order_number,
-          shipping_method: shippingMethod,
-          order_status: orderStatus,
-          shipping_label_status: shippingLabelStatus,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorResult = await response.json().catch(() => null);
-
-        throw new Error(
-          errorResult?.detail || errorResult?.error || "주문 행 저장 실패"
-        );
-      }
-
-      const result = await response.json();
-
-      setLocalRows((prevRows) =>
-        prevRows.map((targetRow) => {
-          if (targetRow.order_number !== row.order_number) {
-            return targetRow;
-          }
-
-          return {
-            ...targetRow,
-            shipping_method: result.shipping_method,
-            label_shipping_method: result.shipping_method,
-            order_status: result.order_status,
-            shipping_label_status: result.shipping_label_status,
-          };
-        })
-      );
-
-      setRowDrafts((prev) => {
-        const next = { ...prev };
-        delete next[row.order_number];
-        return next;
-      });
+      const result = await saveRowToServer(row);
+      applySavedRow(result);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "알 수 없는 오류";
@@ -337,11 +369,63 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
     }
   }
 
+  async function saveSelectedRows() {
+    if (!selectedRows.length) {
+      alert("전체저장할 주문을 선택해줘.");
+      return;
+    }
+
+    const ok = confirm(
+      `선택한 주문 ${selectedRows.length}건을 전체 저장할까?\n\n` +
+        "변경사항이 없는 주문도 현재 화면 값 그대로 저장됩니다."
+    );
+
+    if (!ok) return;
+
+    setSavingAll(true);
+
+    const savedResults: SaveRowResponse[] = [];
+    const errors: string[] = [];
+
+    for (const row of selectedRows) {
+      try {
+        const result = await saveRowToServer(row);
+        savedResults.push(result);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "알 수 없는 오류";
+        errors.push(`${row.order_number}: ${message}`);
+      }
+    }
+
+    savedResults.forEach((result) => {
+      applySavedRow(result);
+    });
+
+    setSavingAll(false);
+
+    if (errors.length) {
+      alert(
+        `일부 저장 실패\n\n성공: ${savedResults.length}건\n실패: ${errors.length}건\n\n` +
+          errors.slice(0, 5).join("\n")
+      );
+      return;
+    }
+
+    alert(`전체저장 완료: ${savedResults.length}건`);
+  }
+
   async function toggleStockoutItem(
     orderNumber: string,
     itemIndex: number,
     checked: boolean
   ) {
+    setStockoutTouchedOrderNumbers((prev) => {
+      const next = new Set(prev);
+      next.add(orderNumber);
+      return next;
+    });
+
     setLocalRows((prevRows) =>
       prevRows.map((row) => {
         if (row.order_number !== orderNumber) return row;
@@ -581,6 +665,23 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
           >
             운송장 업로드 준비중
           </button>
+
+          <button
+            type="button"
+            onClick={saveSelectedRows}
+            disabled={!selectedRows.length || savingAll}
+            style={{
+              padding: "10px 14px",
+              borderRadius: 10,
+              border: "0",
+              background: selectedRows.length && !savingAll ? "#111827" : "#9ca3af",
+              color: "#fff",
+              fontWeight: 800,
+              cursor: selectedRows.length && !savingAll ? "pointer" : "not-allowed",
+            }}
+          >
+            {savingAll ? "전체저장중" : "전체저장"}
+          </button>
         </div>
       </div>
 
@@ -623,7 +724,8 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
               localRows.map((row) => {
                 const checked = selectedOrderNumbers.has(row.order_number);
                 const itemList = formatItemList(row.item_list);
-                const changed = isRowChanged(row);
+                const saveEnabled = isRowSaveEnabled(row);
+                const changed = isRowSelectChanged(row) || isRowStockoutTouched(row);
 
                 return (
                   <tr
@@ -721,19 +823,22 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
                         type="button"
                         onClick={() => saveRow(row)}
                         disabled={
-                          !changed || savingRowOrderNumber === row.order_number
+                          !saveEnabled ||
+                          savingRowOrderNumber === row.order_number ||
+                          savingAll
                         }
                         style={{
                           padding: "7px 10px",
                           borderRadius: 8,
                           border: "0",
-                          background: changed ? "#111827" : "#d1d5db",
+                          background: saveEnabled ? "#111827" : "#d1d5db",
                           color: "#fff",
                           fontSize: 12,
                           fontWeight: 800,
                           cursor:
-                            changed &&
-                            savingRowOrderNumber !== row.order_number
+                            saveEnabled &&
+                            savingRowOrderNumber !== row.order_number &&
+                            !savingAll
                               ? "pointer"
                               : "not-allowed",
                           whiteSpace: "nowrap",
