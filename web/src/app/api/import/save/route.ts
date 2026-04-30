@@ -2,319 +2,209 @@ import { NextResponse } from "next/server";
 
 import { createServiceRoleClient } from "@/lib/supabase/server";
 
-type ImportItem = {
-  item_id?: string;
-  title?: string;
-  item_title?: string;
-  option_text?: string;
-  quantity?: number;
-  item_price?: number;
-  item_total?: number;
-  transaction_id?: string;
+export const runtime = "nodejs";
+
+type ExportRequestBody = {
+  order_numbers?: string[];
 };
 
-type ImportOrder = {
-  selected?: boolean;
-
-  order_no?: string;
-  source_order_nos?: string[];
-  sales_record_no?: string;
-  order_date?: string;
-
-  buyer_username?: string;
-  buyer_email?: string;
-  phone?: string;
-
-  recipient_name?: string;
-  country?: string;
-  country_code?: string;
-
-  subtotal?: number;
-  shipping_fee?: number;
-  tax_amount?: number;
-  refund_amount?: number;
-  order_total?: number;
-
-  quantity_total?: number;
-  total_quantity?: number;
-  count?: number;
-
-  export_price?: number;
-  price?: number | string;
-
-  process_status?: string;
-  order_status?: string;
-
-  shipping_status?: string;
-  shipping_label_status?: string;
-  shipping_method?: string;
-
-  shipping_export?: Record<string, string>;
-
-  itemText?: string;
-  items?: ImportItem[];
+type EbayShippingExportRow = {
+  order_number: string;
+  shipping_method: string | null;
+  shipping_label_status: string | null;
+  export_data: Record<string, unknown> | null;
 };
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "https://ddogagak.github.io",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-};
+const OUTPUT_HEADERS = [
+  "★상품구분",
+  "★수취인명",
+  "수취인EMAIL",
+  "수취인전화국가번호(숫자4자리)",
+  "수취인전화지역번호(숫자4자리)",
+  "수취인전화전화번호(숫자4자리)",
+  "수취인전화국번(숫자4자리)",
+  "★14전화번호",
+  "★16국가코드",
+  "★16국가명",
+  "★15우편번호",
+  "★13상세주소",
+  "★12시/군/구",
+  "★11주/도/시",
+  "수취인 건물명미국행 k-packet 이용할 경우만 입력가능( 영문 공백포함 90자 이내 )",
+  "★총중량",
+  "★내용품",
+  "★개수",
+  "★순중량(g)[ = 품목 1종의 개당중량 * 개수 ](수출우편물 정보관세청 제공 동의시 필수)",
+  "★가격",
+  "단위",
+  "HSCODE(숫자만 10자리)",
+  "생산지",
+  "규격(모델명)",
+  "보험가입여부(Y/N)(미선택시공백가능, 음식물, 전자제품 불가)",
+  "보험가입금액(물품가액을 기입 원\\)",
+  "EMS : EEMS 프리미엄 : PK-Packet : K등기소형 :R",
+  "EMS 비서류 : em,     EMS 서류 : ee, K-Packet : rl, 소형포장물 : re",
+  "고객주문번호( 숫자,영문 30자이내)",
+  "주문인우편번호(숫자6자리)",
+  "주문인주소( 영문 140자이내 공백포함)",
+  "주문인명( 영문 35자이내 공백포함)",
+  "주문인전화국가번호(숫자4자리)",
+  "주문인전화지역번호(숫자4자리)",
+  "주문인전화국번호(숫자4자리)",
+  "주문인전화뒷번호(숫자4자리)",
+  "주문인 전화 전체번호국가번호-지역번호-국번-전화번호( 숫자, - 허용)ex. 86-062-678-1234",
+  "주문인휴대전화지역번호(숫자3자리)",
+  "주문인휴대전화뒷번호(숫자4자리)",
+  "주문인휴대전화국번호(숫자4자리)",
+  "주문인EMAIL( 영문 40자이내)",
+  "주문인 휴대전화 전체지역번호-국번-뒷번호(숫자, - 허용) ex. 010-1234-5678",
+  "수출우편물 정보 관세청 제공 여부(Y/N)",
+  "사업자번호(숫자10자리)",
+  "수출화주이름 또는 상호(수출우편물 정보관세청 제공 동의시 필수)",
+  "수출화주 주소(수출우편물 정보관세청 제공 동의시 필수)",
+  "수출이행등록여부(Y/N)",
+  "수출신고번호1(14~15자리)",
+  "전량분할발송여부(Y:전량,N:분할)",
+  "선기적포장개수",
+  "수출신고번호2(14~15자리)",
+  "전량분할발송여부(Y:전량,N:분할) 1",
+  "선기적포장개수 1",
+  "수출신고번호3(14~15자리)",
+  "전량분할발송여부(Y:전량,N:분할) 3",
+  "선기적포장개수 3",
+  "수출신고번호4(14~15자리)",
+  "선기적포장개수 2",
+  "전량분할발송여부(Y:전량,N:분할) 2",
+  "추천우체국코드(POSA만 사용)5자리숫자",
+  "수출면장여부(Y/N)",
+  "★브라질세금식별번호(* 브라질행 EMS, K-Packet의 경우 필수 입력)",
+  "가로(cm)",
+  "세로(cm)",
+  "높이(cm)",
+  "부피중량 적용 제외 여부(Y/N)",
+  "★IOSS/EORI/TAX NUMBER식별 번호",
+  "상태",
+  "물품",
+  "생성 일시",
+];
 
-const KPACKET_COUNTRIES = new Set([
-  "NZ", "MY", "VN", "BR", "SG", "GB", "AU", "ID", "JP", "CN", "CA", "TH", "TW", "FR", "PH", "HK", "RU", "DE", "ES",
-  "AR", "AT", "BY", "BE", "KH", "CL", "EG", "FI", "HN", "IN", "IE", "IL", "IT", "KZ", "KG", "MX", "MN", "NP", "NL", "NO", "PK", "PE", "PL", "SA", "ZA", "SE", "CH", "TR", "UA", "AE", "UZ",
-]);
+function cleanOrderNumbers(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
 
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 204,
-    headers: corsHeaders,
-  });
+  return Array.from(
+    new Set(value.map((v) => String(v ?? "").trim()).filter(Boolean))
+  );
 }
 
-function json(data: unknown, status = 200) {
-  return NextResponse.json(data, {
-    status,
-    headers: corsHeaders,
-  });
+function cellValue(value: unknown) {
+  if (value === null || value === undefined) return "";
+  return String(value);
 }
 
-function text(value: unknown): string {
-  return String(value ?? "").trim();
+function csvCell(value: unknown) {
+  const text = cellValue(value);
+  return `"${text.replace(/"/g, '""')}"`;
 }
 
-function nullableText(value: unknown): string | null {
-  const v = text(value);
-  return v ? v : null;
+function makeCsv(rows: string[][]) {
+  return rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
 }
 
-function intValue(value: unknown): number {
-  const n = parseInt(String(value ?? "0").replace(/[^0-9-]/g, ""), 10);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function normalizeDate(value?: string): string | null {
-  const raw = text(value);
-  if (!raw) return null;
-
-  const d = new Date(raw);
-  if (Number.isNaN(d.getTime())) return null;
-
-  return d.toISOString();
-}
-
-function normalizeOrderStatus(value: unknown): "ready" | "pending" | "refund" | "contact" | "cancelled" | "completed" {
-  const allowed = new Set([
-    "ready",
-    "pending",
-    "refund",
-    "contact",
-    "cancelled",
-    "completed",
-  ]);
-
-  const v = text(value || "ready");
-
-  if (allowed.has(v)) {
-    return v as "ready" | "pending" | "refund" | "contact" | "cancelled" | "completed";
-  }
-
-  return "ready";
-}
-
-function normalizeShippingLabelStatus(
-  value: unknown
-): "not_exported" | "exported" | "reserved" | "accepted" | "tracking_added" | "shipped" | "issue" {
-  const allowed = new Set([
-    "not_exported",
-    "exported",
-    "reserved",
-    "accepted",
-    "tracking_added",
-    "shipped",
-    "issue",
-  ]);
-
-  const v = text(value || "not_exported");
-
-  if (allowed.has(v)) {
-    return v as "not_exported" | "exported" | "reserved" | "accepted" | "tracking_added" | "shipped" | "issue";
-  }
-
-  return "not_exported";
-}
-
-function getShippingMethod(order: ImportOrder): "k-packet" | "egs" | "check" {
-  const countryCode = text(order.country_code).toUpperCase();
-
-  if (countryCode === "US") return "egs";
-  if (KPACKET_COUNTRIES.has(countryCode)) return "k-packet";
-
-  return "check";
-}
-
-function getSourceOrderNumbers(order: ImportOrder): string[] {
-  if (Array.isArray(order.source_order_nos) && order.source_order_nos.length) {
-    return order.source_order_nos.map(text).filter(Boolean);
-  }
-
-  return text(order.order_no)
-    .split("/")
-    .map(text)
-    .filter(Boolean);
-}
-
-function getItemList(order: ImportOrder): string {
-  const items = Array.isArray(order.items) ? order.items : [];
-
-  const names = items
-    .map((item) => {
-      return [
-        text(item.title || item.item_title),
-        text(item.option_text),
-      ]
-        .filter(Boolean)
-        .join(" ");
-    })
-    .filter(Boolean);
-
-  if (names.length) return names.join("|");
-
-  return text(order.itemText);
+function todayFileDate() {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  return `${yyyy}${mm}${dd}`;
 }
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const orders = (body?.orders || []) as ImportOrder[];
+    const body = (await req.json()) as ExportRequestBody;
+    const orderNumbers = cleanOrderNumbers(body.order_numbers);
 
-    if (!Array.isArray(orders) || !orders.length) {
-      return json({ error: "저장할 주문 데이터가 없습니다." }, 400);
+    if (!orderNumbers.length) {
+      return NextResponse.json(
+        { error: "CSV 추출할 주문번호가 없습니다." },
+        { status: 400 }
+      );
     }
 
     const supabase = createServiceRoleClient();
 
-    const validOrders = orders.filter((order) => text(order.order_no));
-
-    if (!validOrders.length) {
-      return json({ error: "저장 가능한 order_no가 없습니다." }, 400);
-    }
-
-    const ebayOrderRows = validOrders.map((order) => {
-      const saleDate = normalizeDate(order.order_date);
-      const shippingMethod = getShippingMethod(order);
-      const orderStatus = normalizeOrderStatus(order.order_status || order.process_status);
-
-      return {
-        sale_date: saleDate,
-        order_number: text(order.order_no),
-        source_order_numbers: getSourceOrderNumbers(order),
-
-        username: nullableText(order.buyer_username),
-        name: nullableText(order.recipient_name),
-        country: nullableText(order.country),
-        country_code: nullableText(order.country_code),
-
-        quantity: intValue(order.total_quantity ?? order.quantity_total ?? order.count),
-
-        shipping_method: shippingMethod,
-        order_status: orderStatus,
-      };
-    });
-
-    const ebayShippingRows = validOrders.map((order) => {
-      const saleDate = normalizeDate(order.order_date);
-      const shippingMethod = getShippingMethod(order);
-      const shippingLabelStatus = normalizeShippingLabelStatus(
-        order.shipping_label_status || order.shipping_status
-      );
-
-      const exportData =
-        order.shipping_export && typeof order.shipping_export === "object"
-          ? order.shipping_export
-          : {};
-
-      return {
-        sale_date: saleDate,
-        order_number: text(order.order_no),
-        username: nullableText(order.buyer_username),
-
-        shipping_method: shippingMethod,
-        shipping_label_status: shippingLabelStatus,
-
-        export_data: exportData,
-      };
-    });
-
-    const ebayItemRows = validOrders.map((order) => {
-      const saleDate = normalizeDate(order.order_date);
-
-      return {
-        sale_date: saleDate,
-        order_number: text(order.order_no),
-        username: nullableText(order.buyer_username),
-
-        quantity: intValue(order.total_quantity ?? order.quantity_total ?? order.count),
-        item_list: nullableText(getItemList(order)),
-      };
-    });
-
-    const { error: orderError } = await supabase
-      .from("ebay_order")
-      .upsert(ebayOrderRows, { onConflict: "order_number" });
-
-    if (orderError) {
-      return json(
-        {
-          error: "ebay_order 저장 실패",
-          detail: orderError.message,
-        },
-        500
-      );
-    }
-
-    const { error: shippingError } = await supabase
+    const { data, error } = await supabase
       .from("ebay_shipping")
-      .upsert(ebayShippingRows, { onConflict: "order_number" });
+      .select("order_number, shipping_method, shipping_label_status, export_data")
+      .in("order_number", orderNumbers);
 
-    if (shippingError) {
-      return json(
-        {
-          error: "ebay_shipping 저장 실패",
-          detail: shippingError.message,
-        },
-        500
+    if (error) {
+      return NextResponse.json(
+        { error: "배송 데이터 조회 실패", detail: error.message },
+        { status: 500 }
       );
     }
 
-    const { error: itemError } = await supabase
-      .from("ebay_order_item")
-      .upsert(ebayItemRows, { onConflict: "order_number" });
+    const rows = ((data || []) as EbayShippingExportRow[]).filter(
+      (row) => row.shipping_method === "k-packet"
+    );
 
-    if (itemError) {
-      return json(
-        {
-          error: "ebay_order_item 저장 실패",
-          detail: itemError.message,
-        },
-        500
+    if (!rows.length) {
+      return NextResponse.json(
+        { error: "선택한 주문 중 K-Packet 추출 대상이 없습니다." },
+        { status: 400 }
       );
     }
 
-    return json({
-      ok: true,
-      saved_orders: ebayOrderRows.length,
-      saved_shipping: ebayShippingRows.length,
-      saved_items: ebayItemRows.length,
+    const rowMap = new Map(rows.map((row) => [row.order_number, row]));
+
+    const orderedRows = orderNumbers
+      .map((orderNumber) => rowMap.get(orderNumber))
+      .filter(Boolean) as EbayShippingExportRow[];
+
+    const csvRows = [
+      OUTPUT_HEADERS,
+      ...orderedRows.map((row) => {
+        const exportData = row.export_data || {};
+        return OUTPUT_HEADERS.map((header) => cellValue(exportData[header]));
+      }),
+    ];
+
+    const csvText = "\uFEFF" + makeCsv(csvRows);
+
+    const exportedOrderNumbers = orderedRows.map((row) => row.order_number);
+
+    const { error: updateError } = await supabase
+      .from("ebay_shipping")
+      .update({ shipping_label_status: "csv_exported" })
+      .in("order_number", exportedOrderNumbers);
+
+    if (updateError) {
+      return NextResponse.json(
+        {
+          error: "CSV는 생성됐지만 라벨상태 업데이트 실패",
+          detail: updateError.message,
+        },
+        { status: 500 }
+      );
+    }
+
+    const filename = `kpacket_export_${todayFileDate()}.csv`;
+
+    return new NextResponse(csvText, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Cache-Control": "no-store",
+      },
     });
   } catch (error: any) {
-    return json(
+    return NextResponse.json(
       {
-        error: "API 처리 중 오류",
+        error: "K-Packet CSV 추출 중 오류",
         detail: error?.message || "Unknown error",
       },
-      500
+      { status: 500 }
     );
   }
 }
