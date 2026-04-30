@@ -44,15 +44,24 @@ function shortOrderNumber(value: string) {
 }
 
 function formatItemList(value: string | null) {
-  if (!value) return "-";
+  if (!value) return [];
 
   return value
     .split("|")
     .map((part) => part.trim())
-    .filter(Boolean)
-    .join("\n");
+    .filter(Boolean);
 }
 
+function splitItemParts(value: string) {
+  return value
+    .split(/(\[[^\]]*\])/g)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => ({
+      text: part,
+      isOption: part.startsWith("[") && part.endsWith("]"),
+    }));
+}
 function shippingMethodLabel(value: string | null) {
   const map: Record<string, string> = {
     "k-packet": "K-Packet",
