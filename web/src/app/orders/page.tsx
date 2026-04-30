@@ -41,12 +41,11 @@ function firstParam(value: string | string[] | undefined) {
 
 function orderStatusLabel(value: string | null) {
   const map: Record<string, string> = {
-    ready: "처리 가능",
+    accepted: "주문 업로드",
+    check: "재고 확인",
     pending: "확인 필요",
-    refund: "환불 필요",
-    contact: "문의 필요",
-    cancelled: "취소",
-    completed: "완료",
+    refund: "환불/취소",
+    done: "완료",
   };
 
   return value ? map[value] || value : "-";
@@ -54,13 +53,12 @@ function orderStatusLabel(value: string | null) {
 
 function shippingLabelStatusLabel(value: string | null) {
   const map: Record<string, string> = {
-    not_exported: "엑셀 미추출",
-    exported: "CSV 추출",
-    reserved: "예약 완료",
-    accepted: "접수 완료",
-    tracking_added: "운송장 입력",
-    shipped: "발송 완료",
-    issue: "문제 있음",
+    start: "시작",
+    csv_exported: "CSV 추출",
+    created: "라벨작업 완료",
+    printed: "출력 완료",
+    uploaded: "운송장 업로드",
+    done: "배송 완료",
   };
 
   return value ? map[value] || value : "-";
@@ -199,7 +197,7 @@ export default async function OrdersPage({
       shipping_method: order.shipping_method,
       order_status: order.order_status,
       label_shipping_method: shipping?.shipping_method || order.shipping_method || "check",
-      shipping_label_status: shipping?.shipping_label_status || "not_exported",
+      shipping_label_status: shipping?.shipping_label_status || "start",
       tracking_number: shipping?.tracking_number || null,
       item_list: item?.item_list || null,
       stockout_item_indexes: item?.stockout_item_indexes || [],
@@ -209,17 +207,9 @@ export default async function OrdersPage({
   const filteredRows = mergedRows.filter((row) => {
     const rowMethod = row.label_shipping_method || row.shipping_method || "check";
 
-    if (method !== "all" && rowMethod !== method) {
-      return false;
-    }
-
-    if (orderStatus !== "all" && row.order_status !== orderStatus) {
-      return false;
-    }
-
-    if (labelStatus !== "all" && row.shipping_label_status !== labelStatus) {
-      return false;
-    }
+    if (method !== "all" && rowMethod !== method) return false;
+    if (orderStatus !== "all" && row.order_status !== orderStatus) return false;
+    if (labelStatus !== "all" && row.shipping_label_status !== labelStatus) return false;
 
     if (q) {
       const haystack = [
@@ -233,9 +223,7 @@ export default async function OrdersPage({
         .join(" ")
         .toLowerCase();
 
-      if (!haystack.includes(q.toLowerCase())) {
-        return false;
-      }
+      if (!haystack.includes(q.toLowerCase())) return false;
     }
 
     return true;
@@ -343,10 +331,7 @@ export default async function OrdersPage({
               <FilterLink href={buildHref({ method: "all" })} active={method === "all"}>
                 전체
               </FilterLink>
-              <FilterLink
-                href={buildHref({ method: "k-packet" })}
-                active={method === "k-packet"}
-              >
+              <FilterLink href={buildHref({ method: "k-packet" })} active={method === "k-packet"}>
                 K-Packet
               </FilterLink>
               <FilterLink href={buildHref({ method: "egs" })} active={method === "egs"}>
@@ -361,7 +346,7 @@ export default async function OrdersPage({
           <div>
             <div style={{ fontWeight: 800, marginBottom: 8 }}>주문상태</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {["all", "ready", "pending", "refund", "contact", "cancelled", "completed"].map(
+              {["all", "accepted", "check", "pending", "refund", "done"].map(
                 (status) => (
                   <FilterLink
                     key={status}
@@ -380,13 +365,12 @@ export default async function OrdersPage({
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {[
                 "all",
-                "not_exported",
-                "exported",
-                "reserved",
-                "accepted",
-                "tracking_added",
-                "shipped",
-                "issue",
+                "start",
+                "csv_exported",
+                "created",
+                "printed",
+                "uploaded",
+                "done",
               ].map((status) => (
                 <FilterLink
                   key={status}
