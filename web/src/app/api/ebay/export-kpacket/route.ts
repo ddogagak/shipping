@@ -165,21 +165,17 @@ export async function POST(req: Request) {
       OUTPUT_HEADERS,
       ...orderedRows.map((row) => {
         const exportData = row.export_data || {};
-
-        return OUTPUT_HEADERS.map((header) => {
-          return cellValue(exportData[header]);
-        });
+        return OUTPUT_HEADERS.map((header) => cellValue(exportData[header]));
       }),
     ];
 
-    // 기존 index.html에서 뽑던 CSV처럼 UTF-8 BOM 붙임
     const csvText = "\uFEFF" + makeCsv(csvRows);
 
     const exportedOrderNumbers = orderedRows.map((row) => row.order_number);
 
     const { error: updateError } = await supabase
       .from("ebay_shipping")
-      .update({ shipping_label_status: "exported" })
+      .update({ shipping_label_status: "csv_exported" })
       .in("order_number", exportedOrderNumbers);
 
     if (updateError) {
