@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { createServiceRoleClient } from "@/lib/supabase/server";
+import OrdersClient, { type OrderListRow } from "./OrdersClient";
 
 export const dynamic = "force-dynamic";
 
@@ -32,35 +33,9 @@ type EbayItemRow = {
   item_list: string | null;
 };
 
-type MergedRow = EbayOrderRow & {
-  label_shipping_method: string | null;
-  shipping_label_status: string | null;
-  tracking_number: string | null;
-  item_list: string | null;
-};
-
 function firstParam(value: string | string[] | undefined) {
   if (Array.isArray(value)) return value[0] || "";
   return value || "";
-}
-
-function formatDate(value: string | null) {
-  if (!value) return "-";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value.slice(0, 10);
-
-  return date.toISOString().slice(0, 10);
-}
-
-function shippingMethodLabel(value: string | null) {
-  const map: Record<string, string> = {
-    "k-packet": "K-Packet",
-    egs: "EGS",
-    check: "Check",
-  };
-
-  return value ? map[value] || value : "-";
 }
 
 function orderStatusLabel(value: string | null) {
@@ -88,25 +63,6 @@ function shippingLabelStatusLabel(value: string | null) {
   };
 
   return value ? map[value] || value : "-";
-}
-
-function StatusBadge({ children }: { children: React.ReactNode }) {
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        padding: "4px 8px",
-        borderRadius: 999,
-        background: "#f3f4f6",
-        fontSize: 12,
-        fontWeight: 700,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {children}
-    </span>
-  );
 }
 
 function FilterLink({
@@ -226,12 +182,21 @@ export default async function OrdersPage({
 
   const itemMap = new Map(itemRows.map((row) => [row.order_number, row]));
 
-  const mergedRows: MergedRow[] = orders.map((order) => {
+  const mergedRows: OrderListRow[] = orders.map((order) => {
     const shipping = shippingMap.get(order.order_number);
     const item = itemMap.get(order.order_number);
 
     return {
-      ...order,
+      id: order.id,
+      sale_date: order.sale_date,
+      order_number: order.order_number,
+      username: order.username,
+      name: order.name,
+      country: order.country,
+      country_code: order.country_code,
+      quantity: order.quantity,
+      shipping_method: order.shipping_method,
+      order_status: order.order_status,
       label_shipping_method: shipping?.shipping_method || order.shipping_method || "check",
       shipping_label_status: shipping?.shipping_label_status || "not_exported",
       tracking_number: shipping?.tracking_number || null,
@@ -335,24 +300,24 @@ export default async function OrdersPage({
             marginTop: 20,
           }}
         >
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 14, padding: 14 }}>
-            <div style={{ color: "#6b7280", fontSize: 13 }}>전체 주문</div>
-            <strong style={{ fontSize: 28 }}>{totalCount}</strong>
+          <div style={summaryCardStyle}>
+            <div style={summaryLabelStyle}>전체 주문</div>
+            <strong style={summaryNumberStyle}>{totalCount}</strong>
           </div>
 
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 14, padding: 14 }}>
-            <div style={{ color: "#6b7280", fontSize: 13 }}>K-Packet</div>
-            <strong style={{ fontSize: 28 }}>{kpacketCount}</strong>
+          <div style={summaryCardStyle}>
+            <div style={summaryLabelStyle}>K-Packet</div>
+            <strong style={summaryNumberStyle}>{kpacketCount}</strong>
           </div>
 
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 14, padding: 14 }}>
-            <div style={{ color: "#6b7280", fontSize: 13 }}>EGS</div>
-            <strong style={{ fontSize: 28 }}>{egsCount}</strong>
+          <div style={summaryCardStyle}>
+            <div style={summaryLabelStyle}>EGS</div>
+            <strong style={summaryNumberStyle}>{egsCount}</strong>
           </div>
 
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 14, padding: 14 }}>
-            <div style={{ color: "#6b7280", fontSize: 13 }}>Check</div>
-            <strong style={{ fontSize: 28 }}>{checkCount}</strong>
+          <div style={summaryCardStyle}>
+            <div style={summaryLabelStyle}>Check</div>
+            <strong style={summaryNumberStyle}>{checkCount}</strong>
           </div>
         </div>
       </section>
@@ -376,7 +341,10 @@ export default async function OrdersPage({
               <FilterLink href={buildHref({ method: "all" })} active={method === "all"}>
                 전체
               </FilterLink>
-              <FilterLink href={buildHref({ method: "k-packet" })} active={method === "k-packet"}>
+              <FilterLink
+                href={buildHref({ method: "k-packet" })}
+                active={method === "k-packet"}
+              >
                 K-Packet
               </FilterLink>
               <FilterLink href={buildHref({ method: "egs" })} active={method === "egs"}>
@@ -484,198 +452,37 @@ export default async function OrdersPage({
         </div>
       </section>
 
-      <section
-        className="card"
-        style={{
-          marginTop: 16,
-          padding: 20,
-          border: "1px solid #e5e7eb",
-          borderRadius: 16,
-          background: "#fff",
-        }}
-      >
+      {orderError || shippingError || itemError ? (
         <div
           style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 12,
-            flexWrap: "wrap",
-            alignItems: "center",
-            marginBottom: 14,
+            padding: 12,
+            borderRadius: 10,
+            background: "#fee2e2",
+            color: "#991b1b",
+            marginTop: 16,
+            fontWeight: 700,
           }}
         >
-          <div>
-            <h2 style={{ margin: 0 }}>주문 목록</h2>
-            <p style={{ color: "#6b7280", margin: "6px 0 0" }}>
-              현재 조건: {filteredRows.length}건
-            </p>
-          </div>
-
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button
-              type="button"
-              disabled
-              style={{
-                padding: "10px 14px",
-                borderRadius: 10,
-                border: "0",
-                background: "#9ca3af",
-                color: "#fff",
-                fontWeight: 800,
-              }}
-            >
-              선택 K-Packet 엑셀 추출
-            </button>
-
-            <button
-              type="button"
-              disabled
-              style={{
-                padding: "10px 14px",
-                borderRadius: 10,
-                border: "0",
-                background: "#9ca3af",
-                color: "#fff",
-                fontWeight: 800,
-              }}
-            >
-              배송완료 처리
-            </button>
-
-            <button
-              type="button"
-              disabled
-              style={{
-                padding: "10px 14px",
-                borderRadius: 10,
-                border: "1px solid #d1d5db",
-                background: "#f9fafb",
-                color: "#6b7280",
-                fontWeight: 800,
-              }}
-            >
-              운송장 업로드 준비중
-            </button>
-          </div>
+          주문 데이터를 불러오는 중 일부 오류가 발생했습니다.
         </div>
+      ) : null}
 
-        {orderError || shippingError || itemError ? (
-          <div
-            style={{
-              padding: 12,
-              borderRadius: 10,
-              background: "#fee2e2",
-              color: "#991b1b",
-              marginBottom: 12,
-              fontWeight: 700,
-            }}
-          >
-            주문 데이터를 불러오는 중 일부 오류가 발생했습니다.
-          </div>
-        ) : null}
-
-        <div style={{ overflowX: "auto" }}>
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              fontSize: 14,
-              minWidth: 1200,
-            }}
-          >
-            <thead>
-              <tr style={{ background: "#f9fafb" }}>
-                <th style={thStyle}>선택</th>
-                <th style={thStyle}>주문일</th>
-                <th style={thStyle}>주문번호</th>
-                <th style={thStyle}>Username</th>
-                <th style={thStyle}>수취인</th>
-                <th style={thStyle}>국가</th>
-                <th style={thStyle}>수량</th>
-                <th style={thStyle}>배송방식</th>
-                <th style={thStyle}>주문상태</th>
-                <th style={thStyle}>라벨상태</th>
-                <th style={thStyle}>운송장번호</th>
-                <th style={thStyle}>상품목록</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {filteredRows.length ? (
-                filteredRows.map((row) => (
-                  <tr key={row.order_number}>
-                    <td style={tdStyle}>
-                      <input type="checkbox" name="order_number" value={row.order_number} />
-                    </td>
-                    <td style={tdStyle}>{formatDate(row.sale_date)}</td>
-                    <td style={{ ...tdStyle, fontWeight: 800 }}>{row.order_number}</td>
-                    <td style={tdStyle}>{row.username || "-"}</td>
-                    <td style={tdStyle}>{row.name || "-"}</td>
-                    <td style={tdStyle}>
-                      {row.country_code || "-"}
-                      {row.country ? ` · ${row.country}` : ""}
-                    </td>
-                    <td style={tdStyle}>{row.quantity ?? 0}</td>
-                    <td style={tdStyle}>
-                      <StatusBadge>
-                        {shippingMethodLabel(row.label_shipping_method || row.shipping_method)}
-                      </StatusBadge>
-                    </td>
-                    <td style={tdStyle}>
-                      <StatusBadge>{orderStatusLabel(row.order_status)}</StatusBadge>
-                    </td>
-                    <td style={tdStyle}>
-                      <StatusBadge>
-                        {shippingLabelStatusLabel(row.shipping_label_status)}
-                      </StatusBadge>
-                    </td>
-                    <td style={tdStyle}>{row.tracking_number || "-"}</td>
-                    <td
-                      style={{
-                        ...tdStyle,
-                        maxWidth: 360,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                      title={row.item_list || ""}
-                    >
-                      {row.item_list || "-"}
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td
-                    colSpan={12}
-                    style={{
-                      padding: 24,
-                      textAlign: "center",
-                      color: "#6b7280",
-                      borderTop: "1px solid #e5e7eb",
-                    }}
-                  >
-                    조건에 맞는 주문이 없습니다.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <OrdersClient rows={filteredRows} />
     </main>
   );
 }
 
-const thStyle: React.CSSProperties = {
-  textAlign: "left",
-  padding: "10px 8px",
-  borderBottom: "1px solid #e5e7eb",
-  whiteSpace: "nowrap",
+const summaryCardStyle: React.CSSProperties = {
+  border: "1px solid #e5e7eb",
+  borderRadius: 14,
+  padding: 14,
 };
 
-const tdStyle: React.CSSProperties = {
-  padding: "10px 8px",
-  borderBottom: "1px solid #f3f4f6",
-  verticalAlign: "top",
+const summaryLabelStyle: React.CSSProperties = {
+  color: "#6b7280",
+  fontSize: 13,
+};
+
+const summaryNumberStyle: React.CSSProperties = {
+  fontSize: 28,
 };
