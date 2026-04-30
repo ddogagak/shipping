@@ -31,6 +31,7 @@ type EbayShippingRow = {
 type EbayItemRow = {
   order_number: string;
   item_list: string | null;
+  stockout_item_indexes: number[] | null;
 };
 
 function firstParam(value: string | string[] | undefined) {
