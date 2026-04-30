@@ -405,6 +405,18 @@ export async function POST(req: Request) {
       );
     }
 
+
+
+const result = {
+  ok: true,
+  saved: freshOrders.length,
+  skipped_count: skipped.length,
+  skipped,
+};
+
+
+
+    
     return NextResponse.json({
       ok: true,
       saved: freshOrders.length,
