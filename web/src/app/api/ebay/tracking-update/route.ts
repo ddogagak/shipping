@@ -184,6 +184,14 @@ export async function POST(req: Request) {
       inserted_count += 1;
     }
 
+
+
+    if (updated_count > 0 || inserted_count > 0) {
+  await supabase.from("admin_activity_log").insert({
+    activity_type: "tracking_upload",
+  });
+}
+
     return NextResponse.json({
       ok: true,
       updated_count,
