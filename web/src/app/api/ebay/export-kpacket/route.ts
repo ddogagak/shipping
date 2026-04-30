@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import * as XLSX from "xlsx";
 
 import { createServiceRoleClient } from "@/lib/supabase/server";
 
@@ -93,17 +92,22 @@ function cleanOrderNumbers(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
 
   return Array.from(
-    new Set(
-      value
-        .map((v) => String(v ?? "").trim())
-        .filter(Boolean)
-    )
+    new Set(value.map((v) => String(v ?? "").trim()).filter(Boolean))
   );
 }
 
 function cellValue(value: unknown) {
   if (value === null || value === undefined) return "";
   return String(value);
+}
+
+function csvCell(value: unknown) {
+  const text = cellValue(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function makeCsv(rows: string[][]) {
+  return rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
 }
 
 function todayFileDate() {
@@ -121,7 +125,7 @@ export async function POST(req: Request) {
 
     if (!orderNumbers.length) {
       return NextResponse.json(
-        { error: "엑셀 추출할 주문번호가 없습니다." },
+        { error: "CSV 추출할 주문번호가 없습니다." },
         { status: 400 }
       );
     }
@@ -157,7 +161,7 @@ export async function POST(req: Request) {
       .map((orderNumber) => rowMap.get(orderNumber))
       .filter(Boolean) as EbayShippingExportRow[];
 
-    const sheetData = [
+    const csvRows = [
       OUTPUT_HEADERS,
       ...orderedRows.map((row) => {
         const exportData = row.export_data || {};
@@ -168,19 +172,8 @@ export async function POST(req: Request) {
       }),
     ];
 
-    const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
-
-    worksheet["!cols"] = OUTPUT_HEADERS.map((header) => ({
-      wch: Math.min(Math.max(header.length + 2, 12), 36),
-    }));
-
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "K-Packet");
-
-    const workbookArray = XLSX.write(workbook, {
-      bookType: "xlsx",
-      type: "array",
-    }) as ArrayBuffer;
+    // 기존 index.html에서 뽑던 CSV처럼 UTF-8 BOM 붙임
+    const csvText = "\uFEFF" + makeCsv(csvRows);
 
     const exportedOrderNumbers = orderedRows.map((row) => row.order_number);
 
@@ -192,20 +185,19 @@ export async function POST(req: Request) {
     if (updateError) {
       return NextResponse.json(
         {
-          error: "엑셀은 생성됐지만 라벨상태 업데이트 실패",
+          error: "CSV는 생성됐지만 라벨상태 업데이트 실패",
           detail: updateError.message,
         },
         { status: 500 }
       );
     }
 
-    const filename = `kpacket_export_${todayFileDate()}.xlsx`;
+    const filename = `kpacket_export_${todayFileDate()}.csv`;
 
-    return new NextResponse(workbookArray, {
+    return new NextResponse(csvText, {
       status: 200,
       headers: {
-        "Content-Type":
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="${filename}"`,
         "Cache-Control": "no-store",
       },
@@ -213,7 +205,7 @@ export async function POST(req: Request) {
   } catch (error: any) {
     return NextResponse.json(
       {
-        error: "K-Packet 엑셀 추출 중 오류",
+        error: "K-Packet CSV 추출 중 오류",
         detail: error?.message || "Unknown error",
       },
       { status: 500 }
