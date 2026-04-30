@@ -5,6 +5,7 @@ import { createServiceRoleClient } from "@/lib/supabase/server";
 export const runtime = "nodejs";
 
 type Carrier = "k-packet" | "egs";
+type NextStatus = "printed" | "uploaded" | "done";
 
 type OrderRow = {
   order_number: string;
@@ -29,43 +30,35 @@ type DbOrder = OrderRow & {
   tracking_number: string | null;
 };
 
-type ParsedTrackingRow = {
-  row_index: number;
-  carrier: Carrier;
-  original_order_number: string;
-  order_suffixes: string[];
-  recipient_name: string;
-  country_code: string;
-  tracking_number: string;
-  local_tracking_number: string;
-  transmission_result: string;
-  next_shipping_label_status: "printed" | "uploaded" | "done";
-};
+function normalize(value: unknown) {
+  return String(value ?? "").trim();
+}
 
 function normalizeCarrier(value: unknown): Carrier | null {
-  const v = String(value ?? "").trim().toLowerCase();
+  const v = normalize(value).toLowerCase();
   if (v === "k-packet" || v === "kpacket") return "k-packet";
   if (v === "egs" || v === "lincos" || v === "린코스") return "egs";
   return null;
 }
 
-function normalizeText(value: unknown) {
-  return String(value ?? "").trim();
-}
-
 function normalizeName(value: unknown) {
-  return normalizeText(value).replace(/\s+/g, " ").toLowerCase();
+  return normalize(value).replace(/\s+/g, " ").toLowerCase();
 }
 
 function normalizeCountry(value: unknown) {
-  return normalizeText(value).toUpperCase();
+  return normalize(value).toUpperCase();
 }
 
 function normalizeHeader(value: unknown) {
-  return normalizeText(value)
+  return normalize(value)
     .replace(/^\uFEFF/, "")
     .replace(/[\s_\-()]/g, "")
     .toLowerCase();
+}
+
+function lastOrderSuffix(value: unknown) {
+  const matches = normalize(value).match(/\d{5}/g) || [];
+  return matches.length ? matches[matches.length - 1] : "";
 }
 
 function parseCsv(text: string): string[][] {
@@ -131,32 +124,34 @@ function makeRecord(headers: string[], row: string[]) {
 
 function pick(record: Record<string, string>, names: string[]) {
   for (const name of names) {
-    const key = normalizeHeader(name);
-    const value = record[key];
-    if (value !== undefined && String(value).trim() !== "") return String(value).trim();
+    const value = record[normalizeHeader(name)];
+    if (value !== undefined && normalize(value)) return normalize(value);
   }
   return "";
 }
 
-function orderSuffixes(value: unknown): string[] {
-  const text = normalizeText(value);
-  const matches = text.match(/\d{5}/g) || [];
-  const last = matches[matches.length - 1];
-  return last ? [last] : [];
-}
-
 function dbOrderSuffixes(order: DbOrder): string[] {
   const values = [order.order_number, ...(order.source_order_numbers || [])];
-  return Array.from(new Set(values.flatMap((value) => orderSuffixes(value))));
+  return Array.from(new Set(values.map(lastOrderSuffix).filter(Boolean)));
 }
 
-function statusForEgs(localTrackingNumber: string, transmissionResult: string) {
-  if (normalizeText(localTrackingNumber)) return "done" as const;
-  if (normalizeText(transmissionResult) === "전송완료") return "uploaded" as const;
-  return "printed" as const;
+function getKPacketStatus(deliveryProgress: string): NextStatus {
+  const value = normalize(deliveryProgress);
+
+  if (value.includes("접수")) {
+    return "done";
+  }
+
+  return "uploaded";
 }
 
-function parseKPacketRows(csvText: string): ParsedTrackingRow[] {
+function getEgsStatus(localTrackingNumber: string, transmissionResult: string): NextStatus {
+  if (normalize(localTrackingNumber)) return "done";
+  if (normalize(transmissionResult) === "전송완료") return "uploaded";
+  return "printed";
+}
+
+function parseKPacketRows(csvText: string) {
   const rows = parseCsv(csvText);
   if (rows.length < 2) return [];
 
@@ -164,22 +159,50 @@ function parseKPacketRows(csvText: string): ParsedTrackingRow[] {
 
   return rows.slice(1).map((row, index) => {
     const record = makeRecord(headers, row);
-    const originalOrderNumber = pick(record, ["고객주문번호", "주문번호", "order_number"]);
-    const trackingNumber = pick(record, ["등기번호", "운송장번호", "tracking_number"]);
-    const recipientName = pick(record, ["수취인명", "받는사람", "recipient_name", "name"]);
-    const countryCode = pick(record, ["수취인국가코드", "국가코드", "country_code"]);
+
+    const originalOrderNumber = pick(record, [
+      "고객주문번호",
+      "주문번호",
+      "order_number",
+    ]);
+
+    const trackingNumber = pick(record, [
+      "등기번호",
+      "운송장번호",
+      "tracking_number",
+    ]);
+
+    const recipientName = pick(record, [
+      "수취인명",
+      "받는사람",
+      "recipient_name",
+      "name",
+    ]);
+
+    const countryCode = pick(record, [
+      "수취인 국가코드",
+      "수취인국가코드",
+      "국가코드",
+      "country_code",
+    ]);
+
+    const deliveryProgress = pick(record, [
+      "배송진행상태",
+      "배송 진행상태",
+      "배송상태",
+    ]);
 
     return {
       row_index: index + 1,
-      carrier: "k-packet",
+      carrier: "k-packet" as const,
       original_order_number: originalOrderNumber,
-      order_suffixes: orderSuffixes(originalOrderNumber),
+      order_suffixes: [lastOrderSuffix(originalOrderNumber)].filter(Boolean),
       recipient_name: recipientName,
       country_code: normalizeCountry(countryCode),
       tracking_number: trackingNumber,
       local_tracking_number: "",
-      transmission_result: "",
-      next_shipping_label_status: "uploaded",
+      transmission_result: deliveryProgress,
+      next_shipping_label_status: getKPacketStatus(deliveryProgress),
     };
   });
 }
@@ -189,7 +212,7 @@ function splitPastedLine(line: string): string[] {
   return line.split(/\s{2,}/g).map((v) => v.trim());
 }
 
-function parseEgsRows(text: string): ParsedTrackingRow[] {
+function parseEgsRows(text: string) {
   const lines = text
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
@@ -204,37 +227,71 @@ function parseEgsRows(text: string): ParsedTrackingRow[] {
   return lines.slice(1).map((line, index) => {
     const row = splitPastedLine(line);
     const record = makeRecord(headers, row);
-    const originalOrderNumber = pick(record, ["주문번호", "고객주문번호", "order_number"]);
-    const trackingNumber = pick(record, ["린코스송장번호", "송장번호", "운송장번호", "tracking_number"]);
-    const localTrackingNumber = pick(record, ["현지송장번호", "local_tracking_number"]);
-    const recipientName = pick(record, ["받는사람", "수취인명", "recipient_name", "name"]);
-    const countryCode = pick(record, ["수취인국가코드", "국가코드", "country_code"]);
-    const transmissionResult = pick(record, ["전송결과", "transmission_result"]);
+
+    const originalOrderNumber = pick(record, [
+      "주문번호",
+      "고객주문번호",
+      "order_number",
+    ]);
+
+    const trackingNumber = pick(record, [
+      "린코스송장번호",
+      "송장번호",
+      "운송장번호",
+      "tracking_number",
+    ]);
+
+    const localTrackingNumber = pick(record, [
+      "현지송장번호",
+      "local_tracking_number",
+    ]);
+
+    const recipientName = pick(record, [
+      "받는사람",
+      "수취인명",
+      "recipient_name",
+      "name",
+    ]);
+
+    const countryCode = pick(record, [
+      "국가코드",
+      "country_code",
+    ]);
+
+    const transmissionResult = pick(record, [
+      "전송결과",
+      "transmission_result",
+    ]);
 
     return {
       row_index: index + 1,
-      carrier: "egs",
+      carrier: "egs" as const,
       original_order_number: originalOrderNumber,
-      order_suffixes: orderSuffixes(originalOrderNumber),
+      order_suffixes: [lastOrderSuffix(originalOrderNumber)].filter(Boolean),
       recipient_name: recipientName,
       country_code: normalizeCountry(countryCode),
       tracking_number: trackingNumber,
       local_tracking_number: localTrackingNumber,
       transmission_result: transmissionResult,
-      next_shipping_label_status: statusForEgs(localTrackingNumber, transmissionResult),
+      next_shipping_label_status: getEgsStatus(
+        localTrackingNumber,
+        transmissionResult
+      ),
     };
   });
 }
 
-function findMatch(parsed: ParsedTrackingRow, dbOrders: DbOrder[]) {
-  const suffixSet = new Set(parsed.order_suffixes);
+function findMatch(
+  parsed: ReturnType<typeof parseKPacketRows>[number] | ReturnType<typeof parseEgsRows>[number],
+  dbOrders: DbOrder[]
+) {
+  const suffix = parsed.order_suffixes[0] || "";
   const nameKey = normalizeName(parsed.recipient_name);
   const countryKey = normalizeCountry(parsed.country_code);
 
-  let candidates = dbOrders.filter((order) => {
-    const dbSuffixes = dbOrderSuffixes(order);
-    return dbSuffixes.some((suffix) => suffixSet.has(suffix));
-  });
+  let candidates = dbOrders.filter((order) =>
+    dbOrderSuffixes(order).includes(suffix)
+  );
 
   if (parsed.carrier === "egs") {
     candidates = candidates.filter((order) => {
@@ -253,10 +310,20 @@ function findMatch(parsed: ParsedTrackingRow, dbOrders: DbOrder[]) {
   }
 
   if (parsed.carrier === "k-packet" && nameKey) {
-    const nameCandidates = dbOrders.filter((order) => normalizeName(order.name) === nameKey);
+    const nameCandidates = dbOrders.filter((order) => {
+      const sameName = normalizeName(order.name) === nameKey;
+
+      if (countryKey) {
+        return sameName && normalizeCountry(order.country_code) === countryKey;
+      }
+
+      return sameName;
+    });
+
     if (nameCandidates.length === 1) {
       return { status: "matched_by_name" as const, candidates: nameCandidates };
     }
+
     if (nameCandidates.length > 1) {
       return { status: "duplicate_candidate" as const, candidates: nameCandidates };
     }
@@ -271,63 +338,97 @@ export async function POST(req: Request) {
     const carrier = normalizeCarrier(formData.get("carrier"));
 
     if (!carrier) {
-      return NextResponse.json({ error: "carrier가 올바르지 않습니다." }, { status: 400 });
+      return NextResponse.json(
+        { error: "carrier가 올바르지 않습니다." },
+        { status: 400 }
+      );
     }
 
-    let parsedRows: ParsedTrackingRow[] = [];
+    let parsedRows:
+      | ReturnType<typeof parseKPacketRows>
+      | ReturnType<typeof parseEgsRows> = [];
 
     if (carrier === "k-packet") {
       const file = formData.get("file");
+
       if (!(file instanceof File)) {
-        return NextResponse.json({ error: "K-Packet CSV 파일이 없습니다." }, { status: 400 });
+        return NextResponse.json(
+          { error: "K-Packet CSV 파일이 없습니다." },
+          { status: 400 }
+        );
       }
+
       parsedRows = parseKPacketRows(await file.text());
     } else {
-      const text = normalizeText(formData.get("text"));
+      const text = normalize(formData.get("text"));
+
       if (!text) {
-        return NextResponse.json({ error: "EGS/린코스 붙여넣기 내용이 없습니다." }, { status: 400 });
+        return NextResponse.json(
+          { error: "EGS/린코스 붙여넣기 내용이 없습니다." },
+          { status: 400 }
+        );
       }
+
       parsedRows = parseEgsRows(text);
     }
 
     if (!parsedRows.length) {
-      return NextResponse.json({ error: "파싱된 운송장 행이 없습니다." }, { status: 400 });
+      return NextResponse.json(
+        { error: "파싱된 운송장 행이 없습니다." },
+        { status: 400 }
+      );
     }
 
     const supabase = createServiceRoleClient();
 
     const { data: orderRows, error: orderError } = await supabase
       .from("ebay_order")
-      .select("order_number, source_order_numbers, username, name, country, country_code, order_status");
+      .select(
+        "order_number, source_order_numbers, username, name, country, country_code, order_status"
+      );
 
     if (orderError) {
-      return NextResponse.json({ error: "주문 조회 실패", detail: orderError.message }, { status: 500 });
+      return NextResponse.json(
+        { error: "주문 조회 실패", detail: orderError.message },
+        { status: 500 }
+      );
     }
 
     const { data: shippingRows, error: shippingError } = await supabase
       .from("ebay_shipping")
-      .select("order_number, shipping_method, shipping_label_status, tracking_number");
+      .select(
+        "order_number, shipping_method, shipping_label_status, tracking_number"
+      );
 
     if (shippingError) {
-      return NextResponse.json({ error: "배송정보 조회 실패", detail: shippingError.message }, { status: 500 });
+      return NextResponse.json(
+        { error: "배송정보 조회 실패", detail: shippingError.message },
+        { status: 500 }
+      );
     }
 
     const shippingMap = new Map(
-      ((shippingRows || []) as ShippingRow[]).map((row) => [row.order_number, row])
+      ((shippingRows || []) as ShippingRow[]).map((row) => [
+        row.order_number,
+        row,
+      ])
     );
 
-    const dbOrders: DbOrder[] = ((orderRows || []) as OrderRow[]).map((order) => {
-      const shipping = shippingMap.get(order.order_number);
-      return {
-        ...order,
-        shipping_method: shipping?.shipping_method || null,
-        shipping_label_status: shipping?.shipping_label_status || null,
-        tracking_number: shipping?.tracking_number || null,
-      };
-    });
+    const dbOrders: DbOrder[] = ((orderRows || []) as OrderRow[]).map(
+      (order) => {
+        const shipping = shippingMap.get(order.order_number);
+
+        return {
+          ...order,
+          shipping_method: shipping?.shipping_method || null,
+          shipping_label_status: shipping?.shipping_label_status || null,
+          tracking_number: shipping?.tracking_number || null,
+        };
+      }
+    );
 
     const resultRows = parsedRows.map((row) => {
-      const missingTracking = !normalizeText(row.tracking_number);
+      const missingTracking = !normalize(row.tracking_number);
       const match = findMatch(row, dbOrders);
       const selectedCandidate = match.candidates[0] || null;
 
@@ -338,8 +439,11 @@ export async function POST(req: Request) {
         db_name: selectedCandidate?.name || "",
         db_country_code: selectedCandidate?.country_code || "",
         current_tracking_number: selectedCandidate?.tracking_number || "",
-        current_shipping_label_status: selectedCandidate?.shipping_label_status || "",
-        candidate_order_numbers: match.candidates.map((candidate) => candidate.order_number),
+        current_shipping_label_status:
+          selectedCandidate?.shipping_label_status || "",
+        candidate_order_numbers: match.candidates.map(
+          (candidate) => candidate.order_number
+        ),
         candidate_orders: match.candidates.map((candidate) => ({
           order_number: candidate.order_number,
           name: candidate.name || "",
@@ -348,7 +452,10 @@ export async function POST(req: Request) {
           shipping_label_status: candidate.shipping_label_status || "",
           tracking_number: candidate.tracking_number || "",
         })),
-        selected: !missingTracking && (match.status === "matched_by_order" || match.status === "matched_by_name"),
+        selected:
+          !missingTracking &&
+          (match.status === "matched_by_order" ||
+            match.status === "matched_by_name"),
       };
     });
 
@@ -360,7 +467,10 @@ export async function POST(req: Request) {
     });
   } catch (error: any) {
     return NextResponse.json(
-      { error: "운송장 미리보기 처리 중 오류", detail: error?.message || "Unknown error" },
+      {
+        error: "운송장 미리보기 처리 중 오류",
+        detail: error?.message || "Unknown error",
+      },
       { status: 500 }
     );
   }
