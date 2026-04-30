@@ -284,9 +284,9 @@ export async function POST(req: Request) {
     const skipped: Array<{ order_number: string; username: string; reason: string }> = [];
     const freshOrders: any[] = [];
 
-    rows.forEach((order) => {
+    rows.forEach((order: any) => {
       if (!order.selected) return;
-
+    
       const orderNumber = cleanText(order.order_no || order.order_number);
       const username = cleanText(order.buyer_username || order.username);
       const key = duplicateKey(username, orderNumber);
