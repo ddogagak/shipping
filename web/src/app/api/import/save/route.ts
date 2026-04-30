@@ -15,6 +15,7 @@ type ImportItem = {
 
 type ImportOrder = {
   selected?: boolean;
+
   order_no?: string;
   source_order_nos?: string[];
   sales_record_no?: string;
@@ -41,7 +42,13 @@ type ImportOrder = {
   export_price?: number;
   price?: number | string;
 
+  process_status?: string;
+  order_status?: string;
+
+  shipping_status?: string;
+  shipping_label_status?: string;
   shipping_method?: string;
+
   shipping_export?: Record<string, string>;
 
   itemText?: string;
@@ -56,7 +63,7 @@ const corsHeaders = {
 
 const KPACKET_COUNTRIES = new Set([
   "NZ", "MY", "VN", "BR", "SG", "GB", "AU", "ID", "JP", "CN", "CA", "TH", "TW", "FR", "PH", "HK", "RU", "DE", "ES",
-  "AR", "AT", "BY", "BE", "KH", "CL", "EG", "FI", "HN", "IN", "IE", "IL", "IT", "KZ", "KG", "MX", "MN", "NP", "NL", "NO", "PK", "PE", "PL", "SA", "ZA", "SE", "CH", "TR", "UA", "AE", "UZ"
+  "AR", "AT", "BY", "BE", "KH", "CL", "EG", "FI", "HN", "IN", "IE", "IL", "IT", "KZ", "KG", "MX", "MN", "NP", "NL", "NO", "PK", "PE", "PL", "SA", "ZA", "SE", "CH", "TR", "UA", "AE", "UZ",
 ]);
 
 export async function OPTIONS() {
@@ -97,6 +104,47 @@ function normalizeDate(value?: string): string | null {
   return d.toISOString();
 }
 
+function normalizeOrderStatus(value: unknown): "ready" | "pending" | "refund" | "contact" | "cancelled" | "completed" {
+  const allowed = new Set([
+    "ready",
+    "pending",
+    "refund",
+    "contact",
+    "cancelled",
+    "completed",
+  ]);
+
+  const v = text(value || "ready");
+
+  if (allowed.has(v)) {
+    return v as "ready" | "pending" | "refund" | "contact" | "cancelled" | "completed";
+  }
+
+  return "ready";
+}
+
+function normalizeShippingLabelStatus(
+  value: unknown
+): "not_exported" | "exported" | "reserved" | "accepted" | "tracking_added" | "shipped" | "issue" {
+  const allowed = new Set([
+    "not_exported",
+    "exported",
+    "reserved",
+    "accepted",
+    "tracking_added",
+    "shipped",
+    "issue",
+  ]);
+
+  const v = text(value || "not_exported");
+
+  if (allowed.has(v)) {
+    return v as "not_exported" | "exported" | "reserved" | "accepted" | "tracking_added" | "shipped" | "issue";
+  }
+
+  return "not_exported";
+}
+
 function getShippingMethod(order: ImportOrder): "k-packet" | "egs" | "check" {
   const countryCode = text(order.country_code).toUpperCase();
 
@@ -122,7 +170,10 @@ function getItemList(order: ImportOrder): string {
 
   const names = items
     .map((item) => {
-      return [text(item.title || item.item_title), text(item.option_text)]
+      return [
+        text(item.title || item.item_title),
+        text(item.option_text),
+      ]
         .filter(Boolean)
         .join(" ");
     })
@@ -153,6 +204,7 @@ export async function POST(req: Request) {
     const ebayOrderRows = validOrders.map((order) => {
       const saleDate = normalizeDate(order.order_date);
       const shippingMethod = getShippingMethod(order);
+      const orderStatus = normalizeOrderStatus(order.order_status || order.process_status);
 
       return {
         sale_date: saleDate,
@@ -167,12 +219,17 @@ export async function POST(req: Request) {
         quantity: intValue(order.total_quantity ?? order.quantity_total ?? order.count),
 
         shipping_method: shippingMethod,
+        order_status: orderStatus,
       };
     });
 
     const ebayShippingRows = validOrders.map((order) => {
       const saleDate = normalizeDate(order.order_date);
       const shippingMethod = getShippingMethod(order);
+      const shippingLabelStatus = normalizeShippingLabelStatus(
+        order.shipping_label_status || order.shipping_status
+      );
+
       const exportData =
         order.shipping_export && typeof order.shipping_export === "object"
           ? order.shipping_export
@@ -184,9 +241,9 @@ export async function POST(req: Request) {
         username: nullableText(order.buyer_username),
 
         shipping_method: shippingMethod,
-        export_data: exportData,
+        shipping_label_status: shippingLabelStatus,
 
-        receipt_status: "not_submitted",
+        export_data: exportData,
       };
     });
 
@@ -209,7 +266,10 @@ export async function POST(req: Request) {
 
     if (orderError) {
       return json(
-        { error: "ebay_order 저장 실패", detail: orderError.message },
+        {
+          error: "ebay_order 저장 실패",
+          detail: orderError.message,
+        },
         500
       );
     }
@@ -220,7 +280,10 @@ export async function POST(req: Request) {
 
     if (shippingError) {
       return json(
-        { error: "ebay_shipping 저장 실패", detail: shippingError.message },
+        {
+          error: "ebay_shipping 저장 실패",
+          detail: shippingError.message,
+        },
         500
       );
     }
@@ -231,7 +294,10 @@ export async function POST(req: Request) {
 
     if (itemError) {
       return json(
-        { error: "ebay_order_item 저장 실패", detail: itemError.message },
+        {
+          error: "ebay_order_item 저장 실패",
+          detail: itemError.message,
+        },
         500
       );
     }
