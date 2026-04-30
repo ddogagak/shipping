@@ -640,16 +640,92 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
     }
   }
 
-  function handleCompleteShipping() {
+  async function saveBulkRows(
+    actionLabel: string,
+    patch: Partial<Record<RowDraftKey, string>>
+  ) {
     if (!selectedRows.length) {
-      alert("배송완료 처리할 주문을 선택해줘.");
+      alert(`${actionLabel}할 주문을 선택해줘.`);
       return;
     }
 
-    alert(
-      `선택된 주문 ${selectedRows.length}건.\n` +
-        "다음 단계에서 배송완료 처리 API를 연결하면 돼."
-    );
+    const ok = confirm(`선택한 주문 ${selectedRows.length}건을 ${actionLabel}할까?`);
+    if (!ok) return;
+
+    setSavingAll(true);
+
+    const savedResults: SaveRowResponse[] = [];
+    const errors: string[] = [];
+
+    for (const row of selectedRows) {
+      const shippingMethod =
+        patch.shipping_method || getRowDraftValue(row, "shipping_method");
+      const orderStatus = patch.order_status || getRowDraftValue(row, "order_status");
+      const shippingLabelStatus =
+        patch.shipping_label_status ||
+        getRowDraftValue(row, "shipping_label_status");
+
+      try {
+        const response = await fetch("/api/ebay/order-row", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            order_number: row.order_number,
+            shipping_method: shippingMethod,
+            order_status: orderStatus,
+            shipping_label_status: shippingLabelStatus,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorResult = await response.json().catch(() => null);
+          throw new Error(
+            errorResult?.detail || errorResult?.error || `${actionLabel} 실패`
+          );
+        }
+
+        savedResults.push((await response.json()) as SaveRowResponse);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "알 수 없는 오류";
+        errors.push(`${row.order_number}: ${message}`);
+      }
+    }
+
+    savedResults.forEach((result) => applySavedRow(result));
+
+    setSavingAll(false);
+
+    if (errors.length) {
+      alert(
+        `${actionLabel} 일부 실패\n\n성공: ${savedResults.length}건\n실패: ${errors.length}건\n\n` +
+          errors.slice(0, 5).join("\n")
+      );
+      return;
+    }
+
+    alert(`${actionLabel} 완료: ${savedResults.length}건`);
+  }
+
+  function handleCompleteShipping() {
+    void saveBulkRows("배송완료 처리", {
+      order_status: "done",
+      shipping_label_status: "done",
+    });
+  }
+
+  function handleCompleteOrder() {
+    void saveBulkRows("주문상태 완료 처리", {
+      order_status: "done",
+    });
+  }
+
+  function handleCheckOrder() {
+    void saveBulkRows("재고 확인 처리", {
+      order_status: "check",
+    });
   }
 
   return (
@@ -716,18 +792,52 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
           <button
             type="button"
             onClick={handleCompleteShipping}
-            disabled={!selectedRows.length}
+            disabled={!selectedRows.length || savingAll}
             style={{
               padding: "10px 14px",
               borderRadius: 10,
               border: "0",
-              background: selectedRows.length ? "#16a34a" : "#9ca3af",
+              background: selectedRows.length && !savingAll ? "#16a34a" : "#9ca3af",
               color: "#fff",
               fontWeight: 800,
-              cursor: selectedRows.length ? "pointer" : "not-allowed",
+              cursor: selectedRows.length && !savingAll ? "pointer" : "not-allowed",
             }}
           >
             배송완료 처리
+          </button>
+
+          <button
+            type="button"
+            onClick={handleCompleteOrder}
+            disabled={!selectedRows.length || savingAll}
+            style={{
+              padding: "10px 14px",
+              borderRadius: 10,
+              border: "0",
+              background: selectedRows.length && !savingAll ? "#7c3aed" : "#9ca3af",
+              color: "#fff",
+              fontWeight: 800,
+              cursor: selectedRows.length && !savingAll ? "pointer" : "not-allowed",
+            }}
+          >
+            주문완료 처리
+          </button>
+
+          <button
+            type="button"
+            onClick={handleCheckOrder}
+            disabled={!selectedRows.length || savingAll}
+            style={{
+              padding: "10px 14px",
+              borderRadius: 10,
+              border: "0",
+              background: selectedRows.length && !savingAll ? "#f59e0b" : "#9ca3af",
+              color: "#111827",
+              fontWeight: 800,
+              cursor: selectedRows.length && !savingAll ? "pointer" : "not-allowed",
+            }}
+          >
+            재고확인 처리
           </button>
 
           <button
@@ -745,21 +855,6 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
             }}
           >
             선택 해제
-          </button>
-
-          <button
-            type="button"
-            disabled
-            style={{
-              padding: "10px 14px",
-              borderRadius: 10,
-              border: "1px solid #d1d5db",
-              background: "#f9fafb",
-              color: "#6b7280",
-              fontWeight: 800,
-            }}
-          >
-            운송장 업로드 준비중
           </button>
 
           <button
