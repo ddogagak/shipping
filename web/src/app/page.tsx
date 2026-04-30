@@ -240,20 +240,23 @@ export default async function HomePage() {
             </p>
           </Link>
 
-          <a
-            href="https://ddogagak.github.io/shipping/"
-            target="_blank"
-            rel="noreferrer"
-            className="card"
-            style={{
-              textDecoration: "none",
-              color: "inherit",
-              padding: 20,
-              border: "1px solid #fde68a",
-              borderRadius: 16,
-              background: "#fff8d7",
-            }}
-          >
+        <Link
+          href="/order-upload"
+          className="card"
+          style={{
+            textDecoration: "none",
+            color: "inherit",
+            padding: 20,
+            border: "1px solid #fde68a",
+            borderRadius: 16,
+            background: "#fff8d7",
+          }}
+        >
+          <div style={{ fontSize: 22, fontWeight: 800 }}>Overseas Import</div>
+          <p style={{ color: "#6b7280", marginBottom: 0 }}>
+            eBay CSV/PDF 입력 및 K-Packet 출력
+          </p>
+        </Link>
             <div style={{ fontSize: 22, fontWeight: 800 }}>Overseas Import</div>
             <p style={{ color: "#6b7280", marginBottom: 0 }}>
               eBay CSV/PDF 입력 및 K-Packet 출력
