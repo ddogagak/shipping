@@ -26,6 +26,13 @@ export type OrderListRow = {
   stockout_item_indexes: number[];
 };
 
+type RowDraftKey =
+  | "shipping_method"
+  | "order_status"
+  | "shipping_label_status";
+
+type RowDraft = Partial<Record<RowDraftKey, string>>;
+
 const SHIPPING_METHOD_OPTIONS = [
   { value: "k-packet", label: "K-Packet" },
   { value: "egs", label: "EGS" },
@@ -53,7 +60,9 @@ function formatDate(value: string | null) {
   if (!value) return "-";
 
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value.slice(5, 10).replace("-", ".");
+  if (Number.isNaN(date.getTime())) {
+    return value.slice(5, 10).replace("-", ".");
+  }
 
   const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(date.getUTCDate()).padStart(2, "0");
@@ -86,6 +95,18 @@ function splitItemParts(value: string) {
     }));
 }
 
+function selectStyle(changed: boolean): CSSProperties {
+  return {
+    padding: "6px 8px",
+    borderRadius: 8,
+    border: "1px solid #d1d5db",
+    fontSize: 13,
+    fontWeight: 700,
+    background: changed ? "#fff7ed" : "#fff",
+    minWidth: 104,
+  };
+}
+
 export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
   const [localRows, setLocalRows] = useState<OrderListRow[]>(rows);
 
@@ -93,20 +114,11 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
     () => new Set()
   );
 
-  const [rowDrafts, setRowDrafts] = useState<
-    Record<
-      string,
-      {
-        shipping_method?: string;
-        order_status?: string;
-        shipping_label_status?: string;
-      }
-    >
-  >({});
+  const [rowDrafts, setRowDrafts] = useState<Record<string, RowDraft>>({});
 
-  const [savingRowOrderNumber, setSavingRowOrderNumber] = useState<string | null>(
-    null
-  );
+  const [savingRowOrderNumber, setSavingRowOrderNumber] = useState<
+    string | null
+  >(null);
 
   const selectAllRef = useRef<HTMLInputElement | null>(null);
 
@@ -131,7 +143,8 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
     });
   }, [selectedRows]);
 
-  const selectedNotKPacketRows = selectedRows.length - selectedKPacketRows.length;
+  const selectedNotKPacketRows =
+    selectedRows.length - selectedKPacketRows.length;
 
   const allVisibleChecked =
     localRows.length > 0 &&
@@ -198,13 +211,12 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
     setSelectedOrderNumbers(new Set());
   }
 
-  function getRowDraftValue(
-    row: OrderListRow,
-    key: "shipping_method" | "order_status" | "shipping_label_status"
-  ) {
-    const draft = rowDrafts[row.order_number];
+  function getRowDraftValue(row: OrderListRow, key: RowDraftKey): string {
+    const draftValue = rowDrafts[row.order_number]?.[key];
 
-    if (draft?.[key]) return draft[key];
+    if (draftValue) {
+      return draftValue;
+    }
 
     if (key === "shipping_method") {
       return row.label_shipping_method || row.shipping_method || "check";
@@ -217,7 +229,7 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
     return row.shipping_label_status || "start";
   }
 
-  function isRowChanged(row: OrderListRow) {
+  function isRowChanged(row: OrderListRow): boolean {
     const draft = rowDrafts[row.order_number];
 
     if (!draft) return false;
@@ -227,17 +239,26 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
     const savedOrderStatus = row.order_status || "accepted";
     const savedLabelStatus = row.shipping_label_status || "start";
 
+    const shippingMethodChanged =
+      typeof draft.shipping_method === "string" &&
+      draft.shipping_method !== savedShippingMethod;
+
+    const orderStatusChanged =
+      typeof draft.order_status === "string" &&
+      draft.order_status !== savedOrderStatus;
+
+    const shippingLabelStatusChanged =
+      typeof draft.shipping_label_status === "string" &&
+      draft.shipping_label_status !== savedLabelStatus;
+
     return (
-      (draft.shipping_method && draft.shipping_method !== savedShippingMethod) ||
-      (draft.order_status && draft.order_status !== savedOrderStatus) ||
-      (draft.shipping_label_status &&
-        draft.shipping_label_status !== savedLabelStatus)
+      shippingMethodChanged || orderStatusChanged || shippingLabelStatusChanged
     );
   }
 
   function changeRowDraft(
     orderNumber: string,
-    key: "shipping_method" | "order_status" | "shipping_label_status",
+    key: RowDraftKey,
     value: string
   ) {
     setRowDrafts((prev) => ({
@@ -254,7 +275,10 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
 
     const shippingMethod = getRowDraftValue(row, "shipping_method");
     const orderStatus = getRowDraftValue(row, "order_status");
-    const shippingLabelStatus = getRowDraftValue(row, "shipping_label_status");
+    const shippingLabelStatus = getRowDraftValue(
+      row,
+      "shipping_label_status"
+    );
 
     setSavingRowOrderNumber(row.order_number);
 
@@ -284,7 +308,9 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
 
       setLocalRows((prevRows) =>
         prevRows.map((targetRow) => {
-          if (targetRow.order_number !== row.order_number) return targetRow;
+          if (targetRow.order_number !== row.order_number) {
+            return targetRow;
+          }
 
           return {
             ...targetRow,
@@ -301,9 +327,11 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
         delete next[row.order_number];
         return next;
       });
-    } catch (error: any) {
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "알 수 없는 오류";
       console.error(error);
-      alert("저장 오류: " + error.message);
+      alert("저장 오류: " + message);
     } finally {
       setSavingRowOrderNumber(null);
     }
@@ -370,9 +398,11 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
           };
         })
       );
-    } catch (error: any) {
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "알 수 없는 오류";
       console.error(error);
-      alert("재고없음 상태 저장 오류: " + error.message);
+      alert("재고없음 상태 저장 오류: " + message);
       window.location.reload();
     }
   }
@@ -429,9 +459,11 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
 
       alert(`K-Packet CSV 추출 완료: ${selectedKPacketRows.length}건`);
       window.location.reload();
-    } catch (error: any) {
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "알 수 없는 오류";
       console.error(error);
-      alert("K-Packet CSV 추출 오류: " + error.message);
+      alert("K-Packet CSV 추출 오류: " + message);
     }
   }
 
@@ -688,7 +720,9 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
                       <button
                         type="button"
                         onClick={() => saveRow(row)}
-                        disabled={!changed || savingRowOrderNumber === row.order_number}
+                        disabled={
+                          !changed || savingRowOrderNumber === row.order_number
+                        }
                         style={{
                           padding: "7px 10px",
                           borderRadius: 8,
@@ -698,7 +732,8 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
                           fontSize: 12,
                           fontWeight: 800,
                           cursor:
-                            changed && savingRowOrderNumber !== row.order_number
+                            changed &&
+                            savingRowOrderNumber !== row.order_number
                               ? "pointer"
                               : "not-allowed",
                           whiteSpace: "nowrap",
@@ -847,18 +882,6 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
       </div>
     </section>
   );
-}
-
-function selectStyle(changed: boolean): CSSProperties {
-  return {
-    padding: "6px 8px",
-    borderRadius: 8,
-    border: "1px solid #d1d5db",
-    fontSize: 13,
-    fontWeight: 700,
-    background: changed ? "#fff7ed" : "#fff",
-    minWidth: 104,
-  };
 }
 
 const thStyle: CSSProperties = {
