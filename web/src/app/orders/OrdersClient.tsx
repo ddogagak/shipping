@@ -30,9 +30,27 @@ function formatDate(value: string | null) {
   if (!value) return "-";
 
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value.slice(0, 10);
+  if (Number.isNaN(date.getTime())) return value.slice(5, 10).replace("-", ".");
 
-  return date.toISOString().slice(0, 10);
+  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(date.getUTCDate()).padStart(2, "0");
+
+  return `${mm}.${dd}`;
+}
+
+function shortOrderNumber(value: string) {
+  if (!value) return "-";
+  return value.slice(-5);
+}
+
+function formatItemList(value: string | null) {
+  if (!value) return "-";
+
+  return value
+    .split("|")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join("\n");
 }
 
 function shippingMethodLabel(value: string | null) {
@@ -61,7 +79,7 @@ function orderStatusLabel(value: string | null) {
 function shippingLabelStatusLabel(value: string | null) {
   const map: Record<string, string> = {
     not_exported: "엑셀 미추출",
-    exported: "엑셀 추출",
+    exported: "CSV 추출",
     reserved: "예약 완료",
     accepted: "접수 완료",
     tracking_added: "운송장 입력",
@@ -188,8 +206,8 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
     }
 
     const ok = confirm(
-      `선택한 K-Packet 주문 ${selectedKPacketRows.length}건을 엑셀로 추출할까?\n\n` +
-        "추출 후 라벨상태가 '엑셀 추출'로 변경됩니다."
+      `선택한 K-Packet 주문 ${selectedKPacketRows.length}건을 CSV로 추출할까?\n\n` +
+        "추출 후 라벨상태가 'CSV 추출'로 변경됩니다."
     );
 
     if (!ok) return;
@@ -211,7 +229,7 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
         throw new Error(
           errorResult?.detail ||
             errorResult?.error ||
-            "K-Packet 엑셀 추출 실패"
+            "K-Packet CSV 추출 실패"
         );
       }
 
@@ -220,7 +238,7 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
 
       const disposition = response.headers.get("Content-Disposition") || "";
       const filenameMatch = disposition.match(/filename="([^"]+)"/);
-      const filename = filenameMatch?.[1] || "kpacket_export.xlsx";
+      const filename = filenameMatch?.[1] || "kpacket_export.csv";
 
       const a = document.createElement("a");
       a.href = url;
@@ -231,12 +249,12 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
       a.remove();
       window.URL.revokeObjectURL(url);
 
-      alert(`K-Packet 엑셀 추출 완료: ${selectedKPacketRows.length}건`);
+      alert(`K-Packet CSV 추출 완료: ${selectedKPacketRows.length}건`);
 
       window.location.reload();
     } catch (error: any) {
       console.error(error);
-      alert("K-Packet 엑셀 추출 오류: " + error.message);
+      alert("K-Packet CSV 추출 오류: " + error.message);
     }
   }
 
@@ -283,7 +301,7 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
           {selectedNotKPacketRows > 0 ? (
             <p style={{ color: "#b45309", margin: "6px 0 0", fontSize: 13 }}>
               선택한 주문 중 K-Packet이 아닌 주문 {selectedNotKPacketRows}건은
-              K-Packet 엑셀 추출에서 제외됩니다.
+              K-Packet CSV 추출에서 제외됩니다.
             </p>
           ) : null}
         </div>
@@ -303,7 +321,7 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
               cursor: selectedKPacketRows.length ? "pointer" : "not-allowed",
             }}
           >
-            선택 K-Packet 엑셀 추출
+            선택 K-Packet CSV 추출
           </button>
 
           <button
@@ -363,28 +381,18 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
             width: "100%",
             borderCollapse: "collapse",
             fontSize: 14,
-            minWidth: 1200,
+            minWidth: 1100,
           }}
         >
           <thead>
             <tr style={{ background: "#f9fafb" }}>
-              <th style={thStyle}>
-                <label
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    cursor: "pointer",
-                  }}
-                >
-                  <input
-                    ref={selectAllRef}
-                    type="checkbox"
-                    checked={allVisibleChecked}
-                    onChange={(event) => toggleAllVisible(event.target.checked)}
-                  />
-                  선택
-                </label>
+              <th style={{ ...thStyle, width: 42, textAlign: "center" }}>
+                <input
+                  ref={selectAllRef}
+                  type="checkbox"
+                  checked={allVisibleChecked}
+                  onChange={(event) => toggleAllVisible(event.target.checked)}
+                />
               </th>
               <th style={thStyle}>주문일</th>
               <th style={thStyle}>주문번호</th>
@@ -404,6 +412,7 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
             {rows.length ? (
               rows.map((row) => {
                 const checked = selectedOrderNumbers.has(row.order_number);
+                const itemText = formatItemList(row.item_list);
 
                 return (
                   <tr
@@ -412,7 +421,7 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
                       background: checked ? "#eff6ff" : "#fff",
                     }}
                   >
-                    <td style={tdStyle}>
+                    <td style={{ ...tdStyle, textAlign: "center" }}>
                       <input
                         type="checkbox"
                         checked={checked}
@@ -422,18 +431,18 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
 
                     <td style={tdStyle}>{formatDate(row.sale_date)}</td>
 
-                    <td style={{ ...tdStyle, fontWeight: 800 }}>
-                      {row.order_number}
+                    <td
+                      style={{ ...tdStyle, fontWeight: 800 }}
+                      title={row.order_number}
+                    >
+                      {shortOrderNumber(row.order_number)}
                     </td>
 
                     <td style={tdStyle}>{row.username || "-"}</td>
 
                     <td style={tdStyle}>{row.name || "-"}</td>
 
-                    <td style={tdStyle}>
-                      {row.country_code || "-"}
-                      {row.country ? ` · ${row.country}` : ""}
-                    </td>
+                    <td style={tdStyle}>{row.country_code || "-"}</td>
 
                     <td style={tdStyle}>{row.quantity ?? 0}</td>
 
@@ -460,14 +469,14 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
                     <td
                       style={{
                         ...tdStyle,
-                        maxWidth: 360,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
+                        maxWidth: 520,
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                        lineHeight: 1.45,
                       }}
                       title={row.item_list || ""}
                     >
-                      {row.item_list || "-"}
+                      {itemText}
                     </td>
                   </tr>
                 );
