@@ -24,6 +24,7 @@ export type OrderListRow = {
   shipping_label_status: string | null;
   tracking_number: string | null;
   item_list: string | null;
+  stockout_item_indexes: number[];
 };
 
 function formatDate(value: string | null) {
@@ -62,6 +63,7 @@ function splitItemParts(value: string) {
       isOption: part.startsWith("[") && part.endsWith("]"),
     }));
 }
+
 function shippingMethodLabel(value: string | null) {
   const map: Record<string, string> = {
     "k-packet": "K-Packet",
@@ -119,20 +121,26 @@ function StatusBadge({ children }: { children: ReactNode }) {
 }
 
 export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
+  const [localRows, setLocalRows] = useState<OrderListRow[]>(rows);
+
   const [selectedOrderNumbers, setSelectedOrderNumbers] = useState<Set<string>>(
     () => new Set()
   );
 
   const selectAllRef = useRef<HTMLInputElement | null>(null);
 
+  useEffect(() => {
+    setLocalRows(rows);
+  }, [rows]);
+
   const visibleOrderNumbers = useMemo(
-    () => rows.map((row) => row.order_number),
-    [rows]
+    () => localRows.map((row) => row.order_number),
+    [localRows]
   );
 
   const selectedRows = useMemo(() => {
-    return rows.filter((row) => selectedOrderNumbers.has(row.order_number));
-  }, [rows, selectedOrderNumbers]);
+    return localRows.filter((row) => selectedOrderNumbers.has(row.order_number));
+  }, [localRows, selectedOrderNumbers]);
 
   const selectedKPacketRows = useMemo(() => {
     return selectedRows.filter((row) => {
@@ -144,13 +152,13 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
   const selectedNotKPacketRows = selectedRows.length - selectedKPacketRows.length;
 
   const allVisibleChecked =
-    rows.length > 0 &&
+    localRows.length > 0 &&
     visibleOrderNumbers.every((orderNumber) =>
       selectedOrderNumbers.has(orderNumber)
     );
 
   const partlyChecked =
-    rows.some((row) => selectedOrderNumbers.has(row.order_number)) &&
+    localRows.some((row) => selectedOrderNumbers.has(row.order_number)) &&
     !allVisibleChecked;
 
   useEffect(() => {
@@ -206,6 +214,74 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
 
   function clearSelected() {
     setSelectedOrderNumbers(new Set());
+  }
+
+  async function toggleStockoutItem(
+    orderNumber: string,
+    itemIndex: number,
+    checked: boolean
+  ) {
+    setLocalRows((prevRows) =>
+      prevRows.map((row) => {
+        if (row.order_number !== orderNumber) return row;
+
+        const current = new Set(row.stockout_item_indexes || []);
+
+        if (checked) {
+          current.add(itemIndex);
+        } else {
+          current.delete(itemIndex);
+        }
+
+        return {
+          ...row,
+          stockout_item_indexes: Array.from(current).sort((a, b) => a - b),
+          order_status: checked ? "pending" : row.order_status,
+        };
+      })
+    );
+
+    try {
+      const response = await fetch("/api/ebay/item-stockout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          order_number: orderNumber,
+          item_index: itemIndex,
+          checked,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorResult = await response.json().catch(() => null);
+
+        throw new Error(
+          errorResult?.detail ||
+            errorResult?.error ||
+            "재고없음 상태 저장 실패"
+        );
+      }
+
+      const result = await response.json();
+
+      setLocalRows((prevRows) =>
+        prevRows.map((row) => {
+          if (row.order_number !== orderNumber) return row;
+
+          return {
+            ...row,
+            stockout_item_indexes: result.stockout_item_indexes || [],
+            order_status: result.order_status || row.order_status,
+          };
+        })
+      );
+    } catch (error: any) {
+      console.error(error);
+      alert("재고없음 상태 저장 오류: " + error.message);
+      window.location.reload();
+    }
   }
 
   async function handleExportKPacket() {
@@ -303,7 +379,7 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
         <div>
           <h2 style={{ margin: 0 }}>주문 목록</h2>
           <p style={{ color: "#6b7280", margin: "6px 0 0" }}>
-            현재 조건: {rows.length}건 / 선택: {selectedRows.length}건 /
+            현재 조건: {localRows.length}건 / 선택: {selectedRows.length}건 /
             K-Packet 선택: {selectedKPacketRows.length}건
           </p>
 
@@ -418,8 +494,8 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
           </thead>
 
           <tbody>
-            {rows.length ? (
-              rows.map((row) => {
+            {localRows.length ? (
+              localRows.map((row) => {
                 const checked = selectedOrderNumbers.has(row.order_number);
                 const itemList = formatItemList(row.item_list);
 
@@ -475,75 +551,120 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
 
                     <td style={tdStyle}>{row.tracking_number || "-"}</td>
 
-<td
-  style={{
-    ...tdStyle,
-    maxWidth: 620,
-  }}
-  title={row.item_list || ""}
->
-  {itemList.length ? (
-    <div
-      style={{
-        background: "#f3f4f6",
-        borderRadius: 8,
-        overflow: "hidden",
-      }}
-    >
-      {itemList.map((item, itemIndex) => {
-        const parts = splitItemParts(item);
+                    <td
+                      style={{
+                        ...tdStyle,
+                        maxWidth: 620,
+                      }}
+                      title={row.item_list || ""}
+                    >
+                      {itemList.length ? (
+                        <div
+                          style={{
+                            background: "#f3f4f6",
+                            borderRadius: 8,
+                            overflow: "hidden",
+                          }}
+                        >
+                          {itemList.map((item, itemIndex) => {
+                            const parts = splitItemParts(item);
+                            const displayIndex = itemIndex + 1;
+                            const isStockout = (
+                              row.stockout_item_indexes || []
+                            ).includes(displayIndex);
 
-        return (
-          <div
-            key={`${row.order_number}-${itemIndex}`}
-            style={{
-              display: "flex",
-              gap: 8,
-              padding: "8px 10px",
-              borderTop: itemIndex === 0 ? "none" : "1px solid #ffffff",
-              lineHeight: 1.45,
-            }}
-          >
-            <div
-              style={{
-                width: 22,
-                flex: "0 0 22px",
-                fontWeight: 800,
-                color: "#374151",
-              }}
-            >
-              {itemIndex + 1}.
-            </div>
+                            return (
+                              <div
+                                key={`${row.order_number}-${itemIndex}`}
+                                style={{
+                                  display: "flex",
+                                  gap: 8,
+                                  padding: "8px 10px",
+                                  borderTop:
+                                    itemIndex === 0
+                                      ? "none"
+                                      : "1px solid #ffffff",
+                                  lineHeight: 1.45,
+                                  color: isStockout ? "#2563eb" : "#111827",
+                                  background: isStockout
+                                    ? "#eff6ff"
+                                    : "transparent",
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    width: 46,
+                                    flex: "0 0 46px",
+                                    fontWeight: 800,
+                                    color: isStockout ? "#2563eb" : "#374151",
+                                    display: "flex",
+                                    alignItems: "flex-start",
+                                    gap: 5,
+                                  }}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isStockout}
+                                    title="재고 없음"
+                                    onChange={(event) =>
+                                      toggleStockoutItem(
+                                        row.order_number,
+                                        displayIndex,
+                                        event.target.checked
+                                      )
+                                    }
+                                    style={{
+                                      marginTop: 3,
+                                    }}
+                                  />
+                                  <span>{displayIndex}.</span>
+                                </div>
 
-            <div
-              style={{
-                flex: 1,
-                minWidth: 0,
-                wordBreak: "break-word",
-              }}
-            >
-              {parts.map((part, partIndex) => (
-                <span
-                  key={partIndex}
-                  style={{
-                    display: part.isOption ? "block" : "inline",
-                    fontWeight: part.isOption ? 800 : 400,
-                    color: part.isOption ? "#111827" : "#111827",
-                    marginTop: part.isOption ? 2 : 0,
-                  }}
-                >
-                  {part.text}
-                </span>
-              ))}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  ) : (
-    "-"
-  )}
-</td>
+                                <div
+                                  style={{
+                                    flex: 1,
+                                    minWidth: 0,
+                                    wordBreak: "break-word",
+                                  }}
+                                >
+                                  {isStockout ? (
+                                    <div
+                                      style={{
+                                        fontWeight: 900,
+                                        color: "#2563eb",
+                                        marginBottom: 2,
+                                      }}
+                                    >
+                                      재고 없음
+                                    </div>
+                                  ) : null}
+
+                                  {parts.map((part, partIndex) => (
+                                    <span
+                                      key={partIndex}
+                                      style={{
+                                        display: part.isOption
+                                          ? "block"
+                                          : "inline",
+                                        fontWeight: part.isOption ? 800 : 400,
+                                        color: isStockout
+                                          ? "#2563eb"
+                                          : "#111827",
+                                        marginTop: part.isOption ? 2 : 0,
+                                      }}
+                                    >
+                                      {part.text}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
                   </tr>
                 );
               })
