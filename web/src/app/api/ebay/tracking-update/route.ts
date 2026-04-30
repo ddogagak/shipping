@@ -1,98 +1,94 @@
 import { NextResponse } from "next/server";
-
 import { createServiceRoleClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-type Carrier = "k-packet" | "egs";
-type ShippingLabelStatus = "printed" | "uploaded" | "done";
-
-type UpdateRow = {
-  selected?: boolean;
-  carrier?: Carrier;
-  db_order_number?: string;
-  tracking_number?: string;
-  next_shipping_label_status?: ShippingLabelStatus;
-};
-
-type UpdateBody = {
-  carrier?: Carrier;
-  rows?: UpdateRow[];
-};
-
-const ALLOWED_STATUSES = new Set<ShippingLabelStatus>(["printed", "uploaded", "done"]);
-
-function clean(value: unknown) {
-  return String(value ?? "").trim();
-}
-
-function normalizeCarrier(value: unknown): Carrier | null {
-  const v = clean(value).toLowerCase();
-  if (v === "k-packet" || v === "kpacket") return "k-packet";
-  if (v === "egs") return "egs";
-  return null;
-}
-
-function normalizeStatus(value: unknown): ShippingLabelStatus | null {
-  const v = clean(value) as ShippingLabelStatus;
-  return ALLOWED_STATUSES.has(v) ? v : null;
+function normalize(s: any) {
+  return String(s ?? "").trim();
 }
 
 export async function POST(req: Request) {
-  try {
-    const body = (await req.json()) as UpdateBody;
-    const carrier = normalizeCarrier(body.carrier);
+  const supabase = createServiceRoleClient();
+  const body = await req.json();
 
-    if (!carrier) {
-      return NextResponse.json({ error: "carrier가 올바르지 않습니다." }, { status: 400 });
-    }
+  const rows = body.rows || [];
 
-    const rows = Array.isArray(body.rows) ? body.rows : [];
-    const targetRows = rows
-      .filter((row) => row.selected)
-      .map((row) => ({
-        order_number: clean(row.db_order_number),
-        tracking_number: clean(row.tracking_number),
-        shipping_label_status: normalizeStatus(row.next_shipping_label_status),
-      }))
-      .filter((row) => row.order_number && row.tracking_number && row.shipping_label_status);
+  let updated = 0;
+  let inserted = 0;
 
-    if (!targetRows.length) {
-      return NextResponse.json({ error: "업데이트할 행이 없습니다." }, { status: 400 });
-    }
+  for (const r of rows) {
+    if (!r.selected) continue;
 
-    const supabase = createServiceRoleClient();
-    const updated: string[] = [];
-    const failed: { order_number: string; error: string }[] = [];
+    const orderNo = normalize(r.db_order) || normalize(r.original_order_number);
 
-    for (const row of targetRows) {
-      const { error } = await supabase
+    // -----------------------------
+    // 기존 주문 존재 여부 확인
+    // -----------------------------
+    const { data: existing } = await supabase
+      .from("ebay_order")
+      .select("order_number")
+      .eq("order_number", orderNo)
+      .maybeSingle();
+
+    // =============================
+    // 1. 기존 주문 → 업데이트
+    // =============================
+    if (existing) {
+      await supabase
         .from("ebay_shipping")
         .update({
-          shipping_method: carrier,
-          tracking_number: row.tracking_number,
-          shipping_label_status: row.shipping_label_status,
+          tracking_number: r.tracking,
+          shipping_label_status: r.next_status,
         })
-        .eq("order_number", row.order_number);
+        .eq("order_number", orderNo);
 
-      if (error) {
-        failed.push({ order_number: row.order_number, error: error.message });
-      } else {
-        updated.push(row.order_number);
-      }
+      updated++;
+      continue;
     }
 
-    return NextResponse.json({
-      ok: failed.length === 0,
-      updated_count: updated.length,
-      failed_count: failed.length,
-      updated,
-      failed,
+    // =============================
+    // 2. 신규 주문 생성
+    // =============================
+
+    // ebay_order
+    await supabase.from("ebay_order").insert({
+      order_number: orderNo,
+      source_order_numbers: [orderNo],
+      username: normalize(r.username) || null,
+      name: normalize(r.name) || null,
+      country: null,
+      country_code: normalize(r.country) || null,
+      quantity: 1,
+      shipping_method: r.carrier,
+      order_status: "check",
     });
-  } catch (error: any) {
-    return NextResponse.json(
-      { error: "운송장 업데이트 중 오류", detail: error?.message || "Unknown error" },
-      { status: 500 }
-    );
+
+    // ebay_shipping
+    await supabase.from("ebay_shipping").insert({
+      order_number: orderNo,
+      username: normalize(r.username) || null,
+      shipping_method: r.carrier,
+      shipping_label_status: r.next_status,
+      tracking_number: r.tracking,
+      receipt_status: null,
+      export_data: {},
+    });
+
+    // ebay_order_item
+    await supabase.from("ebay_order_item").insert({
+      order_number: orderNo,
+      username: normalize(r.username) || null,
+      quantity: 1,
+      item_list: "",
+      stockout_item_indexes: [],
+    });
+
+    inserted++;
   }
+
+  return NextResponse.json({
+    ok: true,
+    updated,
+    inserted,
+  });
 }
