@@ -41,6 +41,15 @@ type SaveRowResponse = {
   shipping_label_status: string;
 };
 
+type CombineSuggestion = {
+  key: string;
+  username: string;
+  rows: OrderListRow[];
+  orderNumbers: string[];
+  combinedOrderNumber: string;
+  totalQuantity: number;
+};
+
 const SHIPPING_METHOD_OPTIONS = [
   { value: "k-packet", label: "K-Packet" },
   { value: "egs", label: "EGS" },
@@ -90,6 +99,10 @@ function formatItemList(value: string | null) {
     .split("|")
     .map((part) => part.trim())
     .filter(Boolean);
+}
+
+function normalizeUsername(value: string | null) {
+  return String(value ?? "").trim().toLowerCase();
 }
 
 function splitItemParts(value: string) {
@@ -159,6 +172,44 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
 
   const selectedNotKPacketRows =
     selectedRows.length - selectedKPacketRows.length;
+
+  const combineSuggestions = useMemo<CombineSuggestion[]>(() => {
+    const map = new Map<string, OrderListRow[]>();
+
+    localRows.forEach((row) => {
+      const key = normalizeUsername(row.username);
+      if (!key) return;
+      if (row.order_status === "done") return;
+      if (row.shipping_label_status === "done") return;
+
+      const arr = map.get(key) || [];
+      arr.push(row);
+      map.set(key, arr);
+    });
+
+    const result: CombineSuggestion[] = [];
+
+    map.forEach((group, key) => {
+      if (group.length < 2) return;
+
+      result.push({
+        key,
+        username: group[0].username || key,
+        rows: group,
+        orderNumbers: group.map((row) => row.order_number),
+        combinedOrderNumber: group
+          .map((row) => row.order_number.slice(-5))
+          .join("-"),
+        totalQuantity: group.reduce(
+          (sum, row) => sum + Number(row.quantity || 0),
+          0
+        ),
+      });
+    });
+
+    return result;
+  }, [localRows]);
+
 
   const allVisibleChecked =
     localRows.length > 0 &&
@@ -551,6 +602,44 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
     }
   }
 
+
+  async function handleCombineShipping(suggestion: CombineSuggestion) {
+    const ok = confirm(
+      `${suggestion.username}님의 주문 ${suggestion.rows.length}건을 합배송할까?\n\n` +
+        `새 주문번호: ${suggestion.combinedOrderNumber}`
+    );
+
+    if (!ok) return;
+
+    try {
+      const response = await fetch("/api/ebay/combine-shipping", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          order_numbers: suggestion.orderNumbers,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorResult = await response.json().catch(() => null);
+
+        throw new Error(
+          errorResult?.detail || errorResult?.error || "합배송 실패"
+        );
+      }
+
+      alert("합배송 완료");
+      window.location.reload();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "알 수 없는 오류";
+      console.error(error);
+      alert("합배송 오류: " + message);
+    }
+  }
+
   function handleCompleteShipping() {
     if (!selectedRows.length) {
       alert("배송완료 처리할 주문을 선택해줘.");
@@ -585,7 +674,14 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
         }}
       >
         <div>
-          <h2 style={{ margin: 0 }}>주문 목록</h2>
+          <h2 style={{ margin: 0 }}>
+            주문 목록{" "}
+            {combineSuggestions.length > 0 ? (
+              <span style={{ color: "#2563eb", fontSize: 14 }}>
+                합배송 가능 {combineSuggestions.length}그룹
+              </span>
+            ) : null}
+          </h2>
           <p style={{ color: "#6b7280", margin: "6px 0 0" }}>
             현재 조건: {localRows.length}건 / 선택: {selectedRows.length}건 /
             K-Packet 선택: {selectedKPacketRows.length}건
@@ -985,6 +1081,72 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
           </tbody>
         </table>
       </div>
+
+      {combineSuggestions.length > 0 ? (
+        <div
+          style={{
+            marginTop: 18,
+            padding: 16,
+            border: "1px solid #bfdbfe",
+            borderRadius: 14,
+            background: "#eff6ff",
+          }}
+        >
+          <h3 style={{ margin: "0 0 10px", color: "#1e3a8a" }}>
+            합배송 제안
+          </h3>
+
+          <div style={{ display: "grid", gap: 10 }}>
+            {combineSuggestions.map((suggestion) => (
+              <div
+                key={suggestion.key}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  padding: 12,
+                  borderRadius: 12,
+                  background: "#fff",
+                  border: "1px solid #dbeafe",
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 900, marginBottom: 4 }}>
+                    {suggestion.username}
+                  </div>
+                  <div style={{ color: "#374151", fontSize: 13 }}>
+                    주문 {suggestion.rows.length}건 / 총 수량 {suggestion.totalQuantity}개
+                  </div>
+                  <div style={{ color: "#6b7280", fontSize: 13, marginTop: 3 }}>
+                    기존 주문: {suggestion.orderNumbers.map(shortOrderNumber).join(", ")}
+                  </div>
+                  <div style={{ color: "#1d4ed8", fontSize: 13, marginTop: 3 }}>
+                    새 주문번호: {suggestion.combinedOrderNumber}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleCombineShipping(suggestion)}
+                  style={{
+                    padding: "9px 13px",
+                    borderRadius: 10,
+                    border: "0",
+                    background: "#2563eb",
+                    color: "#fff",
+                    fontWeight: 900,
+                    cursor: "pointer",
+                  }}
+                >
+                  합배송
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
