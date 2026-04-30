@@ -6,7 +6,6 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type ReactNode,
 } from "react";
 
 export type OrderListRow = {
@@ -26,6 +25,29 @@ export type OrderListRow = {
   item_list: string | null;
   stockout_item_indexes: number[];
 };
+
+const SHIPPING_METHOD_OPTIONS = [
+  { value: "k-packet", label: "K-Packet" },
+  { value: "egs", label: "EGS" },
+  { value: "check", label: "Check" },
+];
+
+const ORDER_STATUS_OPTIONS = [
+  { value: "accepted", label: "주문 업로드" },
+  { value: "check", label: "재고 확인" },
+  { value: "pending", label: "확인 필요" },
+  { value: "refund", label: "환불/취소" },
+  { value: "done", label: "완료" },
+];
+
+const SHIPPING_LABEL_STATUS_OPTIONS = [
+  { value: "start", label: "시작" },
+  { value: "csv_exported", label: "CSV 추출" },
+  { value: "created", label: "라벨작업 완료" },
+  { value: "printed", label: "출력 완료" },
+  { value: "uploaded", label: "운송장 업로드" },
+  { value: "done", label: "배송 완료" },
+];
 
 function formatDate(value: string | null) {
   if (!value) return "-";
@@ -64,62 +86,6 @@ function splitItemParts(value: string) {
     }));
 }
 
-function shippingMethodLabel(value: string | null) {
-  const map: Record<string, string> = {
-    "k-packet": "K-Packet",
-    egs: "EGS",
-    check: "Check",
-  };
-
-  return value ? map[value] || value : "-";
-}
-
-function orderStatusLabel(value: string | null) {
-  const map: Record<string, string> = {
-    ready: "처리 가능",
-    pending: "확인 필요",
-    refund: "환불 필요",
-    contact: "문의 필요",
-    cancelled: "취소",
-    completed: "완료",
-  };
-
-  return value ? map[value] || value : "-";
-}
-
-function shippingLabelStatusLabel(value: string | null) {
-  const map: Record<string, string> = {
-    not_exported: "엑셀 미추출",
-    exported: "CSV 추출",
-    reserved: "예약 완료",
-    accepted: "접수 완료",
-    tracking_added: "운송장 입력",
-    shipped: "발송 완료",
-    issue: "문제 있음",
-  };
-
-  return value ? map[value] || value : "-";
-}
-
-function StatusBadge({ children }: { children: ReactNode }) {
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        padding: "4px 8px",
-        borderRadius: 999,
-        background: "#f3f4f6",
-        fontSize: 12,
-        fontWeight: 700,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {children}
-    </span>
-  );
-}
-
 export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
   const [localRows, setLocalRows] = useState<OrderListRow[]>(rows);
 
@@ -127,10 +93,26 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
     () => new Set()
   );
 
+  const [rowDrafts, setRowDrafts] = useState<
+    Record<
+      string,
+      {
+        shipping_method?: string;
+        order_status?: string;
+        shipping_label_status?: string;
+      }
+    >
+  >({});
+
+  const [savingRowOrderNumber, setSavingRowOrderNumber] = useState<string | null>(
+    null
+  );
+
   const selectAllRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setLocalRows(rows);
+    setRowDrafts({});
   }, [rows]);
 
   const visibleOrderNumbers = useMemo(
@@ -214,6 +196,117 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
 
   function clearSelected() {
     setSelectedOrderNumbers(new Set());
+  }
+
+  function getRowDraftValue(
+    row: OrderListRow,
+    key: "shipping_method" | "order_status" | "shipping_label_status"
+  ) {
+    const draft = rowDrafts[row.order_number];
+
+    if (draft?.[key]) return draft[key];
+
+    if (key === "shipping_method") {
+      return row.label_shipping_method || row.shipping_method || "check";
+    }
+
+    if (key === "order_status") {
+      return row.order_status || "accepted";
+    }
+
+    return row.shipping_label_status || "start";
+  }
+
+  function isRowChanged(row: OrderListRow) {
+    const draft = rowDrafts[row.order_number];
+
+    if (!draft) return false;
+
+    const savedShippingMethod =
+      row.label_shipping_method || row.shipping_method || "check";
+    const savedOrderStatus = row.order_status || "accepted";
+    const savedLabelStatus = row.shipping_label_status || "start";
+
+    return (
+      (draft.shipping_method && draft.shipping_method !== savedShippingMethod) ||
+      (draft.order_status && draft.order_status !== savedOrderStatus) ||
+      (draft.shipping_label_status &&
+        draft.shipping_label_status !== savedLabelStatus)
+    );
+  }
+
+  function changeRowDraft(
+    orderNumber: string,
+    key: "shipping_method" | "order_status" | "shipping_label_status",
+    value: string
+  ) {
+    setRowDrafts((prev) => ({
+      ...prev,
+      [orderNumber]: {
+        ...prev[orderNumber],
+        [key]: value,
+      },
+    }));
+  }
+
+  async function saveRow(row: OrderListRow) {
+    if (!isRowChanged(row)) return;
+
+    const shippingMethod = getRowDraftValue(row, "shipping_method");
+    const orderStatus = getRowDraftValue(row, "order_status");
+    const shippingLabelStatus = getRowDraftValue(row, "shipping_label_status");
+
+    setSavingRowOrderNumber(row.order_number);
+
+    try {
+      const response = await fetch("/api/ebay/order-row", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          order_number: row.order_number,
+          shipping_method: shippingMethod,
+          order_status: orderStatus,
+          shipping_label_status: shippingLabelStatus,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorResult = await response.json().catch(() => null);
+
+        throw new Error(
+          errorResult?.detail || errorResult?.error || "주문 행 저장 실패"
+        );
+      }
+
+      const result = await response.json();
+
+      setLocalRows((prevRows) =>
+        prevRows.map((targetRow) => {
+          if (targetRow.order_number !== row.order_number) return targetRow;
+
+          return {
+            ...targetRow,
+            shipping_method: result.shipping_method,
+            label_shipping_method: result.shipping_method,
+            order_status: result.order_status,
+            shipping_label_status: result.shipping_label_status,
+          };
+        })
+      );
+
+      setRowDrafts((prev) => {
+        const next = { ...prev };
+        delete next[row.order_number];
+        return next;
+      });
+    } catch (error: any) {
+      console.error(error);
+      alert("저장 오류: " + error.message);
+    } finally {
+      setSavingRowOrderNumber(null);
+    }
   }
 
   async function toggleStockoutItem(
@@ -335,7 +428,6 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
       window.URL.revokeObjectURL(url);
 
       alert(`K-Packet CSV 추출 완료: ${selectedKPacketRows.length}건`);
-
       window.location.reload();
     } catch (error: any) {
       console.error(error);
@@ -466,7 +558,7 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
             width: "100%",
             borderCollapse: "collapse",
             fontSize: 14,
-            minWidth: 1100,
+            minWidth: 1300,
           }}
         >
           <thead>
@@ -489,6 +581,7 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
               <th style={thStyle}>주문상태</th>
               <th style={thStyle}>라벨상태</th>
               <th style={thStyle}>운송장번호</th>
+              <th style={thStyle}>저장</th>
               <th style={thStyle}>상품목록</th>
             </tr>
           </thead>
@@ -498,6 +591,7 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
               localRows.map((row) => {
                 const checked = selectedOrderNumbers.has(row.order_number);
                 const itemList = formatItemList(row.item_list);
+                const changed = isRowChanged(row);
 
                 return (
                   <tr
@@ -524,32 +618,97 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
                     </td>
 
                     <td style={tdStyle}>{row.username || "-"}</td>
-
                     <td style={tdStyle}>{row.name || "-"}</td>
-
                     <td style={tdStyle}>{row.country_code || "-"}</td>
-
                     <td style={tdStyle}>{row.quantity ?? 0}</td>
 
                     <td style={tdStyle}>
-                      <StatusBadge>
-                        {shippingMethodLabel(
-                          row.label_shipping_method || row.shipping_method
-                        )}
-                      </StatusBadge>
+                      <select
+                        value={getRowDraftValue(row, "shipping_method")}
+                        onChange={(event) =>
+                          changeRowDraft(
+                            row.order_number,
+                            "shipping_method",
+                            event.target.value
+                          )
+                        }
+                        style={selectStyle(changed)}
+                      >
+                        {SHIPPING_METHOD_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                     </td>
 
                     <td style={tdStyle}>
-                      <StatusBadge>{orderStatusLabel(row.order_status)}</StatusBadge>
+                      <select
+                        value={getRowDraftValue(row, "order_status")}
+                        onChange={(event) =>
+                          changeRowDraft(
+                            row.order_number,
+                            "order_status",
+                            event.target.value
+                          )
+                        }
+                        style={selectStyle(changed)}
+                      >
+                        {ORDER_STATUS_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                     </td>
 
                     <td style={tdStyle}>
-                      <StatusBadge>
-                        {shippingLabelStatusLabel(row.shipping_label_status)}
-                      </StatusBadge>
+                      <select
+                        value={getRowDraftValue(row, "shipping_label_status")}
+                        onChange={(event) =>
+                          changeRowDraft(
+                            row.order_number,
+                            "shipping_label_status",
+                            event.target.value
+                          )
+                        }
+                        style={selectStyle(changed)}
+                      >
+                        {SHIPPING_LABEL_STATUS_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                     </td>
 
                     <td style={tdStyle}>{row.tracking_number || "-"}</td>
+
+                    <td style={tdStyle}>
+                      <button
+                        type="button"
+                        onClick={() => saveRow(row)}
+                        disabled={!changed || savingRowOrderNumber === row.order_number}
+                        style={{
+                          padding: "7px 10px",
+                          borderRadius: 8,
+                          border: "0",
+                          background: changed ? "#111827" : "#d1d5db",
+                          color: "#fff",
+                          fontSize: 12,
+                          fontWeight: 800,
+                          cursor:
+                            changed && savingRowOrderNumber !== row.order_number
+                              ? "pointer"
+                              : "not-allowed",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {savingRowOrderNumber === row.order_number
+                          ? "저장중"
+                          : "저장"}
+                      </button>
+                    </td>
 
                     <td
                       style={{
@@ -671,7 +830,7 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
             ) : (
               <tr>
                 <td
-                  colSpan={12}
+                  colSpan={13}
                   style={{
                     padding: 24,
                     textAlign: "center",
@@ -688,6 +847,18 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
       </div>
     </section>
   );
+}
+
+function selectStyle(changed: boolean): CSSProperties {
+  return {
+    padding: "6px 8px",
+    borderRadius: 8,
+    border: "1px solid #d1d5db",
+    fontSize: 13,
+    fontWeight: 700,
+    background: changed ? "#fff7ed" : "#fff",
+    minWidth: 104,
+  };
 }
 
 const thStyle: CSSProperties = {
