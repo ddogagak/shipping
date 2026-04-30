@@ -34,37 +34,80 @@ type EbayItemRow = {
   stockout_item_indexes: number[] | null;
 };
 
+const SHIPPING_METHOD_OPTIONS = [
+  { value: "k-packet", label: "K-Packet" },
+  { value: "egs", label: "EGS" },
+  { value: "check", label: "Check" },
+];
+
+const ORDER_STATUS_OPTIONS = [
+  { value: "accepted", label: "주문 업로드" },
+  { value: "check", label: "재고 확인" },
+  { value: "pending", label: "확인 필요" },
+  { value: "refund", label: "환불/취소" },
+  { value: "done", label: "완료" },
+];
+
+const SHIPPING_LABEL_STATUS_OPTIONS = [
+  { value: "start", label: "시작" },
+  { value: "csv_exported", label: "CSV 추출" },
+  { value: "created", label: "라벨작업 완료" },
+  { value: "printed", label: "출력 완료" },
+  { value: "uploaded", label: "운송장 업로드" },
+  { value: "done", label: "배송 완료" },
+];
+
+const DEFAULT_ORDER_STATUSES = ["accepted", "check", "pending"];
+const DEFAULT_LABEL_STATUSES = [
+  "start",
+  "csv_exported",
+  "created",
+  "printed",
+  "uploaded",
+];
+
+const LABEL_SORT_ORDER = [
+  "start",
+  "csv_exported",
+  "created",
+  "printed",
+  "uploaded",
+  "done",
+];
+
+const ORDER_SORT_ORDER = ["accepted", "check", "pending", "done", "refund"];
+
+function paramValues(value: string | string[] | undefined) {
+  const raw = Array.isArray(value) ? value : value ? [value] : [];
+
+  return raw
+    .flatMap((item) => String(item).split(","))
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function firstParam(value: string | string[] | undefined) {
   if (Array.isArray(value)) return value[0] || "";
   return value || "";
 }
 
-function orderStatusLabel(value: string | null) {
-  const map: Record<string, string> = {
-    accepted: "주문 업로드",
-    check: "재고 확인",
-    pending: "확인 필요",
-    refund: "환불/취소",
-    done: "완료",
-  };
+function sameValues(a: string[], b: string[]) {
+  if (a.length !== b.length) return false;
+  const bSet = new Set(b);
+  return a.every((item) => bSet.has(item));
+}
 
-  return value ? map[value] || value : "-";
+function orderStatusLabel(value: string | null) {
+  const option = ORDER_STATUS_OPTIONS.find((item) => item.value === value);
+  return option?.label || value || "-";
 }
 
 function shippingLabelStatusLabel(value: string | null) {
-  const map: Record<string, string> = {
-    start: "시작",
-    csv_exported: "CSV 추출",
-    created: "라벨작업 완료",
-    printed: "출력 완료",
-    uploaded: "운송장 업로드",
-    done: "배송 완료",
-  };
-
-  return value ? map[value] || value : "-";
+  const option = SHIPPING_LABEL_STATUS_OPTIONS.find((item) => item.value === value);
+  return option?.label || value || "-";
 }
 
-function FilterLink({
+function FilterButton({
   href,
   active,
   children,
@@ -79,12 +122,12 @@ function FilterLink({
       style={{
         textDecoration: "none",
         color: active ? "#fff" : "#111827",
-        background: active ? "#111827" : "#fff",
-        border: "1px solid #d1d5db",
+        background: active ? "#2563eb" : "#fff",
+        border: active ? "1px solid #2563eb" : "1px solid #d1d5db",
         padding: "8px 12px",
         borderRadius: 999,
         fontSize: 14,
-        fontWeight: 700,
+        fontWeight: 800,
       }}
     >
       {children}
@@ -99,36 +142,47 @@ export default async function OrdersPage({
 }) {
   const params = searchParams ? await searchParams : {};
 
-  const method = firstParam(params.method) || "all";
-  const orderStatus = firstParam(params.order_status) || "all";
-  const labelStatus = firstParam(params.label_status) || "all";
+  const methodParams = paramValues(params.method);
+  const orderStatusParams = paramValues(params.order_status);
+  const labelStatusParams = paramValues(params.label_status);
   const q = firstParam(params.q).trim();
 
+  const selectedMethods = methodParams;
+  const selectedOrderStatuses = orderStatusParams.length
+    ? orderStatusParams
+    : DEFAULT_ORDER_STATUSES;
+  const selectedLabelStatuses = labelStatusParams.length
+    ? labelStatusParams
+    : DEFAULT_LABEL_STATUSES;
+
   const currentParams = {
-    method,
-    order_status: orderStatus,
-    label_status: labelStatus,
+    methods: selectedMethods,
+    orderStatuses: selectedOrderStatuses,
+    labelStatuses: selectedLabelStatuses,
     q,
   };
 
-  function buildHref(updates: Partial<typeof currentParams>) {
+  function buildHref(nextParams: {
+    methods?: string[];
+    orderStatuses?: string[];
+    labelStatuses?: string[];
+    q?: string;
+  }) {
     const next = {
       ...currentParams,
-      ...updates,
+      ...nextParams,
     };
 
     const urlParams = new URLSearchParams();
 
-    if (next.method && next.method !== "all") {
-      urlParams.set("method", next.method);
+    next.methods.forEach((value) => urlParams.append("method", value));
+
+    if (!sameValues(next.orderStatuses, DEFAULT_ORDER_STATUSES)) {
+      next.orderStatuses.forEach((value) => urlParams.append("order_status", value));
     }
 
-    if (next.order_status && next.order_status !== "all") {
-      urlParams.set("order_status", next.order_status);
-    }
-
-    if (next.label_status && next.label_status !== "all") {
-      urlParams.set("label_status", next.label_status);
+    if (!sameValues(next.labelStatuses, DEFAULT_LABEL_STATUSES)) {
+      next.labelStatuses.forEach((value) => urlParams.append("label_status", value));
     }
 
     if (next.q) {
@@ -137,6 +191,12 @@ export default async function OrdersPage({
 
     const query = urlParams.toString();
     return query ? `/orders?${query}` : "/orders";
+  }
+
+  function toggleValue(list: string[], value: string) {
+    return list.includes(value)
+      ? list.filter((item) => item !== value)
+      : [...list, value];
   }
 
   const supabase = createServiceRoleClient();
@@ -175,10 +235,7 @@ export default async function OrdersPage({
     itemError = itemResult.error;
   }
 
-  const shippingMap = new Map(
-    shippingRows.map((row) => [row.order_number, row])
-  );
-
+  const shippingMap = new Map(shippingRows.map((row) => [row.order_number, row]));
   const itemMap = new Map(itemRows.map((row) => [row.order_number, row]));
 
   const mergedRows: OrderListRow[] = orders.map((order) => {
@@ -204,53 +261,57 @@ export default async function OrdersPage({
     };
   });
 
-  const filteredRows = mergedRows.filter((row) => {
-    const rowMethod = row.label_shipping_method || row.shipping_method || "check";
+  const filteredRows = mergedRows
+    .filter((row) => {
+      const rowMethod = row.label_shipping_method || row.shipping_method || "check";
+      const rowOrderStatus = row.order_status || "accepted";
+      const rowLabelStatus = row.shipping_label_status || "start";
 
-    if (method !== "all" && rowMethod !== method) return false;
-    if (orderStatus !== "all" && row.order_status !== orderStatus) return false;
-    if (labelStatus !== "all" && row.shipping_label_status !== labelStatus) return false;
+      if (selectedMethods.length && !selectedMethods.includes(rowMethod)) return false;
+      if (!selectedOrderStatuses.includes(rowOrderStatus)) return false;
+      if (!selectedLabelStatuses.includes(rowLabelStatus)) return false;
 
-    if (q) {
-      const haystack = [
-        row.order_number,
-        row.username,
-        row.name,
-        row.country,
-        row.country_code,
-        row.item_list,
-      ]
-        .join(" ")
-        .toLowerCase();
+      if (q) {
+        const haystack = [
+          row.order_number,
+          row.username,
+          row.name,
+          row.country,
+          row.country_code,
+          row.item_list,
+          row.tracking_number,
+        ]
+          .join(" ")
+          .toLowerCase();
 
-      if (!haystack.includes(q.toLowerCase())) return false;
-    }
+        if (!haystack.includes(q.toLowerCase())) return false;
+      }
 
-    return true;
-  });
+      return true;
+    })
+    .sort((a, b) => {
+      const labelA = LABEL_SORT_ORDER.indexOf(a.shipping_label_status || "start");
+      const labelB = LABEL_SORT_ORDER.indexOf(b.shipping_label_status || "start");
+      if (labelA !== labelB) return labelA - labelB;
+
+      const orderA = ORDER_SORT_ORDER.indexOf(a.order_status || "accepted");
+      const orderB = ORDER_SORT_ORDER.indexOf(b.order_status || "accepted");
+      if (orderA !== orderB) return orderA - orderB;
+
+      const nameCompare = String(a.name || "").localeCompare(String(b.name || ""));
+      if (nameCompare !== 0) return nameCompare;
+
+      return String(a.sale_date || "").localeCompare(String(b.sale_date || ""));
+    });
 
   const totalCount = mergedRows.length;
-  const kpacketCount = mergedRows.filter(
-    (row) => row.label_shipping_method === "k-packet"
-  ).length;
-  const egsCount = mergedRows.filter(
-    (row) => row.label_shipping_method === "egs"
-  ).length;
-  const checkCount = mergedRows.filter(
-    (row) => row.label_shipping_method === "check"
-  ).length;
+  const kpacketCount = mergedRows.filter((row) => row.label_shipping_method === "k-packet").length;
+  const egsCount = mergedRows.filter((row) => row.label_shipping_method === "egs").length;
+  const checkCount = mergedRows.filter((row) => row.label_shipping_method === "check").length;
 
   return (
     <main style={{ maxWidth: 1500, margin: "0 auto", padding: 24 }}>
-      <section
-        className="card"
-        style={{
-          padding: 20,
-          border: "1px solid #e5e7eb",
-          borderRadius: 16,
-          background: "#fff",
-        }}
-      >
+      <section className="card" style={sectionStyle}>
         <div
           style={{
             display: "flex",
@@ -312,73 +373,75 @@ export default async function OrdersPage({
         </div>
       </section>
 
-      <section
-        className="card"
-        style={{
-          marginTop: 16,
-          padding: 20,
-          border: "1px solid #e5e7eb",
-          borderRadius: 16,
-          background: "#fff",
-        }}
-      >
+      <section className="card" style={{ ...sectionStyle, marginTop: 16 }}>
         <h2 style={{ marginTop: 0 }}>필터</h2>
 
         <div style={{ display: "grid", gap: 14 }}>
           <div>
             <div style={{ fontWeight: 800, marginBottom: 8 }}>배송방식</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <FilterLink href={buildHref({ method: "all" })} active={method === "all"}>
+              <FilterButton
+                href={buildHref({ methods: [] })}
+                active={selectedMethods.length === 0}
+              >
                 전체
-              </FilterLink>
-              <FilterLink href={buildHref({ method: "k-packet" })} active={method === "k-packet"}>
-                K-Packet
-              </FilterLink>
-              <FilterLink href={buildHref({ method: "egs" })} active={method === "egs"}>
-                EGS
-              </FilterLink>
-              <FilterLink href={buildHref({ method: "check" })} active={method === "check"}>
-                Check
-              </FilterLink>
+              </FilterButton>
+              {SHIPPING_METHOD_OPTIONS.map((option) => (
+                <FilterButton
+                  key={option.value}
+                  href={buildHref({
+                    methods: toggleValue(selectedMethods, option.value),
+                  })}
+                  active={selectedMethods.includes(option.value)}
+                >
+                  {option.label}
+                </FilterButton>
+              ))}
             </div>
           </div>
 
           <div>
             <div style={{ fontWeight: 800, marginBottom: 8 }}>주문상태</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {["all", "accepted", "check", "pending", "refund", "done"].map(
-                (status) => (
-                  <FilterLink
-                    key={status}
-                    href={buildHref({ order_status: status })}
-                    active={orderStatus === status}
-                  >
-                    {status === "all" ? "전체" : orderStatusLabel(status)}
-                  </FilterLink>
-                )
-              )}
+              <FilterButton
+                href={buildHref({ orderStatuses: DEFAULT_ORDER_STATUSES })}
+                active={sameValues(selectedOrderStatuses, DEFAULT_ORDER_STATUSES)}
+              >
+                기본값
+              </FilterButton>
+              {ORDER_STATUS_OPTIONS.map((option) => (
+                <FilterButton
+                  key={option.value}
+                  href={buildHref({
+                    orderStatuses: toggleValue(selectedOrderStatuses, option.value),
+                  })}
+                  active={selectedOrderStatuses.includes(option.value)}
+                >
+                  {option.label}
+                </FilterButton>
+              ))}
             </div>
           </div>
 
           <div>
             <div style={{ fontWeight: 800, marginBottom: 8 }}>라벨상태</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {[
-                "all",
-                "start",
-                "csv_exported",
-                "created",
-                "printed",
-                "uploaded",
-                "done",
-              ].map((status) => (
-                <FilterLink
-                  key={status}
-                  href={buildHref({ label_status: status })}
-                  active={labelStatus === status}
+              <FilterButton
+                href={buildHref({ labelStatuses: DEFAULT_LABEL_STATUSES })}
+                active={sameValues(selectedLabelStatuses, DEFAULT_LABEL_STATUSES)}
+              >
+                기본값
+              </FilterButton>
+              {SHIPPING_LABEL_STATUS_OPTIONS.map((option) => (
+                <FilterButton
+                  key={option.value}
+                  href={buildHref({
+                    labelStatuses: toggleValue(selectedLabelStatuses, option.value),
+                  })}
+                  active={selectedLabelStatuses.includes(option.value)}
                 >
-                  {status === "all" ? "전체" : shippingLabelStatusLabel(status)}
-                </FilterLink>
+                  {option.label}
+                </FilterButton>
               ))}
             </div>
           </div>
@@ -388,19 +451,37 @@ export default async function OrdersPage({
             method="get"
             style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
           >
-            {method !== "all" ? <input type="hidden" name="method" value={method} /> : null}
-            {orderStatus !== "all" ? (
-              <input type="hidden" name="order_status" value={orderStatus} />
-            ) : null}
-            {labelStatus !== "all" ? (
-              <input type="hidden" name="label_status" value={labelStatus} />
-            ) : null}
+            {selectedMethods.map((value) => (
+              <input key={`method-${value}`} type="hidden" name="method" value={value} />
+            ))}
+
+            {!sameValues(selectedOrderStatuses, DEFAULT_ORDER_STATUSES)
+              ? selectedOrderStatuses.map((value) => (
+                  <input
+                    key={`order-${value}`}
+                    type="hidden"
+                    name="order_status"
+                    value={value}
+                  />
+                ))
+              : null}
+
+            {!sameValues(selectedLabelStatuses, DEFAULT_LABEL_STATUSES)
+              ? selectedLabelStatuses.map((value) => (
+                  <input
+                    key={`label-${value}`}
+                    type="hidden"
+                    name="label_status"
+                    value={value}
+                  />
+                ))
+              : null}
 
             <input
               type="text"
               name="q"
               defaultValue={q}
-              placeholder="주문번호, username, 수취인, 국가, 상품 검색"
+              placeholder="주문번호, username, 수취인, 국가, 상품, 운송장 검색"
               style={{
                 flex: "1 1 320px",
                 padding: "10px 12px",
@@ -461,6 +542,13 @@ export default async function OrdersPage({
     </main>
   );
 }
+
+const sectionStyle: React.CSSProperties = {
+  padding: 20,
+  border: "1px solid #e5e7eb",
+  borderRadius: 16,
+  background: "#fff",
+};
 
 const summaryCardStyle: React.CSSProperties = {
   border: "1px solid #e5e7eb",
