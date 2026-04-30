@@ -55,7 +55,7 @@ function orderStatusLabel(value: string | null) {
 function shippingLabelStatusLabel(value: string | null) {
   const map: Record<string, string> = {
     not_exported: "엑셀 미추출",
-    exported: "엑셀 추출",
+    exported: "CSV 추출",
     reserved: "예약 완료",
     accepted: "접수 완료",
     tracking_added: "운송장 입력",
@@ -170,7 +170,7 @@ export default async function OrdersPage({
 
     const itemResult = await supabase
       .from("ebay_order_item")
-      .select("order_number, item_list")
+      .select("order_number, item_list, stockout_item_indexes")
       .in("order_number", orderNumbers);
 
     itemRows = (itemResult.data || []) as EbayItemRow[];
@@ -202,6 +202,7 @@ export default async function OrdersPage({
       shipping_label_status: shipping?.shipping_label_status || "not_exported",
       tracking_number: shipping?.tracking_number || null,
       item_list: item?.item_list || null,
+      stockout_item_indexes: item?.stockout_item_indexes || [],
     };
   });
 
@@ -398,7 +399,11 @@ export default async function OrdersPage({
             </div>
           </div>
 
-          <form action="/orders" method="get" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <form
+            action="/orders"
+            method="get"
+            style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+          >
             {method !== "all" ? <input type="hidden" name="method" value={method} /> : null}
             {orderStatus !== "all" ? (
               <input type="hidden" name="order_status" value={orderStatus} />
