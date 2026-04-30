@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 
 export type OrderListRow = {
   id: string;
@@ -65,7 +72,7 @@ function shippingLabelStatusLabel(value: string | null) {
   return value ? map[value] || value : "-";
 }
 
-function StatusBadge({ children }: { children: React.ReactNode }) {
+function StatusBadge({ children }: { children: ReactNode }) {
   return (
     <span
       style={{
@@ -174,16 +181,63 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
     setSelectedOrderNumbers(new Set());
   }
 
-  function handleExportKPacket() {
+  async function handleExportKPacket() {
     if (!selectedKPacketRows.length) {
       alert("K-Packet 주문을 선택해줘.");
       return;
     }
 
-    alert(
-      `선택된 K-Packet 주문 ${selectedKPacketRows.length}건.\n` +
-        "다음 단계에서 여기 버튼에 엑셀 다운로드 API를 연결하면 돼."
+    const ok = confirm(
+      `선택한 K-Packet 주문 ${selectedKPacketRows.length}건을 엑셀로 추출할까?\n\n` +
+        "추출 후 라벨상태가 '엑셀 추출'로 변경됩니다."
     );
+
+    if (!ok) return;
+
+    try {
+      const response = await fetch("/api/ebay/export-kpacket", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          order_numbers: selectedKPacketRows.map((row) => row.order_number),
+        }),
+      });
+
+      if (!response.ok) {
+        const errorResult = await response.json().catch(() => null);
+
+        throw new Error(
+          errorResult?.detail ||
+            errorResult?.error ||
+            "K-Packet 엑셀 추출 실패"
+        );
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+
+      const disposition = response.headers.get("Content-Disposition") || "";
+      const filenameMatch = disposition.match(/filename="([^"]+)"/);
+      const filename = filenameMatch?.[1] || "kpacket_export.xlsx";
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+
+      a.remove();
+      window.URL.revokeObjectURL(url);
+
+      alert(`K-Packet 엑셀 추출 완료: ${selectedKPacketRows.length}건`);
+
+      window.location.reload();
+    } catch (error: any) {
+      console.error(error);
+      alert("K-Packet 엑셀 추출 오류: " + error.message);
+    }
   }
 
   function handleCompleteShipping() {
@@ -222,8 +276,8 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
         <div>
           <h2 style={{ margin: 0 }}>주문 목록</h2>
           <p style={{ color: "#6b7280", margin: "6px 0 0" }}>
-            현재 조건: {rows.length}건 / 선택: {selectedRows.length}건 / K-Packet 선택:{" "}
-            {selectedKPacketRows.length}건
+            현재 조건: {rows.length}건 / 선택: {selectedRows.length}건 /
+            K-Packet 선택: {selectedKPacketRows.length}건
           </p>
 
           {selectedNotKPacketRows > 0 ? (
@@ -365,15 +419,24 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
                         onChange={() => toggleOne(row.order_number)}
                       />
                     </td>
+
                     <td style={tdStyle}>{formatDate(row.sale_date)}</td>
-                    <td style={{ ...tdStyle, fontWeight: 800 }}>{row.order_number}</td>
+
+                    <td style={{ ...tdStyle, fontWeight: 800 }}>
+                      {row.order_number}
+                    </td>
+
                     <td style={tdStyle}>{row.username || "-"}</td>
+
                     <td style={tdStyle}>{row.name || "-"}</td>
+
                     <td style={tdStyle}>
                       {row.country_code || "-"}
                       {row.country ? ` · ${row.country}` : ""}
                     </td>
+
                     <td style={tdStyle}>{row.quantity ?? 0}</td>
+
                     <td style={tdStyle}>
                       <StatusBadge>
                         {shippingMethodLabel(
@@ -381,15 +444,19 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
                         )}
                       </StatusBadge>
                     </td>
+
                     <td style={tdStyle}>
                       <StatusBadge>{orderStatusLabel(row.order_status)}</StatusBadge>
                     </td>
+
                     <td style={tdStyle}>
                       <StatusBadge>
                         {shippingLabelStatusLabel(row.shipping_label_status)}
                       </StatusBadge>
                     </td>
+
                     <td style={tdStyle}>{row.tracking_number || "-"}</td>
+
                     <td
                       style={{
                         ...tdStyle,
@@ -427,14 +494,14 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
   );
 }
 
-const thStyle: React.CSSProperties = {
+const thStyle: CSSProperties = {
   textAlign: "left",
   padding: "10px 8px",
   borderBottom: "1px solid #e5e7eb",
   whiteSpace: "nowrap",
 };
 
-const tdStyle: React.CSSProperties = {
+const tdStyle: CSSProperties = {
   padding: "10px 8px",
   borderBottom: "1px solid #f3f4f6",
   verticalAlign: "top",
