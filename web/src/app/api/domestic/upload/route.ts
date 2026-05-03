@@ -19,6 +19,7 @@ type ParsedRow = {
   boxCount: string;
   boxType: string;
   baseFee: string;
+  shippingType: string;
   orderCount: string;
   firstOrderDate: string;
   itemSummary: string;
@@ -138,7 +139,176 @@ function firstDate(a: string, b: string) {
   return a < b ? a : b;
 }
 
+function normalizeBunjangDate(value: string) {
+  const text = safeText(value);
+
+  const match = text.match(/(\d{2})년\s*(\d{2})월\s*(\d{2})일\s*(\d{2}):(\d{2})/);
+  if (!match) return "";
+
+  return `20${match[1]}.${match[2]}.${match[3]} ${match[4]}:${match[5]}`;
+}
+
+function splitBunjangBlocks(text: string) {
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+
+  if (!normalized) return [];
+
+  return normalized
+    .split(/(?=상품\s*준비\s*중)/g)
+    .map((block) => block.trim())
+    .filter((block) => block.includes("배송지정보") && block.includes("거래정보"));
+}
+
+function pickNextLine(lines: string[], label: string) {
+  const index = lines.findIndex((line) => line === label || line.includes(label));
+  return index >= 0 ? safeText(lines[index + 1]) : "";
+}
+
+function parseBunjangShippingType(block: string) {
+  const method = block.match(/거래방법\s*\n([^\n]+)/)?.[1] || "";
+  const shippingFeeText = block.match(/배송비\s*\n\s*([+\-]?\s*[\d,]+원)/)?.[1] || "";
+  const shippingFee = parsePrice(shippingFeeText);
+
+  if (method.includes("GS반값택배")) return "GS반값택배";
+  if (method.includes("일반택배") && shippingFee > 0 && shippingFee <= 2900) return "준등기";
+
+  return "일반택배";
+}
+
+function parseBunjangAddress(lines: string[], shippingType: string) {
+  const start = lines.findIndex((line) => line.includes("배송지정보"));
+  if (start < 0) {
+    return {
+      recipientName: "",
+      postalCode: "",
+      phone: "",
+      address: "",
+    };
+  }
+
+  const section: string[] = [];
+
+  for (let i = start + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+
+    if (
+      line.includes("거래 요청사항") ||
+      line.includes("거래정보") ||
+      line.includes("주문번호")
+    ) {
+      break;
+    }
+
+    if (line) section.push(line);
+  }
+
+  const recipientName = section[0] || "";
+  const phone = section.find((line) => /^01\d-\d{3,4}-\d{4}$/.test(line)) || "";
+
+  if (shippingType === "GS반값택배") {
+    const storeName =
+      section.find((line) => /^GS\d*/.test(line) || line.includes("GS25")) || "";
+
+    return {
+      recipientName,
+      postalCode: "",
+      phone,
+      address: storeName,
+    };
+  }
+
+  const addressLine =
+    section.find((line) => /^\(\d{5}\)/.test(line)) ||
+    section.find((line) => /\d{5}/.test(line) && /시|도|구|군|로|길/.test(line)) ||
+    "";
+
+  const match = addressLine.match(/^\((\d{5})\)\s*(.+)$/);
+
+  return {
+    recipientName,
+    postalCode: match ? match[1] : "",
+    phone,
+    address: match ? match[2] : addressLine,
+  };
+}
+
+function parseBunjangItems(block: string) {
+  const lines = block
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const productPriceText =
+    block.match(/판매정보\s*\n상품금액\s*\n\s*([\d,]+원)/)?.[1] ||
+    "";
+
+  const price = parsePrice(productPriceText);
+
+  const start = lines.findIndex((line) => line.includes("상품 준비 중"));
+  const end = lines.findIndex((line) => line.includes("배송 예약하기"));
+
+  const candidateLines =
+    start >= 0 && end > start ? lines.slice(start + 2, end) : [];
+
+  const productName =
+    candidateLines.find((line) => !/^[\d,]+원$/.test(line)) || "";
+
+  return {
+    items: productName ? [{ item_text: productName, price }] : [],
+    itemSummary: productName,
+    itemTotalPrice: price ? formatWon(price) : "",
+    total: price,
+  };
+}
+
+function parseBunjangText(text: string): ParsedRow[] {
+  const blocks = splitBunjangBlocks(text);
+
+  return blocks.map((block) => {
+    const lines = block
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    const shippingType = parseBunjangShippingType(block);
+    const addressInfo = parseBunjangAddress(lines, shippingType);
+    const parsedItems = parseBunjangItems(block);
+
+    const nickname = pickNextLine(lines, "구매자");
+    const orderDateRaw =
+      block.match(/\d{2}년\s*\d{2}월\s*\d{2}일\s*\d{2}:\d{2}/)?.[0] || "";
+    const orderDate = normalizeBunjangDate(orderDateRaw);
+
+    return {
+      selected: true,
+      platform: "bunjang",
+      recipientName: addressInfo.recipientName,
+      nickname,
+      postalCode: withApostrophe(addressInfo.postalCode),
+      phone: withApostrophe(addressInfo.phone),
+      address: addressInfo.address,
+      customerOrderNo: `B${nickname}`,
+      itemName: "피규어",
+      contentName: `스와숍-${nickname}`,
+      boxCount: "1",
+      boxType: "1",
+      baseFee: "",
+      orderCount: "1",
+      firstOrderDate: orderDate,
+      itemSummary: parsedItems.itemSummary,
+      itemTotalPrice: parsedItems.itemTotalPrice,
+      sourceOrderDates: orderDate ? [orderDate] : [],
+      items: parsedItems.items,
+      shippingType,
+    };
+  });
+}
+
 function parseDomesticText(text: string, platform: Platform): ParsedRow[] {
+  if (platform === "bunjang") {
+    return parseBunjangText(text);
+  }
+
   const blocks = splitOrderBlocks(text);
   const prefix = PLATFORM_PREFIX[platform];
   const map = new Map<string, ParsedRow>();
@@ -201,6 +371,7 @@ function parseDomesticText(text: string, platform: Platform): ParsedRow[] {
       boxCount: "1",
       boxType: "1",
       baseFee: "",
+      shippingType: "일반택배",
       orderCount: "1",
       firstOrderDate: orderDate,
       itemSummary: parsedItems.itemSummary,
@@ -331,11 +502,12 @@ export async function POST(req: Request) {
     }));
 
     const shippingPayload = freshRows.map((row: ParsedRow) => ({
-      order_id: row.customerOrderNo,
-      carrier: "우체국택배",
-      tracking_number: null,
-      shipping_status: "start",
-    }));
+  order_id: row.customerOrderNo,
+  carrier: "우체국택배",
+  shipping_type: row.shippingType || "일반택배",
+  tracking_number: null,
+  shipping_status: "start",
+}));
 
     const itemPayload = freshRows.flatMap((row: ParsedRow) =>
       (row.items || []).map((item) => ({
