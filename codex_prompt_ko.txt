@@ -1,0 +1,289 @@
+아래에 현재 작동 중인 HTML 코드를 붙일 것이다. 이 코드를 기반으로 수정하고, 기존 출력 포맷과 기존 기능을 유지하면서 필요한 부분만 고쳐라.
+
+프로젝트 설명
+
+이 프로젝트는 eBay 주문 Packing Slip PDF를 입력받아, K-Packet 라벨 업로드용 CSV/XLSX 파일을 생성하는 단일 HTML 기반 도구이다.
+
+현재는 서버, DB, Notion, eBay API 연동 없이 브라우저에서만 동작하는 테스트용 HTML이다.
+향후에는 배송관리 사이트로 확장할 수 있지만, 지금은 PDF 입력 → 주문 파싱 → 화면 확인 → CSV/XLSX 출력 기능이 핵심이다.
+
+중요:
+기존 HTML 코드의 구조와 기존 출력 포맷은 임의로 크게 바꾸지 말 것.
+특히 CSV/XLSX 출력 컬럼은 기존 K-Packet CSV 샘플의 컬럼명과 순서를 그대로 유지해야 한다.
+출력 컬럼을 새로 추가하거나 이름을 바꾸지 말 것.
+
+INPUT
+
+입력 파일은 eBay Seller Hub에서 다운로드한 Packing Slip PDF이다.
+
+특징:
+1. 하나의 PDF 안에 여러 주문이 들어있다.
+2. 주문은 "Order: XX-XXXXX-XXXXX" 형식의 주문번호로 시작한다.
+3. 한 주문이 여러 페이지에 걸쳐 이어질 수 있다.
+4. 따라서 페이지 단위로 주문을 나누면 안 되고, 반드시 "Order:" 패턴 기준으로 주문을 분리해야 한다.
+5. 다음 "Order:" 패턴이 나오기 전까지는 같은 주문으로 처리한다.
+
+PDF에서 추출해야 하는 주요 정보:
+- Order number
+- Order date
+- Sales record #
+- Buyer username
+- Buyer email
+- Phone
+- Shipping service
+- Ship to 수취인 정보
+- 수취인명
+- 주소
+- 도시
+- 주/도
+- 우편번호
+- 국가
+- VAT / IOSS / Buyer Tax ID
+- Item title
+- Item ID
+- Option text
+- Quantity
+- Item price
+- Item total
+- Subtotal
+- Shipping
+- VAT / tax
+- Refund
+- Order total
+
+핵심 파싱 규칙
+
+1. 주문 분리
+- "Order: XX-XXXXX-XXXXX" 패턴을 기준으로 주문을 분리한다.
+- 한 주문이 여러 페이지에 걸쳐 있어도 다음 Order가 나오기 전까지 같은 주문으로 본다.
+
+2. 주소 파싱
+- "Ship to" 블록에서 수취인명, 주소, 도시/주/우편번호, 국가를 추출한다.
+- PDF 텍스트 추출 시 Ship from과 Ship to가 한 줄에 섞일 수 있으므로 발송인 정보는 제거한다.
+- 발송인 관련 값 예:
+  - Sy
+  - 2171 Lakeview Dr
+  - Apt 79
+  - Ypsilanti, MI, 48198-6712
+  - United States
+- 위 값들이 수취인 주소에 섞이면 제거한다.
+
+3. 도시/주/우편번호
+- 일반적으로 다음 형태를 파싱한다:
+  City, State, PostalCode
+  예: Roma, RM, 00185
+- 우편번호는 문자열로 유지한다.
+- 00185 같은 선행 0이 사라지면 안 된다.
+- 미국 우편번호는 기존 Pipedream 규칙처럼 앞 5자리만 사용한다.
+
+4. 국가코드
+- PDF의 국가명은 ISO 2자리 코드로 변환한다.
+- 예:
+  Italy → IT
+  Canada → CA
+  Germany → DE
+  Mexico → MX
+  United States → US
+
+5. 특수문자 변환
+- 수취인명, 주소, 도시, 주, 상품명 등은 비ASCII 문자를 영어 알파벳으로 변환한다.
+- 예:
+  Ortegón → Ortegon
+  Bogotá → Bogota
+  ä → ae
+  ö → oe
+  ü → ue
+  ß → ss
+- 기존 Pipedream의 replaceSpecialChars 규칙을 따른다.
+
+K-Packet 가능 국가 규칙
+
+K-Packet 가능 국가는 기존 Pipedream 국가 목록과 추가 국가 목록을 합친다.
+
+기존 Pipedream 국가:
+NZ, MY, VN, BR, SG, GB, AU, ID, JP, CN, CA, TH, TW, FR, PH, HK, RU, DE, ES
+
+추가 국가:
+AR, AT, BY, BE, KH, CL, EG, FI, HN, IN, IE, IL, IT, KZ, KG, MX, MN, NP, NL, NO, PK, PE, PL, SA, ZA, SE, CH, TR, UA, AE, UZ
+
+K-Packet 가능 국가가 아니면:
+- 해당 주문을 자동으로 보류 상태로 표시한다.
+- CSV/XLSX 출력 대상에서 기본 제외한다.
+- 화면에서 사용자가 상태를 바꿀 수는 있게 한다.
+
+TAX / IOSS 규칙
+
+기존 Pipedream 규칙을 따른다.
+
+1. IOSS
+PDF에 다음 값이 있으면:
+VAT Paid: IOSS - IM2760000742
+
+출력값:
+IM2760000742
+
+2. 호주 ABN
+64652016681이 포함되어 있으면:
+ABN64652016681
+
+3. 영국 VAT
+36560857이 포함되어 있으면:
+GB365608576000
+
+4. 유럽 국가 자동 IOSS
+TAX 값이 비어 있고 국가코드가 아래 중 하나면:
+SE, DE, ES, PL, FR, IE, IT
+
+출력값:
+IM2760000742
+
+5. AU 자동 TAX
+TAX 값이 비어 있고 국가코드가 AU면:
+ABN64652016681
+
+6. GB 자동 TAX
+TAX 값이 비어 있고 국가코드가 GB면:
+GB365608576000
+
+7. 멕시코 RFC
+PDF에 다음 형태가 있으면:
+Buyer Tax ID: RFC CAPA961116HX5
+
+출력값은 RFC 뒤의 번호만 사용한다:
+CAPA961116HX5
+
+즉, "RFC" 문자열은 제거하고 실제 번호만 CSV의 TAX 컬럼에 넣는다.
+
+가격 규칙
+
+기존 Pipedream의 가격 규칙을 따른다.
+
+1. TAX/IOSS 값이 존재하는 경우
+- PDF에서 추출한 Subtotal 값을 그대로 사용한다.
+
+2. TAX/IOSS 값이 없는 경우
+- 국가코드가 US가 아니면 가격을 15로 고정한다.
+
+3. US 예외
+- 국가코드가 US면 TAX/IOSS가 없어도 원래 가격을 유지한다.
+
+4. Subtotal 파싱 주의
+- PDF 텍스트 추출 결과에서 금액이 화면 순서와 다르게 나올 수 있다.
+- eBay PDF에서는 라벨이 Subtotal / Shipping / VAT / Order total 순서로 보이더라도, 값은 Order total / VAT / Shipping / Subtotal 순서로 추출되는 경우가 있다.
+- 따라서 첫 번째 주문 예시는 다음과 같이 잡혀야 한다:
+  Order: 27-14536-52033
+  Subtotal: 69.87
+  Shipping: 12.51
+  VAT: 18.12
+  Order total: 100.50
+
+수량 규칙
+
+1. 주문 내 모든 상품의 Quantity를 합산한다.
+2. PDF 텍스트 추출 시 수량/가격 줄이 두 가지 형태로 나타날 수 있다.
+   - 형태 A: 1 $17.77 $17.77
+   - 형태 B: 상품명 ... (Item ID: 254342418531) 1 $17.33 $17.33
+3. 수량이 0으로 나오면 안 된다.
+4. 수량을 명확히 못 잡는 경우에는 Item ID 개수를 기준으로 최소한 각 상품 1개로 계산한다.
+
+내용품 / HSCODE 규칙
+
+기존 Pipedream 규칙을 따른다.
+
+1. 기본값
+- 내용품: photocard
+- HSCODE: 4909000000
+- 높이: 1
+
+2. 상품명 또는 옵션에 plush가 포함된 경우
+- 내용품: toy
+- HSCODE: 9503003411
+- 높이: 8
+
+주문 상태 규칙
+
+현재는 상품 단위 상태관리는 하지 않는다.
+주문 단위 상태만 관리한다.
+
+process_status 값:
+- ready: 바로처리
+- pending: 보류
+- refund: 환불필요
+- contact: 구매자문의중
+- cancelled: 취소완료
+- completed: 처리완료
+
+기본 상태:
+- K-Packet 가능 국가이면 ready
+- K-Packet 불가 국가이면 pending
+- Refund 라인이 감지되면 refund 또는 확인 필요 상태로 표시
+
+Combined Shipping 기능
+
+1. PDF 파싱 후, 수취인명 + 국가코드가 같은 주문이 있으면 화면 상단 알림창에 묶음배송 후보를 제안한다.
+2. 자동으로 합치지 않는다.
+3. 사용자가 combined shipping 버튼을 누른 경우에만 통합한다.
+
+통합 규칙:
+- 주문번호는 슬래시로 연결한다.
+- 개수는 합산한다.
+- 가격은 각 주문의 출력 가격을 기준으로 합산한다.
+- 주소/수취인/국가/전화번호는 대표 주문의 값을 사용한다.
+
+출력:
+- 기존 CSV/XLSX 70개 컬럼은 절대 변경하지 않는다.
+- combined shipping 행도 기존 포맷의 한 행으로 출력한다.
+- 고객주문번호 컬럼에 통합 주문번호를 넣는다.
+
+OUTPUT
+
+출력은 CSV 또는 XLSX이다.
+
+중요:
+1. 기존 K-Packet CSV 샘플의 70개 컬럼명과 순서를 그대로 유지한다.
+2. 컬럼명을 바꾸지 않는다.
+3. 새 컬럼을 추가하지 않는다.
+4. 상품요약 같은 임의 컬럼을 추가하지 않는다.
+
+주요 출력 컬럼 매핑:
+- ★수취인명: 변환된 수취인명
+- 수취인EMAIL: eBay member email
+- ★14전화번호: 정리된 전화번호
+- ★16국가코드: ISO 2자리 국가코드
+- ★16국가명: ISO 2자리 국가코드
+- ★15우편번호: 문자열 우편번호
+- ★13상세주소: 상세주소
+- ★12시/군/구: city
+- ★11주/도/시: state/province
+- ★내용품: photocard 또는 toy
+- ★개수: Quantity 합산
+- ★가격: 가격 규칙에 따라 계산된 값
+- HSCODE(숫자만 10자리): 내용품별 HSCODE
+- 고객주문번호: eBay order number 또는 combined order number
+- ★IOSS/EORI/TAX NUMBER식별 번호: 정규화된 TAX/IOSS 값
+
+고정값:
+- 단위: USD
+- 생산지: KR
+- 배송방식: K-Packet
+- EMS/K-Packet 구분값: K
+- 상세 서비스 코드: rl
+- 수출우편물 정보 관세청 제공 여부: Y
+- 부피중량 적용 제외 여부: Y
+
+현재 코드 수정 시 주의사항
+
+1. 기존 HTML을 통째로 다시 만들지 말고, 필요한 함수만 수정하거나 추가한다.
+2. 기존 CSV/XLSX 70개 컬럼 출력 포맷은 유지한다.
+3. 출력 컬럼을 추가하지 않는다.
+4. 화면 미리보기용 정보가 필요하더라도 CSV/XLSX에는 반영하지 않는다.
+5. 가격과 개수는 PDF 파싱 결과에서 정확히 계산되어야 한다.
+6. 첫 번째 주문 테스트 기준:
+   - Order: 27-14536-52033
+   - 수취인: Valentina Iorio
+   - 국가: IT
+   - 우편번호: 00185
+   - IOSS: IM2760000742
+   - 개수: 3
+   - 가격: 69.87
+7. 이 값이 틀리면 파싱 로직이 잘못된 것이다.
