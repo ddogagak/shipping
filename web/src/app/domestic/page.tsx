@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import * as XLSX from "xlsx";
 
 type Platform = "wise" | "x" | "bunjang";
@@ -19,6 +19,10 @@ type DomesticRow = {
   boxCount: string;
   boxType: string;
   baseFee: string;
+
+  orderCount: string;
+  itemSummary: string;
+  itemTotalPrice: string;
 };
 
 const PLATFORM_TABS: { value: Platform; label: string; prefix: string }[] = [
@@ -38,6 +42,9 @@ const HEADERS = [
   "박스수량",
   "박스타입",
   "기본운임",
+  "주문건수",
+  "아이템",
+  "상품금액합계",
 ];
 
 function platformPrefix(platform: Platform) {
@@ -49,9 +56,9 @@ function safeText(value: unknown) {
 }
 
 function withApostrophe(value: string) {
-  const clean = safeText(value);
+  const clean = safeText(value).replace(/^'+/, "");
   if (!clean) return "";
-  return clean.startsWith("'") ? clean : `'${clean}`;
+  return `'${clean}`;
 }
 
 function parseNameAndNickname(line: string) {
@@ -71,27 +78,80 @@ function parseNameAndNickname(line: string) {
   };
 }
 
-function splitBlocks(text: string) {
-  return text
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .split(/(?=배송\s*정보)/g)
-    .map((block) => block.trim())
+function splitOrderBlocks(text: string) {
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+
+  if (!normalized) return [];
+
+  const datePattern = /\d{4}\.\s*\d{2}\.\s*\d{2}\s*\/\s*\d{2}:\d{2}/g;
+  const matches = [...normalized.matchAll(datePattern)];
+
+  if (!matches.length) {
+    return [normalized];
+  }
+
+  return matches
+    .map((match, index) => {
+      const start = match.index || 0;
+      const end =
+        index + 1 < matches.length ? matches[index + 1].index || normalized.length : normalized.length;
+
+      return normalized.slice(start, end).trim();
+    })
     .filter(Boolean);
 }
 
-function parseDomesticText(text: string, platform: Platform): DomesticRow[] {
-  const blocks = splitBlocks(text);
-  const prefix = platformPrefix(platform);
+function parsePrice(value: string) {
+  return Number(value.replace(/[^0-9]/g, "")) || 0;
+}
 
-  return blocks.map((block) => {
+function formatWon(value: number) {
+  return `${value.toLocaleString("ko-KR")}원`;
+}
+
+function parseItems(block: string) {
+  const lines = block
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const items: string[] = [];
+  let total = 0;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+
+    if (!line.startsWith("#")) continue;
+
+    const itemName = line;
+    const priceLine = lines[i + 1] || "";
+    const price = parsePrice(priceLine);
+
+    items.push(itemName);
+
+    if (price) {
+      total += price;
+    }
+  }
+
+  return {
+    itemSummary: items.join(" / "),
+    itemTotalPrice: total ? formatWon(total) : "",
+  };
+}
+
+function groupBlocksByRecipient(blocks: string[], platform: Platform): DomesticRow[] {
+  const prefix = platformPrefix(platform);
+  const map = new Map<string, DomesticRow>();
+
+  blocks.forEach((block) => {
     const lines = block
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean);
 
     const shippingInfoIndex = lines.findIndex((line) => line.includes("배송 정보"));
-    const nameLine = lines[shippingInfoIndex + 1] || "";
+    const nameLine = shippingInfoIndex >= 0 ? lines[shippingInfoIndex + 1] || "" : "";
 
     const addressLine =
       lines.find((line) => /^\[\d{5}\]/.test(line)) ||
@@ -107,8 +167,24 @@ function parseDomesticText(text: string, platform: Platform): DomesticRow[] {
     const phone = phoneLine.replace(/\(.*?\)/g, "").trim();
 
     const { recipientName, nickname } = parseNameAndNickname(nameLine);
+    const { itemSummary, itemTotalPrice } = parseItems(block);
 
-    return {
+    const key = `${recipientName}|${nickname}|${postalCode}|${phone}|${address}`;
+
+    const existing = map.get(key);
+
+    if (existing) {
+      const nextOrderCount = Number(existing.orderCount || 0) + 1;
+      const nextTotal =
+        parsePrice(existing.itemTotalPrice) + parsePrice(itemTotalPrice);
+
+      existing.orderCount = String(nextOrderCount);
+      existing.itemSummary = [existing.itemSummary, itemSummary].filter(Boolean).join(" / ");
+      existing.itemTotalPrice = nextTotal ? formatWon(nextTotal) : "";
+      return;
+    }
+
+    map.set(key, {
       selected: true,
       platform,
       recipientName,
@@ -122,8 +198,18 @@ function parseDomesticText(text: string, platform: Platform): DomesticRow[] {
       boxCount: "1",
       boxType: "1",
       baseFee: "",
-    };
+      orderCount: "1",
+      itemSummary,
+      itemTotalPrice,
+    });
   });
+
+  return Array.from(map.values());
+}
+
+function parseDomesticText(text: string, platform: Platform): DomesticRow[] {
+  const blocks = splitOrderBlocks(text);
+  return groupBlocksByRecipient(blocks, platform);
 }
 
 function toExcelRow(row: DomesticRow) {
@@ -138,6 +224,9 @@ function toExcelRow(row: DomesticRow) {
     박스수량: row.boxCount,
     박스타입: row.boxType,
     기본운임: row.baseFee,
+    주문건수: row.orderCount,
+    아이템: row.itemSummary,
+    상품금액합계: row.itemTotalPrice,
   };
 }
 
@@ -190,6 +279,9 @@ export default function DomesticPage() {
       { wch: 10 },
       { wch: 10 },
       { wch: 12 },
+      { wch: 10 },
+      { wch: 80 },
+      { wch: 16 },
     ];
 
     const workbook = XLSX.utils.book_new();
@@ -304,7 +396,7 @@ export default function DomesticPage() {
             <table
               style={{
                 width: "100%",
-                minWidth: 1200,
+                minWidth: 1500,
                 borderCollapse: "collapse",
                 fontSize: 13,
               }}
@@ -331,58 +423,20 @@ export default function DomesticPage() {
                         }
                       />
                     </td>
-                    <EditableCell
-                      value={row.recipientName}
-                      onChange={(value) =>
-                        updateRow(index, { recipientName: value })
-                      }
-                    />
-                    <EditableCell
-                      value={row.postalCode}
-                      onChange={(value) =>
-                        updateRow(index, { postalCode: withApostrophe(value) })
-                      }
-                    />
-                    <EditableCell
-                      value={row.phone}
-                      onChange={(value) =>
-                        updateRow(index, { phone: withApostrophe(value) })
-                      }
-                    />
-                    <EditableCell
-                      value={row.address}
-                      onChange={(value) => updateRow(index, { address: value })}
-                      wide
-                    />
-                    <EditableCell
-                      value={row.customerOrderNo}
-                      onChange={(value) =>
-                        updateRow(index, { customerOrderNo: value })
-                      }
-                    />
-                    <EditableCell
-                      value={row.itemName}
-                      onChange={(value) => updateRow(index, { itemName: value })}
-                    />
-                    <EditableCell
-                      value={row.contentName}
-                      onChange={(value) =>
-                        updateRow(index, { contentName: value })
-                      }
-                      wide
-                    />
-                    <EditableCell
-                      value={row.boxCount}
-                      onChange={(value) => updateRow(index, { boxCount: value })}
-                    />
-                    <EditableCell
-                      value={row.boxType}
-                      onChange={(value) => updateRow(index, { boxType: value })}
-                    />
-                    <EditableCell
-                      value={row.baseFee}
-                      onChange={(value) => updateRow(index, { baseFee: value })}
-                    />
+
+                    <EditableCell value={row.recipientName} onChange={(value) => updateRow(index, { recipientName: value })} />
+                    <EditableCell value={row.postalCode} onChange={(value) => updateRow(index, { postalCode: withApostrophe(value) })} />
+                    <EditableCell value={row.phone} onChange={(value) => updateRow(index, { phone: withApostrophe(value) })} />
+                    <EditableCell value={row.address} onChange={(value) => updateRow(index, { address: value })} wide />
+                    <EditableCell value={row.customerOrderNo} onChange={(value) => updateRow(index, { customerOrderNo: value })} />
+                    <EditableCell value={row.itemName} onChange={(value) => updateRow(index, { itemName: value })} />
+                    <EditableCell value={row.contentName} onChange={(value) => updateRow(index, { contentName: value })} wide />
+                    <EditableCell value={row.boxCount} onChange={(value) => updateRow(index, { boxCount: value })} />
+                    <EditableCell value={row.boxType} onChange={(value) => updateRow(index, { boxType: value })} />
+                    <EditableCell value={row.baseFee} onChange={(value) => updateRow(index, { baseFee: value })} />
+                    <EditableCell value={row.orderCount} onChange={(value) => updateRow(index, { orderCount: value })} />
+                    <EditableCell value={row.itemSummary} onChange={(value) => updateRow(index, { itemSummary: value })} extraWide />
+                    <EditableCell value={row.itemTotalPrice} onChange={(value) => updateRow(index, { itemTotalPrice: value })} />
                   </tr>
                 ))}
               </tbody>
@@ -398,10 +452,12 @@ function EditableCell({
   value,
   onChange,
   wide,
+  extraWide,
 }: {
   value: string;
   onChange: (value: string) => void;
   wide?: boolean;
+  extraWide?: boolean;
 }) {
   return (
     <td style={tdStyle}>
@@ -409,7 +465,7 @@ function EditableCell({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         style={{
-          width: wide ? 360 : 160,
+          width: extraWide ? 520 : wide ? 360 : 160,
           border: "1px solid #d1d5db",
           borderRadius: 8,
           padding: "6px 8px",
@@ -420,22 +476,22 @@ function EditableCell({
   );
 }
 
-const cardStyle: React.CSSProperties = {
+const cardStyle: CSSProperties = {
   border: "1px solid #e5e7eb",
   borderRadius: 16,
   padding: 20,
   background: "#fff",
 };
 
-const labelStyle: React.CSSProperties = {
+const labelStyle: CSSProperties = {
   display: "block",
   fontWeight: 800,
   marginBottom: 8,
 };
 
-const textareaStyle: React.CSSProperties = {
+const textareaStyle: CSSProperties = {
   width: "100%",
-  minHeight: 220,
+  minHeight: 260,
   border: "1px solid #d1d5db",
   borderRadius: 12,
   padding: 12,
@@ -443,7 +499,7 @@ const textareaStyle: React.CSSProperties = {
   lineHeight: 1.5,
 };
 
-const primaryButtonStyle: React.CSSProperties = {
+const primaryButtonStyle: CSSProperties = {
   border: 0,
   borderRadius: 10,
   padding: "10px 14px",
@@ -453,7 +509,7 @@ const primaryButtonStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 
-const darkButtonStyle: React.CSSProperties = {
+const darkButtonStyle: CSSProperties = {
   border: 0,
   borderRadius: 10,
   padding: "10px 14px",
@@ -461,7 +517,7 @@ const darkButtonStyle: React.CSSProperties = {
   fontWeight: 800,
 };
 
-function tabStyle(active: boolean): React.CSSProperties {
+function tabStyle(active: boolean): CSSProperties {
   return {
     border: "1px solid " + (active ? "#2563eb" : "#d1d5db"),
     borderRadius: 999,
@@ -473,14 +529,14 @@ function tabStyle(active: boolean): React.CSSProperties {
   };
 }
 
-const thStyle: React.CSSProperties = {
+const thStyle: CSSProperties = {
   textAlign: "left",
   borderBottom: "1px solid #e5e7eb",
   padding: "10px 8px",
   whiteSpace: "nowrap",
 };
 
-const tdStyle: React.CSSProperties = {
+const tdStyle: CSSProperties = {
   borderBottom: "1px solid #f3f4f6",
   padding: "10px 8px",
   verticalAlign: "top",
