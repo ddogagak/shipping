@@ -29,9 +29,7 @@ npm run dev
 
 기본 페이지:
 - `/` : 안내 페이지
-- `/domestic-upload` : 국내 주문 텍스트 업로드/미리보기/엑셀추출/DB저장
-- `/domestic-orders` : 국내 주문조회/필터/상태변경/엑셀추출
-- `/domestic-tracking` : 국내 운송장 매칭 미리보기/업데이트
+- `/domestic` : Domestic Order 입력/조회/상태변경
 - `/orders` : orders 목록 화면
 - `/import` : eBay Orders Report CSV 미리보기 + DB 저장
 
