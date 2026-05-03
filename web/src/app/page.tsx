@@ -36,14 +36,8 @@ export default async function HomePage() {
           주문 업로드, 주문 관리, 운송장 업로드를 처리합니다.
         </p>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: 12,
-            marginTop: 24,
-          }}
-        >
+        <h2 style={{ marginTop: 28, marginBottom: 12 }}>Overseas</h2>
+        <div style={gridStyle}>
           <Link href="/orders" style={cardStyle("#fff", "#e5e7eb")}>
             <div style={titleStyle}>Overseas Order</div>
             <p style={descStyle}>해외 주문 조회 및 상태 관리</p>
@@ -67,10 +61,26 @@ export default async function HomePage() {
               Last update: {formatDate(lastTrackingUpload?.created_at)}
             </p>
           </Link>
+        </div>
 
-          <Link href="/domestic" style={cardStyle("#f9fafb", "#e5e7eb")}>
-            <div style={titleStyle}>Domestic</div>
-            <p style={descStyle}>국내 주문 관리</p>
+        <h2 style={{ marginTop: 28, marginBottom: 12 }}>Domestic</h2>
+        <div style={gridStyle}>
+          <Link href="/domestic-upload" style={cardStyle("#f9fafb", "#e5e7eb")}>
+            <div style={titleStyle}>Domestic Upload</div>
+            <p style={descStyle}>국내 주문 텍스트 업로드/엑셀 추출</p>
+          </Link>
+
+          <Link href="/domestic-orders" style={cardStyle("#f9fafb", "#e5e7eb")}>
+            <div style={titleStyle}>Domestic Orders</div>
+            <p style={descStyle}>국내 주문 조회 및 상태 관리</p>
+          </Link>
+
+          <Link
+            href="/domestic-tracking"
+            style={cardStyle("#f9fafb", "#e5e7eb")}
+          >
+            <div style={titleStyle}>Domestic Tracking</div>
+            <p style={descStyle}>국내 운송장 매칭/업데이트</p>
           </Link>
         </div>
       </section>
@@ -101,6 +111,12 @@ function cardStyle(bg: string, border: string): React.CSSProperties {
     display: "block",
   };
 }
+
+const gridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: 12,
+};
 
 const titleStyle: React.CSSProperties = {
   fontSize: 22,

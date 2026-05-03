@@ -23,8 +23,6 @@
     button { border:0; border-radius:12px; padding:10px 14px; font-weight:700; cursor:pointer; background:#e5e7eb; color:#111827; }
     button.primary { background:var(--accent); color:#fff; }
     button.green { background:#059669; color:#fff; }
-    button.dbsave { background:#7c3aed; color:#fff; box-shadow:0 6px 14px rgba(124,58,237,.22); }
-    button.dbsave:not(:disabled):hover { background:#6d28d9; }
     button.warn { background:#f59e0b; color:#111827; }
     button.red { background:#ef4444; color:#fff; }
     button:disabled { opacity:.45; cursor:not-allowed; }
@@ -84,8 +82,9 @@
       <button class="primary" id="parsePdfBtn">PDF 파싱</button>
       <button id="parseTextBtn">붙여넣은 텍스트 파싱</button>
       <button id="selectReadyBtn">바로처리만 선택</button>
+      <button id="selectAllBtn">전체 선택</button>
       <button id="clearBtn">초기화</button>
-      <button class="dbsave" id="saveDbBtn" disabled>DB 저장</button>
+      <button id="saveDbBtn" disabled>DB 저장(준비중)</button>
       <button class="green" id="downloadCsvBtn" disabled>CSV 다운로드</button>
       <button class="green" id="downloadXlsxBtn" disabled>XLSX 다운로드</button>
     </div>
@@ -112,7 +111,7 @@
       <table id="ordersTable">
         <thead>
           <tr>
-            <th><label style="display:flex;align-items:center;gap:6px;margin:0;font-size:12px;font-weight:800;"><input id="toggleAllSelected" type="checkbox" style="width:auto;margin:0;">선택</label></th><th>처리상태</th><th>주문번호</th><th>날짜</th><th>Username</th><th>수취인</th><th>국가</th><th>전화</th><th>우편번호</th><th>상세주소</th><th>도시</th><th>주/도</th><th>내용품</th><th>개수</th><th>가격</th><th>TAX/IOSS</th><th>메모</th>
+            <th>선택</th><th>처리상태</th><th>주문번호</th><th>날짜</th><th>Username</th><th>수취인</th><th>국가</th><th>전화</th><th>우편번호</th><th>상세주소</th><th>도시</th><th>주/도</th><th>내용품</th><th>개수</th><th>가격</th><th>TAX/IOSS</th><th>메모</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -141,8 +140,6 @@ const COUNTRY_CODES = {
 };
 const CALLING_CODES = { US:"1", CA:"1", IT:"39", NZ:"64", DE:"49", CO:"57", MX:"52", GB:"44", AU:"61", FR:"33", ES:"34", BR:"55", JP:"81", CN:"86", SG:"65", MY:"60", VN:"84", TH:"66", TW:"886", HK:"852", NL:"31", SE:"46", CH:"41", TR:"90", AE:"971", IE:"353", IL:"972", PL:"48", AT:"43", BE:"32", FI:"358", NO:"47", RU:"7", ID:"62", PH:"63" };
 let orders = [];
-const IMPORT_SAVE_API_URL = "https://shipping-khaki.vercel.app/api/import/save";
-const ORDER_LIST_URL = "https://shipping-khaki.vercel.app/orders";
 
 if (window.pdfjsLib) {
   pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
@@ -782,13 +779,6 @@ function renderOrders() {
   document.getElementById("summary").style.display = orders.length ? "grid" : "none";
   document.getElementById("downloadCsvBtn").disabled = !orders.length;
   document.getElementById("downloadXlsxBtn").disabled = !orders.length;
-  document.getElementById("saveDbBtn").disabled = !orders.length;
-  const toggleAll = document.getElementById("toggleAllSelected");
-  if (toggleAll) {
-    const selectedCount = orders.filter(o => o.selected).length;
-    toggleAll.checked = orders.length > 0 && selectedCount === orders.length;
-    toggleAll.indeterminate = selectedCount > 0 && selectedCount < orders.length;
-  }
   updateSummary();
   renderCombinedSuggestions();
 }
@@ -831,77 +821,6 @@ function updateSummary() {
   document.getElementById("sumKpacket").textContent = orders.filter(o=>KPACKET_COUNTRIES.has(o.country_code)).length;
   document.getElementById("sumSelected").textContent = orders.filter(o=>o.selected).length;
 }
-function toggleAllSelectedFromHeader(checked) {
-  orders.forEach(o => { o.selected = checked; });
-  renderOrders();
-}
-
-function buildShippingExportObject(o) {
-  const values = buildOutputRow(o);
-  const obj = {};
-  OUTPUT_HEADERS.forEach((header, index) => {
-    obj[header] = values[index] ?? "";
-  });
-  return obj;
-}
-
-function buildDbOrderPayload(o) {
-  return {
-    ...o,
-    shipping_export: buildShippingExportObject(o)
-  };
-}
-
-async function saveOrdersToDb() {
-  const rows = selectedRows();
-
-  if (!rows.length) {
-    alert("DB에 저장할 선택 주문이 없어.");
-    return;
-  }
-
-  const combinedRows = rows.filter(o => o.isCombined);
-  if (combinedRows.length) {
-    const ok = confirm(
-      "combined shipping 처리된 행이 포함되어 있어.\n" +
-      "DB에도 통합 주문번호(A/B/C)와 합산 수량/가격 기준으로 저장돼.\n\n" +
-      "그래도 저장할까?"
-    );
-    if (!ok) return;
-  }
-
-  if (!confirm(`${rows.length}건을 DB에 저장할까?`)) {
-    return;
-  }
-
-  try {
-    const response = await fetch(IMPORT_SAVE_API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ orders: rows.map(buildDbOrderPayload) }),
-    });
-
-    const result = await response.json();
-
-    if (!response.ok) {
-      throw new Error(result.detail || result.error || "DB 저장 실패");
-    }
-
-    const savedOrders = result.saved_orders ?? result.saved ?? result.orders_count ?? rows.length;
-    const savedShipping = result.saved_shipping ?? 0;
-    const savedItems = result.saved_items ?? result.items_count ?? 0;
-
-    alert(`DB 저장 완료\n주문 기본정보: ${savedOrders}건\n배송 export 정보: ${savedShipping}건\n아이템 정보: ${savedItems}건`);
-    log(`DB 저장 완료: ebay_order ${savedOrders}건 / ebay_shipping ${savedShipping}건 / ebay_order_item ${savedItems}건`);
-
-    window.location.href = ORDER_LIST_URL;
-  } catch (error) {
-    console.error(error);
-    alert("DB 저장 오류: " + error.message);
-    log("DB 저장 오류: " + error.message);
-  }
-}
-
 function buildOutputRow(o) {
   const row = Object.fromEntries(OUTPUT_HEADERS.map(h => [h, ""]));
   const content = o.content || "photocard";
@@ -1031,8 +950,7 @@ document.getElementById("combinedSuggestions").addEventListener("click", (e) => 
 });
 document.getElementById("downloadXlsxBtn").addEventListener("click", downloadXlsx);
 document.getElementById("selectReadyBtn").addEventListener("click", () => { orders.forEach(o => o.selected = o.process_status === "ready"); renderOrders(); });
-document.getElementById("saveDbBtn").addEventListener("click", saveOrdersToDb);
-document.getElementById("toggleAllSelected").addEventListener("change", (e) => { toggleAllSelectedFromHeader(e.target.checked); });
+document.getElementById("selectAllBtn").addEventListener("click", () => { orders.forEach(o => o.selected = true); renderOrders(); });
 document.getElementById("clearBtn").addEventListener("click", () => { orders = []; document.getElementById("rawText").value = ""; document.getElementById("pdfFile").value = ""; document.getElementById("csvFile").value = ""; renderOrders(); log("초기화 완료"); });
 </script>
 </body>
