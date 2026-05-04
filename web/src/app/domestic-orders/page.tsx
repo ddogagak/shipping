@@ -580,9 +580,7 @@ const tdStyle: CSSProperties = {
   padding: "10px 8px",
   verticalAlign: "top",
 };
-"use client";
 
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import * as XLSX from "xlsx";
 
 type DomesticOrder = {
