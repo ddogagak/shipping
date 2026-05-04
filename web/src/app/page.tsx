@@ -83,12 +83,12 @@ export default async function HomePage() {
             <p style={descStyle}>국내 운송장 매칭/업데이트</p>
           </Link>
 
-                    <a href="/archive" style={cardStyle}>
-            <h2 style={{ marginTop: 0 }}>보관소</h2>
-            <p style={{ color: "#6b7280" }}>
+          <Link href="/archive" style={cardStyle("#fff", "#e5e7eb")}>
+            <div style={titleStyle}>보관소</div>
+            <p style={descStyle}>
               PDF / 엑셀 파일을 업로드하고 내려받습니다.
             </p>
-          </a>
+          </Link>
 
           
         </div>
