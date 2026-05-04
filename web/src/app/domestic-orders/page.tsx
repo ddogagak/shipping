@@ -137,16 +137,35 @@ function toExcelRow(row: DomesticOrder) {
   };
 }
 
-function sortValue(row: Row, key: SortKey) {
+function sortValue(row: Row, key: SortKey): string | number {
   const s = shipping(row);
 
-  if (key === "shipping_status") return s?.shipping_status || "start";
-  if (key === "shipping_type") return s?.shipping_type || "일반택배";
-  if (key === "tracking_number") return s?.tracking_number || "";
-  if (key === "order_count") return Number(row.order_count || 0);
-  if (key === "item_total_price") return Number(row.item_total_price || 0);
-
-  return String(row[key] || "");
+  switch (key) {
+    case "platform":
+      return row.platform || "";
+    case "order_id":
+      return row.order_id || "";
+    case "nickname":
+      return row.nickname || "";
+    case "order_count":
+      return Number(row.order_count || 0);
+    case "first_order_date":
+      return row.first_order_date || "";
+    case "item_summary":
+      return row.item_summary || "";
+    case "item_total_price":
+      return Number(row.item_total_price || 0);
+    case "order_status":
+      return row.order_status || "";
+    case "shipping_status":
+      return s?.shipping_status || "start";
+    case "shipping_type":
+      return s?.shipping_type || "일반택배";
+    case "tracking_number":
+      return s?.tracking_number || "";
+    default:
+      return "";
+  }
 }
 
 function compareRows(a: Row, b: Row, key: SortKey, direction: SortDirection) {
