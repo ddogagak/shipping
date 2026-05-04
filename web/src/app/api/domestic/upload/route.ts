@@ -19,13 +19,13 @@ type ParsedRow = {
   boxCount: string;
   boxType: string;
   baseFee: string;
-  shippingType: string;
   orderCount: string;
   firstOrderDate: string;
   itemSummary: string;
   itemTotalPrice: string;
   sourceOrderDates: string[];
   items: { item_text: string; price: number }[];
+  shippingType: string;
 };
 
 const PLATFORM_PREFIX: Record<Platform, string> = {
@@ -141,16 +141,13 @@ function firstDate(a: string, b: string) {
 
 function normalizeBunjangDate(value: string) {
   const text = safeText(value);
-
   const match = text.match(/(\d{2})년\s*(\d{2})월\s*(\d{2})일\s*(\d{2}):(\d{2})/);
   if (!match) return "";
-
   return `20${match[1]}.${match[2]}.${match[3]} ${match[4]}:${match[5]}`;
 }
 
 function splitBunjangBlocks(text: string) {
   const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
-
   if (!normalized) return [];
 
   return normalized
@@ -171,26 +168,19 @@ function parseBunjangShippingType(block: string) {
 
   if (method.includes("GS반값택배")) return "GS반값택배";
   if (method.includes("일반택배") && shippingFee > 0 && shippingFee <= 2900) return "준등기";
-
   return "일반택배";
 }
 
 function parseBunjangAddress(lines: string[], shippingType: string) {
   const start = lines.findIndex((line) => line.includes("배송지정보"));
   if (start < 0) {
-    return {
-      recipientName: "",
-      postalCode: "",
-      phone: "",
-      address: "",
-    };
+    return { recipientName: "", postalCode: "", phone: "", address: "" };
   }
 
   const section: string[] = [];
 
   for (let i = start + 1; i < lines.length; i += 1) {
     const line = lines[i];
-
     if (
       line.includes("거래 요청사항") ||
       line.includes("거래정보") ||
@@ -198,7 +188,6 @@ function parseBunjangAddress(lines: string[], shippingType: string) {
     ) {
       break;
     }
-
     if (line) section.push(line);
   }
 
@@ -239,19 +228,14 @@ function parseBunjangItems(block: string) {
     .filter(Boolean);
 
   const productPriceText =
-    block.match(/판매정보\s*\n상품금액\s*\n\s*([\d,]+원)/)?.[1] ||
-    "";
-
+    block.match(/판매정보\s*\n상품금액\s*\n\s*([\d,]+원)/)?.[1] || "";
   const price = parsePrice(productPriceText);
 
   const start = lines.findIndex((line) => line.includes("상품 준비 중"));
   const end = lines.findIndex((line) => line.includes("배송 예약하기"));
+  const candidateLines = start >= 0 && end > start ? lines.slice(start + 2, end) : [];
 
-  const candidateLines =
-    start >= 0 && end > start ? lines.slice(start + 2, end) : [];
-
-  const productName =
-    candidateLines.find((line) => !/^[\d,]+원$/.test(line)) || "";
+  const productName = candidateLines.find((line) => !/^[\d,]+원$/.test(line)) || "";
 
   return {
     items: productName ? [{ item_text: productName, price }] : [],
@@ -275,8 +259,7 @@ function parseBunjangText(text: string): ParsedRow[] {
     const parsedItems = parseBunjangItems(block);
 
     const nickname = pickNextLine(lines, "구매자");
-    const orderDateRaw =
-      block.match(/\d{2}년\s*\d{2}월\s*\d{2}일\s*\d{2}:\d{2}/)?.[0] || "";
+    const orderDateRaw = block.match(/\d{2}년\s*\d{2}월\s*\d{2}일\s*\d{2}:\d{2}/)?.[0] || "";
     const orderDate = normalizeBunjangDate(orderDateRaw);
 
     return {
@@ -371,13 +354,13 @@ function parseDomesticText(text: string, platform: Platform): ParsedRow[] {
       boxCount: "1",
       boxType: "1",
       baseFee: "",
-      shippingType: "일반택배",
       orderCount: "1",
       firstOrderDate: orderDate,
       itemSummary: parsedItems.itemSummary,
       itemTotalPrice: parsedItems.itemTotalPrice,
       sourceOrderDates: orderDate ? [orderDate] : [],
       items: parsedItems.items,
+      shippingType: "일반택배",
     });
   });
 
@@ -399,7 +382,6 @@ export async function POST(req: Request) {
       const text = safeText(form.get("text"));
 
       const parsed = parseDomesticText(text, platform);
-
       const orderIds = parsed.map((row) => row.customerOrderNo).filter(Boolean);
 
       const { data: existing, error } = orderIds.length
@@ -417,7 +399,6 @@ export async function POST(req: Request) {
       }
 
       const existingSet = new Set((existing || []).map((row: any) => row.order_id));
-
       const fresh = parsed.filter((row) => !existingSet.has(row.customerOrderNo));
       const duplicated = parsed
         .filter((row) => existingSet.has(row.customerOrderNo))
@@ -439,16 +420,10 @@ export async function POST(req: Request) {
 
     const body = await req.json();
     const rows = Array.isArray(body.rows) ? body.rows : [];
-
     const selectedRows = rows.filter((row: ParsedRow) => row.selected);
 
     if (!selectedRows.length) {
-      return NextResponse.json({
-        ok: true,
-        saved: 0,
-        skipped_count: 0,
-        skipped: [],
-      });
+      return NextResponse.json({ ok: true, saved: 0, skipped_count: 0, skipped: [] });
     }
 
     const orderIds = selectedRows.map((row: ParsedRow) => row.customerOrderNo);
@@ -472,18 +447,10 @@ export async function POST(req: Request) {
 
     const skipped = selectedRows
       .filter((row: ParsedRow) => existingSet.has(row.customerOrderNo))
-      .map((row: ParsedRow) => ({
-        order_id: row.customerOrderNo,
-        reason: "저장 직전 기존 DB 중복",
-      }));
+      .map((row: ParsedRow) => ({ order_id: row.customerOrderNo, reason: "저장 직전 기존 DB 중복" }));
 
     if (!freshRows.length) {
-      return NextResponse.json({
-        ok: true,
-        saved: 0,
-        skipped_count: skipped.length,
-        skipped,
-      });
+      return NextResponse.json({ ok: true, saved: 0, skipped_count: skipped.length, skipped });
     }
 
     const orderPayload = freshRows.map((row: ParsedRow) => ({
@@ -498,16 +465,17 @@ export async function POST(req: Request) {
       address: row.address || null,
       order_count: Number(row.orderCount) || 1,
       item_total_price: numberFromWon(row.itemTotalPrice),
+      item_summary: row.itemSummary || null,
       order_status: "accepted",
     }));
 
     const shippingPayload = freshRows.map((row: ParsedRow) => ({
-  order_id: row.customerOrderNo,
-  carrier: "우체국택배",
-  shipping_type: row.shippingType || "일반택배",
-  tracking_number: null,
-  shipping_status: "start",
-}));
+      order_id: row.customerOrderNo,
+      carrier: "우체국택배",
+      shipping_type: row.shippingType || "일반택배",
+      tracking_number: null,
+      shipping_status: "start",
+    }));
 
     const itemPayload = freshRows.flatMap((row: ParsedRow) =>
       (row.items || []).map((item) => ({
@@ -552,6 +520,10 @@ export async function POST(req: Request) {
       }
     }
 
+    await supabase.from("admin_activity_log").insert({
+      activity_type: "domestic_upload",
+    });
+
     return NextResponse.json({
       ok: true,
       saved: freshRows.length,
@@ -560,10 +532,7 @@ export async function POST(req: Request) {
     });
   } catch (error: any) {
     return NextResponse.json(
-      {
-        error: "국내 주문 업로드 처리 중 오류",
-        detail: error?.message || "Unknown error",
-      },
+      { error: "국내 주문 업로드 처리 중 오류", detail: error?.message || "Unknown error" },
       { status: 500 }
     );
   }
