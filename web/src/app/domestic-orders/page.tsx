@@ -37,7 +37,6 @@ type DomesticOrder = {
 };
 
 type Row = DomesticOrder & { selected: boolean };
-
 type SortKey =
   | "platform"
   | "order_id"
