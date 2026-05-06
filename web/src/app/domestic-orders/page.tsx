@@ -378,6 +378,7 @@ export default function DomesticOrdersPage() {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button type="button" onClick={exportExcel} style={blackButtonStyle}>선택 {selectedIds.length}건 엑셀 추출</button>
             <button type="button" onClick={() => patch("checked")} style={blueButtonStyle}>재고확인 처리</button>
+            <button type="button" onClick={() => patch("tracking_uploaded")} style={purpleButtonStyle}>운송장입력 처리</button>
             <button type="button" onClick={() => patch("order_done")} style={purpleButtonStyle}>주문완료 처리</button>
             <button type="button" onClick={() => patch("shipping_done")} style={greenButtonStyle}>배송완료 처리</button>
           </div>
