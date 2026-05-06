@@ -107,7 +107,8 @@ export default function DomesticUploadPage() {
         body: form,
       });
 
-      const json = await res.json();
+      const text = await res.text();
+      const json = text ? JSON.parse(text) : {};
 
       if (!res.ok) {
         setMessage(json.detail || json.error || "미리보기 실패");
@@ -151,7 +152,8 @@ export default function DomesticUploadPage() {
         }),
       });
 
-      const json = await res.json();
+      const text = await res.text();
+      const json = text ? JSON.parse(text) : {};
 
       if (!res.ok) {
         setMessage(json.detail || json.error || "DB 저장 실패");
