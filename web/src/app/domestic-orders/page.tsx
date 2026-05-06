@@ -1,244 +1,881 @@
-import { NextResponse } from "next/server";
-import { createServiceRoleClient } from "@/lib/supabase/server";
+"use client";
 
-export const runtime = "nodejs";
+import Link from "next/link";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import * as XLSX from "xlsx";
 
-export async function GET() {
-  const supabase = createServiceRoleClient();
+type ShippingInfo = {
+  carrier: string | null;
+  shipping_type: string | null;
+  tracking_number: string | null;
+  shipping_status: string | null;
+  excel_exported_at: string | null;
+};
 
-  const { data, error } = await supabase
-    .from("domestic_order")
-    .select(`
-      order_id,
-      customer_order_no,
-      platform,
-      source_order_dates,
-      first_order_date,
-      nickname,
-      recipient_name,
-      phone,
-      postal_code,
-      address,
-      order_count,
-      item_summary,
-      item_total_price,
-      memo,
-      order_status,
-      created_at,
-      domestic_shipping (
-        carrier,
-        shipping_type,
-        tracking_number,
-        shipping_status,
-        excel_exported_at
-      )
-    `)
-    .order("created_at", { ascending: false });
+type DomesticOrder = {
+  order_id: string;
+  customer_order_no: string | null;
+  platform: string;
+  source_order_dates: string[] | null;
+  first_order_date: string | null;
+  nickname: string | null;
+  recipient_name: string | null;
+  phone: string | null;
+  postal_code: string | null;
+  address: string | null;
+  order_count: number | null;
+  item_summary: string | null;
+  item_total_price: number | null;
+  memo: string | null;
+  order_status: string | null;
+  created_at: string | null;
+  domestic_shipping: ShippingInfo | ShippingInfo[] | null;
+};
 
-  if (error) {
-    return NextResponse.json(
-      { error: "국내 주문 조회 실패", detail: error.message },
-      { status: 500 }
-    );
-  }
+type Row = DomesticOrder & { selected: boolean };
 
-  return NextResponse.json({ ok: true, orders: data || [] });
+type SortKey =
+  | "platform"
+  | "order_id"
+  | "nickname"
+  | "order_count"
+  | "first_order_date"
+  | "memo"
+  | "order_status"
+  | "shipping_status"
+  | "shipping_type"
+  | "tracking_number"
+  | "item_summary"
+  | "item_total_price";
+
+type SortDirection = "asc" | "desc";
+
+const PLATFORM_OPTIONS = [
+  { value: "wise", label: "Wise" },
+  { value: "x", label: "X" },
+  { value: "bunjang", label: "번개장터" },
+];
+
+const ORDER_STATUS_OPTIONS = [
+  { value: "accepted", label: "입력됨" },
+  { value: "checked", label: "재고확인" },
+  { value: "done", label: "완료" },
+];
+
+const SHIPPING_STATUS_OPTIONS = [
+  { value: "start", label: "시작" },
+  { value: "excel_exported", label: "엑셀 추출" },
+  { value: "uploaded", label: "운송장 입력" },
+  { value: "done", label: "배송완료" },
+];
+
+const SHIPPING_TYPE_OPTIONS = [
+  { value: "일반택배", label: "일반택배" },
+  { value: "GS반값택배", label: "GS반값택배" },
+  { value: "준등기", label: "준등기" },
+];
+
+const HEADERS = [
+  "받는분성명",
+  "받는분우편번호",
+  "받는분전화번호",
+  "받는분주소(전체, 분할)",
+  "고객주문번호",
+  "품목명",
+  "내품명",
+  "박스수량",
+  "박스타입",
+  "기본운임",
+  "주문건수",
+  "최초주문일",
+  "아이템",
+  "상품금액합계",
+];
+
+function shipping(row: DomesticOrder): ShippingInfo | null {
+  if (Array.isArray(row.domestic_shipping)) return row.domestic_shipping[0] || null;
+  return row.domestic_shipping || null;
 }
 
-export async function PATCH(req: Request) {
-  const supabase = createServiceRoleClient();
-  const body = await req.json();
+function label(options: { value: string; label: string }[], value?: string | null) {
+  return options.find((option) => option.value === value)?.label || value || "-";
+}
 
-  const orderIds = Array.isArray(body.order_ids)
-    ? body.order_ids.map((v: unknown) => String(v ?? "").trim()).filter(Boolean)
-    : [];
+function formatWon(value?: number | null) {
+  return `${Number(value || 0).toLocaleString("ko-KR")}원`;
+}
 
-  const action = String(body.action || "").trim();
-  const now = new Date().toISOString();
+function withApostrophe(value?: string | null) {
+  const clean = String(value ?? "").trim().replace(/^'+/, "");
+  if (!clean) return "";
+  return `'${clean}`;
+}
 
-  if (action === "update_row") {
-    const orderId = String(body.order_id || "").trim();
+function displayOrderNo(row: DomesticOrder) {
+  return row.customer_order_no || row.order_id;
+}
 
-    if (!orderId) {
-      return NextResponse.json(
-        { error: "order_id가 없습니다." },
-        { status: 400 }
-      );
-    }
+function contentName(row: DomesticOrder) {
+  const prefix = row.platform === "bunjang" ? "스와숍" : "도파민베이커리";
+  return `${prefix}-${row.nickname || ""}`;
+}
 
-    const { error: orderError } = await supabase
-      .from("domestic_order")
-      .update({
-        memo: body.memo ?? null,
-        order_status: body.order_status || "accepted",
-        updated_at: now,
-      })
-      .eq("order_id", orderId);
+function toExcelRow(row: DomesticOrder) {
+  return {
+    받는분성명: row.recipient_name || "",
+    받는분우편번호: withApostrophe(row.postal_code),
+    받는분전화번호: withApostrophe(row.phone),
+    "받는분주소(전체, 분할)": row.address || "",
+    고객주문번호: displayOrderNo(row),
+    품목명: "피규어",
+    내품명: contentName(row),
+    박스수량: "1",
+    박스타입: "1",
+    기본운임: "",
+    주문건수: String(row.order_count || 1),
+    최초주문일: row.first_order_date || "",
+    아이템: row.item_summary || "",
+    상품금액합계: formatWon(row.item_total_price),
+  };
+}
 
-    if (orderError) {
-      return NextResponse.json(
-        { error: "국내 주문 행 저장 실패", detail: orderError.message },
-        { status: 500 }
-      );
-    }
+function sortValue(row: Row, key: SortKey): string | number {
+  const s = shipping(row);
 
-    const { error: shippingError } = await supabase
-      .from("domestic_shipping")
-      .update({
-        shipping_status: body.shipping_status || "start",
-        shipping_type: body.shipping_type || "일반택배",
-        updated_at: now,
-      })
-      .eq("order_id", orderId);
+  switch (key) {
+    case "platform":
+      return row.platform || "";
+    case "order_id":
+      return displayOrderNo(row);
+    case "nickname":
+      return row.nickname || "";
+    case "order_count":
+      return Number(row.order_count || 0);
+    case "first_order_date":
+      return row.first_order_date || "";
+    case "memo":
+      return row.memo || "";
+    case "order_status":
+      return row.order_status || "";
+    case "shipping_status":
+      return s?.shipping_status || "start";
+    case "shipping_type":
+      return s?.shipping_type || "일반택배";
+    case "tracking_number":
+      return s?.tracking_number || "";
+    case "item_summary":
+      return row.item_summary || "";
+    case "item_total_price":
+      return Number(row.item_total_price || 0);
+    default:
+      return "";
+  }
+}
 
-    if (shippingError) {
-      return NextResponse.json(
-        { error: "국내 배송 행 저장 실패", detail: shippingError.message },
-        { status: 500 }
-      );
-    }
+function compareRows(a: Row, b: Row, key: SortKey, direction: SortDirection) {
+  const aValue = sortValue(a, key);
+  const bValue = sortValue(b, key);
+  const factor = direction === "asc" ? 1 : -1;
 
-    return NextResponse.json({ ok: true });
+  if (typeof aValue === "number" && typeof bValue === "number") {
+    return (aValue - bValue) * factor;
   }
 
-  if (!orderIds.length) {
-    return NextResponse.json(
-      { error: "선택된 주문이 없습니다." },
-      { status: 400 }
+  return String(aValue).localeCompare(String(bValue), "ko") * factor;
+}
+
+function defaultShipping(): ShippingInfo {
+  return {
+    carrier: "우체국택배",
+    shipping_type: "일반택배",
+    tracking_number: null,
+    shipping_status: "start",
+    excel_exported_at: null,
+  };
+}
+
+export default function DomesticOrdersPage() {
+  const [rows, setRows] = useState<Row[]>([]);
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const [platforms, setPlatforms] = useState<string[]>([]);
+  const [orderStatuses, setOrderStatuses] = useState<string[]>(["accepted", "checked"]);
+  const [shippingStatuses, setShippingStatuses] = useState<string[]>([
+    "start",
+    "excel_exported",
+    "uploaded",
+  ]);
+  const [shippingTypes, setShippingTypes] = useState<string[]>([]);
+  const [q, setQ] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("first_order_date");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+
+  async function load() {
+    setLoading(true);
+    setMessage("");
+
+    try {
+      const res = await fetch("/api/domestic/orders", { cache: "no-store" });
+      const json = await res.json();
+
+      if (!res.ok) {
+        setMessage(json.detail || json.error || "조회 실패");
+        return;
+      }
+
+      setRows(
+        (json.orders || []).map((row: DomesticOrder) => ({
+          ...row,
+          selected: false,
+        }))
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const filteredRows = useMemo(() => {
+    return rows
+      .filter((row) => {
+        const s = shipping(row);
+        const shippingStatus = s?.shipping_status || "start";
+        const shippingType = s?.shipping_type || "일반택배";
+
+        if (platforms.length && !platforms.includes(row.platform)) return false;
+        if (orderStatuses.length && !orderStatuses.includes(row.order_status || "accepted")) return false;
+        if (shippingStatuses.length && !shippingStatuses.includes(shippingStatus)) return false;
+        if (shippingTypes.length && !shippingTypes.includes(shippingType)) return false;
+
+        if (q.trim()) {
+          const text = [
+            row.order_id,
+            row.customer_order_no,
+            row.platform,
+            row.nickname,
+            row.recipient_name,
+            row.phone,
+            row.postal_code,
+            row.address,
+            row.first_order_date,
+            row.item_summary,
+            row.memo,
+            s?.tracking_number,
+            shippingType,
+          ]
+            .join(" ")
+            .toLowerCase();
+
+          if (!text.includes(q.trim().toLowerCase())) return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => compareRows(a, b, sortKey, sortDirection));
+  }, [rows, platforms, orderStatuses, shippingStatuses, shippingTypes, q, sortKey, sortDirection]);
+
+  const selectedIds = rows.filter((row) => row.selected).map((row) => row.order_id);
+  const selectedRows = rows.filter((row) => row.selected);
+  const allFilteredSelected = filteredRows.length > 0 && filteredRows.every((row) => row.selected);
+
+  function toggleList(list: string[], value: string) {
+    return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
+  }
+
+  function updateSelected(orderId: string, selected: boolean) {
+    setRows((prev) =>
+      prev.map((row) => (row.order_id === orderId ? { ...row, selected } : row))
     );
   }
 
-  if (action === "checked") {
-    const { error } = await supabase
-      .from("domestic_order")
-      .update({ order_status: "checked", updated_at: now })
-      .in("order_id", orderIds);
-
-    if (error) {
-      return NextResponse.json(
-        { error: "재고확인 처리 실패", detail: error.message },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ ok: true });
+  function updateRowValue(orderId: string, patch: Partial<Row>) {
+    setRows((prev) =>
+      prev.map((row) => (row.order_id === orderId ? { ...row, ...patch } : row))
+    );
   }
 
-  if (action === "tracking_uploaded") {
-    const { error } = await supabase
-      .from("domestic_shipping")
-      .update({
-        shipping_status: "uploaded",
-        updated_at: now,
+  function updateShippingValue(orderId: string, patch: Partial<ShippingInfo>) {
+    setRows((prev) =>
+      prev.map((row) => {
+        if (row.order_id !== orderId) return row;
+        const current = shipping(row) || defaultShipping();
+        return {
+          ...row,
+          domestic_shipping: {
+            ...current,
+            ...patch,
+          },
+        };
       })
-      .in("order_id", orderIds);
-
-    if (error) {
-      return NextResponse.json(
-        { error: "운송장입력 처리 실패", detail: error.message },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ ok: true });
+    );
   }
 
-  if (action === "order_done") {
-    const { error } = await supabase
-      .from("domestic_order")
-      .update({ order_status: "done", updated_at: now })
-      .in("order_id", orderIds);
-
-    if (error) {
-      return NextResponse.json(
-        { error: "주문완료 처리 실패", detail: error.message },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ ok: true });
+  function toggleAllFiltered(checked: boolean) {
+    const ids = new Set(filteredRows.map((row) => row.order_id));
+    setRows((prev) =>
+      prev.map((row) => (ids.has(row.order_id) ? { ...row, selected: checked } : row))
+    );
   }
 
-  if (action === "shipping_done") {
-    const { error: shippingError } = await supabase
-      .from("domestic_shipping")
-      .update({ shipping_status: "done", updated_at: now })
-      .in("order_id", orderIds);
-
-    if (shippingError) {
-      return NextResponse.json(
-        { error: "배송완료 처리 실패", detail: shippingError.message },
-        { status: 500 }
-      );
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
     }
 
-    const { error: orderError } = await supabase
-      .from("domestic_order")
-      .update({ order_status: "done", updated_at: now })
-      .in("order_id", orderIds);
-
-    if (orderError) {
-      return NextResponse.json(
-        { error: "주문완료 동기화 실패", detail: orderError.message },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ ok: true });
+    setSortKey(key);
+    setSortDirection("asc");
   }
 
-  if (action === "excel_exported") {
-    const { error } = await supabase
-      .from("domestic_shipping")
-      .update({
-        shipping_status: "excel_exported",
-        excel_exported_at: now,
-        updated_at: now,
-      })
-      .in("order_id", orderIds);
-
-    if (error) {
-      return NextResponse.json(
-        { error: "엑셀추출 상태 변경 실패", detail: error.message },
-        { status: 500 }
-      );
+  async function patch(action: string) {
+    if (!selectedIds.length) {
+      alert("선택된 주문이 없어.");
+      return;
     }
 
-    return NextResponse.json({ ok: true });
+    const res = await fetch("/api/domestic/orders", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ order_ids: selectedIds, action }),
+    });
+
+    const json = await res.json();
+
+    if (!res.ok) {
+      alert(json.detail || json.error || "상태 변경 실패");
+      return;
+    }
+
+    await load();
   }
 
-  return NextResponse.json(
-    { error: "알 수 없는 action입니다." },
-    { status: 400 }
+  async function saveRow(row: Row) {
+    const s = shipping(row) || defaultShipping();
+
+    const res = await fetch("/api/domestic/orders", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "update_row",
+        order_id: row.order_id,
+        memo: row.memo || "",
+        order_status: row.order_status || "accepted",
+        shipping_status: s.shipping_status || "start",
+        shipping_type: s.shipping_type || "일반택배",
+      }),
+    });
+
+    const json = await res.json();
+
+    if (!res.ok) {
+      alert(json.detail || json.error || "저장 실패");
+      return;
+    }
+
+    await load();
+  }
+
+  async function deleteSelected() {
+    if (!selectedIds.length) {
+      alert("삭제할 주문을 선택해줘.");
+      return;
+    }
+
+    if (!confirm(`선택 ${selectedIds.length}건을 삭제할까?`)) return;
+
+    const res = await fetch("/api/domestic/orders", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ order_ids: selectedIds }),
+    });
+
+    const json = await res.json();
+
+    if (!res.ok) {
+      alert(json.detail || json.error || "삭제 실패");
+      return;
+    }
+
+    await load();
+  }
+
+  async function exportExcel() {
+    if (!selectedRows.length) {
+      alert("엑셀 추출할 주문을 선택해줘.");
+      return;
+    }
+
+    const data = selectedRows.map(toExcelRow);
+    const worksheet = XLSX.utils.json_to_sheet(data, { header: HEADERS });
+
+    worksheet["!cols"] = [
+      { wch: 14 },
+      { wch: 16 },
+      { wch: 18 },
+      { wch: 48 },
+      { wch: 18 },
+      { wch: 14 },
+      { wch: 28 },
+      { wch: 10 },
+      { wch: 10 },
+      { wch: 12 },
+      { wch: 10 },
+      { wch: 20 },
+      { wch: 80 },
+      { wch: 16 },
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "국내배송");
+
+    const now = new Date();
+    const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(
+      2,
+      "0"
+    )}${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(
+      2,
+      "0"
+    )}${String(now.getMinutes()).padStart(2, "0")}`;
+
+    XLSX.writeFile(workbook, `domestic_shipping_${stamp}.xlsx`);
+    await patch("excel_exported");
+  }
+
+  return (
+    <main style={{ maxWidth: 1600, margin: "0 auto", padding: 24 }}>
+      <section style={cardStyle}>
+        <div style={topHeaderStyle}>
+          <div>
+            <h1 style={{ marginTop: 0, marginBottom: 8 }}>Domestic Orders</h1>
+            <p style={{ color: "#6b7280", margin: 0 }}>
+              국내 주문 조회, 필터, 상태 변경, 엑셀 재추출 화면입니다.
+            </p>
+          </div>
+
+          <Link href="/" style={homeButtonStyle}>
+            홈으로
+          </Link>
+        </div>
+
+        {message ? <p style={{ color: "#b91c1c" }}>{message}</p> : null}
+
+        <div style={summaryGridStyle}>
+          <Summary label="전체" value={rows.length} />
+          <Summary label="현재 표시" value={filteredRows.length} />
+          <Summary label="선택" value={selectedIds.length} />
+          <Summary
+            label="배송완료"
+            value={rows.filter((row) => shipping(row)?.shipping_status === "done").length}
+          />
+        </div>
+      </section>
+
+      <section style={{ ...cardStyle, marginTop: 16 }}>
+        <h2 style={{ marginTop: 0 }}>필터</h2>
+
+        <FilterGroup
+          title="플랫폼"
+          options={PLATFORM_OPTIONS}
+          selected={platforms}
+          onToggle={(value) => setPlatforms((prev) => toggleList(prev, value))}
+        />
+        <FilterGroup
+          title="주문상태"
+          options={ORDER_STATUS_OPTIONS}
+          selected={orderStatuses}
+          onToggle={(value) => setOrderStatuses((prev) => toggleList(prev, value))}
+        />
+        <FilterGroup
+          title="배송상태"
+          options={SHIPPING_STATUS_OPTIONS}
+          selected={shippingStatuses}
+          onToggle={(value) => setShippingStatuses((prev) => toggleList(prev, value))}
+        />
+        <FilterGroup
+          title="배송수단"
+          options={SHIPPING_TYPE_OPTIONS}
+          selected={shippingTypes}
+          onToggle={(value) => setShippingTypes((prev) => toggleList(prev, value))}
+        />
+
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <input
+            value={q}
+            onChange={(event) => setQ(event.target.value)}
+            placeholder="고객주문번호, 닉네임, 아이템, 메모, 운송장 검색"
+            style={searchInputStyle}
+          />
+          <button type="button" onClick={() => void load()} style={blackButtonStyle}>
+            새로고침
+          </button>
+        </div>
+      </section>
+
+      <section style={{ ...cardStyle, marginTop: 16 }}>
+        <div style={actionBarStyle}>
+          <div style={{ fontWeight: 800 }}>선택 {selectedIds.length}건</div>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" onClick={exportExcel} style={blackButtonStyle}>
+              선택 {selectedIds.length}건 엑셀 추출
+            </button>
+            <button type="button" onClick={deleteSelected} style={redButtonStyle}>
+              선택 {selectedIds.length}건 삭제
+            </button>
+            <button type="button" onClick={() => patch("checked")} style={blueButtonStyle}>
+              재고확인 처리
+            </button>
+            <button type="button" onClick={() => patch("tracking_uploaded")} style={purpleButtonStyle}>
+              운송장입력 처리
+            </button>
+            <button type="button" onClick={() => patch("shipping_done")} style={greenButtonStyle}>
+              배송완료 처리
+            </button>
+          </div>
+        </div>
+
+        {loading ? (
+          <p>불러오는 중...</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table
+              style={{
+                width: "100%",
+                minWidth: 1650,
+                borderCollapse: "collapse",
+                fontSize: 13,
+              }}
+            >
+              <thead>
+                <tr style={{ background: "#f9fafb" }}>
+                  <th style={thStyle}>
+                    <input
+                      type="checkbox"
+                      checked={allFilteredSelected}
+                      onChange={(event) => toggleAllFiltered(event.target.checked)}
+                    />
+                  </th>
+                  <SortableTh label="플랫폼" sortKeyValue="platform" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                  <SortableTh label="고객주문번호" sortKeyValue="order_id" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                  <SortableTh label="닉네임" sortKeyValue="nickname" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                  <SortableTh label="주문건수" sortKeyValue="order_count" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                  <SortableTh label="최초주문일" sortKeyValue="first_order_date" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                  <SortableTh label="메모" sortKeyValue="memo" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                  <th style={thStyle}>저장</th>
+                  <SortableTh label="주문상태" sortKeyValue="order_status" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                  <SortableTh label="배송상태" sortKeyValue="shipping_status" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                  <SortableTh label="배송수단" sortKeyValue="shipping_type" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                  <SortableTh label="운송장" sortKeyValue="tracking_number" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                  <SortableTh label="아이템" sortKeyValue="item_summary" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                  <SortableTh label="상품합계" sortKeyValue="item_total_price" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRows.map((row) => {
+                  const s = shipping(row) || defaultShipping();
+
+                  return (
+                    <tr key={row.order_id}>
+                      <td style={tdStyle}>
+                        <input
+                          type="checkbox"
+                          checked={row.selected}
+                          onChange={(event) => updateSelected(row.order_id, event.target.checked)}
+                        />
+                      </td>
+                      <td style={tdStyle}>{label(PLATFORM_OPTIONS, row.platform)}</td>
+                      <td style={tdStyle}>{displayOrderNo(row)}</td>
+                      <td style={tdStyle}>{row.nickname || ""}</td>
+                      <td style={tdStyle}>{row.order_count || 1}</td>
+                      <td style={tdStyle}>{row.first_order_date || ""}</td>
+
+                      <td style={tdStyle}>
+                        <input
+                          value={row.memo || ""}
+                          onChange={(event) => updateRowValue(row.order_id, { memo: event.target.value })}
+                          style={memoInputStyle}
+                        />
+                      </td>
+
+                      <td style={tdStyle}>
+                        <button type="button" onClick={() => saveRow(row)} style={smallSaveButtonStyle}>
+                          저장
+                        </button>
+                      </td>
+
+                      <td style={tdStyle}>
+                        <select
+                          value={row.order_status || "accepted"}
+                          onChange={(event) =>
+                            updateRowValue(row.order_id, { order_status: event.target.value })
+                          }
+                          style={selectStyle}
+                        >
+                          {ORDER_STATUS_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+
+                      <td style={tdStyle}>
+                        <select
+                          value={s.shipping_status || "start"}
+                          onChange={(event) =>
+                            updateShippingValue(row.order_id, { shipping_status: event.target.value })
+                          }
+                          style={selectStyle}
+                        >
+                          {SHIPPING_STATUS_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+
+                      <td style={tdStyle}>
+                        <select
+                          value={s.shipping_type || "일반택배"}
+                          onChange={(event) =>
+                            updateShippingValue(row.order_id, { shipping_type: event.target.value })
+                          }
+                          style={selectStyle}
+                        >
+                          {SHIPPING_TYPE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+
+                      <td style={tdStyle}>{s.tracking_number || ""}</td>
+
+                      <td
+                        style={{
+                          ...tdStyle,
+                          minWidth: 360,
+                          maxWidth: 520,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                        title={row.item_summary || ""}
+                      >
+                        {row.item_summary || ""}
+                      </td>
+
+                      <td style={tdStyle}>{formatWon(row.item_total_price)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </main>
   );
 }
 
-export async function DELETE(req: Request) {
-  const supabase = createServiceRoleClient();
-  const body = await req.json();
-
-  const orderIds = Array.isArray(body.order_ids)
-    ? body.order_ids.map((v: unknown) => String(v ?? "").trim()).filter(Boolean)
-    : [];
-
-  if (!orderIds.length) {
-    return NextResponse.json(
-      { error: "삭제할 주문이 없습니다." },
-      { status: 400 }
-    );
-  }
-
-  const { error } = await supabase
-    .from("domestic_order")
-    .delete()
-    .in("order_id", orderIds);
-
-  if (error) {
-    return NextResponse.json(
-      { error: "국내 주문 삭제 실패", detail: error.message },
-      { status: 500 }
-    );
-  }
-
-  return NextResponse.json({ ok: true, deleted: orderIds.length });
+function Summary({ label, value }: { label: string; value: number }) {
+  return (
+    <div style={summaryCardStyle}>
+      <div style={{ color: "#6b7280", fontSize: 13 }}>{label}</div>
+      <strong style={{ fontSize: 28 }}>{value}</strong>
+    </div>
+  );
 }
+
+function FilterGroup({
+  title,
+  options,
+  selected,
+  onToggle,
+}: {
+  title: string;
+  options: { value: string; label: string }[];
+  selected: string[];
+  onToggle: (value: string) => void;
+}) {
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ fontWeight: 800, marginBottom: 8 }}>{title}</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {options.map((option) => {
+          const active = selected.includes(option.value);
+
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onToggle(option.value)}
+              style={filterButtonStyle(active)}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SortableTh({
+  label,
+  sortKeyValue,
+  sortKey,
+  direction,
+  onSort,
+}: {
+  label: string;
+  sortKeyValue: SortKey;
+  sortKey: SortKey;
+  direction: SortDirection;
+  onSort: (key: SortKey) => void;
+}) {
+  const active = sortKey === sortKeyValue;
+
+  return (
+    <th style={thStyle}>
+      <button type="button" onClick={() => onSort(sortKeyValue)} style={sortButtonStyle}>
+        {label} {active ? (direction === "asc" ? "▲" : "▼") : "↕"}
+      </button>
+    </th>
+  );
+}
+
+const cardStyle: CSSProperties = {
+  border: "1px solid #e5e7eb",
+  borderRadius: 16,
+  padding: 20,
+  background: "#fff",
+};
+
+const topHeaderStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+  gap: 16,
+  flexWrap: "wrap",
+};
+
+const homeButtonStyle: CSSProperties = {
+  textDecoration: "none",
+  border: "1px solid #d1d5db",
+  borderRadius: 10,
+  padding: "8px 12px",
+  color: "#111827",
+  fontWeight: 800,
+  background: "#fff",
+};
+
+const summaryGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+  gap: 12,
+  marginTop: 18,
+};
+
+const summaryCardStyle: CSSProperties = {
+  border: "1px solid #e5e7eb",
+  borderRadius: 14,
+  padding: 14,
+};
+
+const actionBarStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  alignItems: "center",
+  flexWrap: "wrap",
+  marginBottom: 12,
+};
+
+const searchInputStyle: CSSProperties = {
+  flex: "1 1 340px",
+  padding: "10px 12px",
+  border: "1px solid #d1d5db",
+  borderRadius: 10,
+};
+
+const blackButtonStyle: CSSProperties = {
+  border: 0,
+  borderRadius: 10,
+  padding: "10px 14px",
+  background: "#111827",
+  color: "#fff",
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
+const blueButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#2563eb" };
+const purpleButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#7c3aed" };
+const greenButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#059669" };
+const redButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#dc2626" };
+
+const smallSaveButtonStyle: CSSProperties = {
+  border: 0,
+  borderRadius: 8,
+  padding: "7px 10px",
+  background: "#111827",
+  color: "#fff",
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
+const memoInputStyle: CSSProperties = {
+  width: 220,
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  padding: "6px 8px",
+};
+
+const selectStyle: CSSProperties = {
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  padding: "6px 8px",
+  background: "#fff",
+};
+
+function filterButtonStyle(active: boolean): CSSProperties {
+  return {
+    border: active ? "1px solid #2563eb" : "1px solid #d1d5db",
+    borderRadius: 999,
+    padding: "8px 12px",
+    background: active ? "#2563eb" : "#fff",
+    color: active ? "#fff" : "#111827",
+    fontWeight: 800,
+    cursor: "pointer",
+  };
+}
+
+const sortButtonStyle: CSSProperties = {
+  border: 0,
+  background: "transparent",
+  padding: 0,
+  fontWeight: 800,
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+};
+
+const thStyle: CSSProperties = {
+  textAlign: "left",
+  borderBottom: "1px solid #e5e7eb",
+  padding: "10px 8px",
+  whiteSpace: "nowrap",
+};
+
+const tdStyle: CSSProperties = {
+  borderBottom: "1px solid #f3f4f6",
+  padding: "10px 8px",
+  verticalAlign: "top",
+};
