@@ -59,6 +59,26 @@ export async function PATCH(req: Request) {
     );
   }
 
+if (action === "tracking_uploaded") {
+  const { error } = await supabase
+    .from("domestic_shipping")
+    .update({
+      shipping_status: "uploaded",
+      updated_at: new Date().toISOString(),
+    })
+    .in("order_id", orderIds);
+
+  if (error) {
+    return NextResponse.json(
+      { error: "운송장입력 처리 실패", detail: error.message },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
+  
   if (action === "checked") {
     const { error } = await supabase
       .from("domestic_order")
