@@ -55,6 +55,53 @@ export async function PATCH(req: Request) {
   const action = String(body.action || "").trim();
   const now = new Date().toISOString();
 
+  // ✅ 행별 저장은 체크박스 선택 여부와 상관없이 먼저 처리
+  if (action === "update_row") {
+    const orderId = String(body.order_id || "").trim();
+
+    if (!orderId) {
+      return NextResponse.json(
+        { error: "order_id가 없습니다." },
+        { status: 400 }
+      );
+    }
+
+    const { error: orderError } = await supabase
+      .from("domestic_order")
+      .update({
+        memo: body.memo ?? null,
+        order_status: body.order_status || "accepted",
+        updated_at: now,
+      })
+      .eq("order_id", orderId);
+
+    if (orderError) {
+      return NextResponse.json(
+        { error: "국내 주문 행 저장 실패", detail: orderError.message },
+        { status: 500 }
+      );
+    }
+
+    const { error: shippingError } = await supabase
+      .from("domestic_shipping")
+      .update({
+        shipping_status: body.shipping_status || "start",
+        shipping_type: body.shipping_type || "일반택배",
+        updated_at: now,
+      })
+      .eq("order_id", orderId);
+
+    if (shippingError) {
+      return NextResponse.json(
+        { error: "국내 배송 행 저장 실패", detail: shippingError.message },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ ok: true });
+  }
+
+  // ✅ 여기부터는 체크박스로 선택한 주문들에 대한 일괄 처리
   if (!orderIds.length) {
     return NextResponse.json(
       { error: "선택된 주문이 없습니다." },
@@ -62,73 +109,10 @@ export async function PATCH(req: Request) {
     );
   }
 
-if (action === "update_row") {
-  const orderId = String(body.order_id || "").trim();
-
-  if (!orderId) {
-    return NextResponse.json({ error: "order_id가 없습니다." }, { status: 400 });
-  }
-
-  const { error: orderError } = await supabase
-    .from("domestic_order")
-    .update({
-      memo: body.memo ?? null,
-      order_status: body.order_status || "accepted",
-      updated_at: now,
-    })
-    .eq("order_id", orderId);
-
-  if (orderError) {
-    return NextResponse.json(
-      { error: "국내 주문 행 저장 실패", detail: orderError.message },
-      { status: 500 }
-    );
-  }
-
-  const { error: shippingError } = await supabase
-    .from("domestic_shipping")
-    .update({
-      shipping_status: body.shipping_status || "start",
-      shipping_type: body.shipping_type || "일반택배",
-      updated_at: now,
-    })
-    .eq("order_id", orderId);
-
-  if (shippingError) {
-    return NextResponse.json(
-      { error: "국내 배송 행 저장 실패", detail: shippingError.message },
-      { status: 500 }
-    );
-  }
-
-  return NextResponse.json({ ok: true });
-}
-
-  
-if (action === "tracking_uploaded") {
-  const { error } = await supabase
-    .from("domestic_shipping")
-    .update({
-      shipping_status: "uploaded",
-      updated_at: new Date().toISOString(),
-    })
-    .in("order_id", orderIds);
-
-  if (error) {
-    return NextResponse.json(
-      { error: "운송장입력 처리 실패", detail: error.message },
-      { status: 500 }
-    );
-  }
-
-  return NextResponse.json({ ok: true });
-}
-
-  
   if (action === "checked") {
     const { error } = await supabase
       .from("domestic_order")
-      .update({ order_status: "checked", updated_at: new Date().toISOString() })
+      .update({ order_status: "checked", updated_at: now })
       .in("order_id", orderIds);
 
     if (error) {
@@ -141,10 +125,29 @@ if (action === "tracking_uploaded") {
     return NextResponse.json({ ok: true });
   }
 
+  if (action === "tracking_uploaded") {
+    const { error } = await supabase
+      .from("domestic_shipping")
+      .update({
+        shipping_status: "uploaded",
+        updated_at: now,
+      })
+      .in("order_id", orderIds);
+
+    if (error) {
+      return NextResponse.json(
+        { error: "운송장입력 처리 실패", detail: error.message },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ ok: true });
+  }
+
   if (action === "order_done") {
     const { error } = await supabase
       .from("domestic_order")
-      .update({ order_status: "done", updated_at: new Date().toISOString() })
+      .update({ order_status: "done", updated_at: now })
       .in("order_id", orderIds);
 
     if (error) {
@@ -158,8 +161,6 @@ if (action === "tracking_uploaded") {
   }
 
   if (action === "shipping_done") {
-    const now = new Date().toISOString();
-
     const { error: shippingError } = await supabase
       .from("domestic_shipping")
       .update({ shipping_status: "done", updated_at: now })
@@ -192,8 +193,8 @@ if (action === "tracking_uploaded") {
       .from("domestic_shipping")
       .update({
         shipping_status: "excel_exported",
-        excel_exported_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        excel_exported_at: now,
+        updated_at: now,
       })
       .in("order_id", orderIds);
 
