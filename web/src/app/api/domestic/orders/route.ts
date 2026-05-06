@@ -53,6 +53,7 @@ export async function PATCH(req: Request) {
     : [];
 
   const action = String(body.action || "").trim();
+  const now = new Date().toISOString();
 
   if (!orderIds.length) {
     return NextResponse.json(
