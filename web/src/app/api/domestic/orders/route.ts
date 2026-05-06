@@ -23,6 +23,7 @@ export async function GET() {
       item_total_price,
       order_status,
       created_at,
+      memo,
       domestic_shipping (
         carrier,
         shipping_type,
@@ -60,6 +61,49 @@ export async function PATCH(req: Request) {
     );
   }
 
+if (action === "update_row") {
+  const orderId = String(body.order_id || "").trim();
+
+  if (!orderId) {
+    return NextResponse.json({ error: "order_id가 없습니다." }, { status: 400 });
+  }
+
+  const { error: orderError } = await supabase
+    .from("domestic_order")
+    .update({
+      memo: body.memo ?? null,
+      order_status: body.order_status || "accepted",
+      updated_at: now,
+    })
+    .eq("order_id", orderId);
+
+  if (orderError) {
+    return NextResponse.json(
+      { error: "국내 주문 행 저장 실패", detail: orderError.message },
+      { status: 500 }
+    );
+  }
+
+  const { error: shippingError } = await supabase
+    .from("domestic_shipping")
+    .update({
+      shipping_status: body.shipping_status || "start",
+      shipping_type: body.shipping_type || "일반택배",
+      updated_at: now,
+    })
+    .eq("order_id", orderId);
+
+  if (shippingError) {
+    return NextResponse.json(
+      { error: "국내 배송 행 저장 실패", detail: shippingError.message },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
+  
 if (action === "tracking_uploaded") {
   const { error } = await supabase
     .from("domestic_shipping")
@@ -166,4 +210,35 @@ if (action === "tracking_uploaded") {
     { error: "알 수 없는 action입니다." },
     { status: 400 }
   );
+}
+
+
+export async function DELETE(req: Request) {
+  const supabase = createServiceRoleClient();
+  const body = await req.json();
+
+  const orderIds = Array.isArray(body.order_ids)
+    ? body.order_ids.map((v: unknown) => String(v ?? "").trim()).filter(Boolean)
+    : [];
+
+  if (!orderIds.length) {
+    return NextResponse.json(
+      { error: "삭제할 주문이 없습니다." },
+      { status: 400 }
+    );
+  }
+
+  const { error } = await supabase
+    .from("domestic_order")
+    .delete()
+    .in("order_id", orderIds);
+
+  if (error) {
+    return NextResponse.json(
+      { error: "국내 주문 삭제 실패", detail: error.message },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json({ ok: true, deleted: orderIds.length });
 }
