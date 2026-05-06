@@ -19,6 +19,7 @@ export async function GET() {
       postal_code,
       address,
       order_count,
+      item_summary,
       item_total_price,
       order_status,
       created_at,
