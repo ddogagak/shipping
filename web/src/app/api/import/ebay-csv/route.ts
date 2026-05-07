@@ -405,7 +405,9 @@ export async function POST(req: Request) {
       );
     }
 
-
+await supabase.from("admin_activity_log").insert({
+  activity_type: "order_upload",
+});
 
 const result = {
   ok: true,
