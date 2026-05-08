@@ -19,6 +19,7 @@ type UpdateOrderRowBody = {
   shipping_method?: string;
   order_status?: string;
   shipping_label_status?: string;
+  memo?: string;
 };
 
 const SHIPPING_METHODS = new Set<ShippingMethod>(["k-packet", "egs", "check"]);
@@ -61,7 +62,7 @@ function normalizeOrderStatus(value: unknown): OrderStatus | null {
 }
 
 function normalizeShippingLabelStatus(
-  value: unknown
+  value: unknown,
 ): ShippingLabelStatus | null {
   const v = String(value ?? "").trim();
 
@@ -80,34 +81,35 @@ export async function POST(req: Request) {
     const shippingMethod = normalizeShippingMethod(body.shipping_method);
     const orderStatus = normalizeOrderStatus(body.order_status);
     const shippingLabelStatus = normalizeShippingLabelStatus(
-      body.shipping_label_status
+      body.shipping_label_status,
     );
+    const memo = String(body.memo ?? "").trim() || null;
 
     if (!orderNumber) {
       return NextResponse.json(
         { error: "order_number가 없습니다." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     if (!shippingMethod) {
       return NextResponse.json(
         { error: "shipping_method가 올바르지 않습니다." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     if (!orderStatus) {
       return NextResponse.json(
         { error: "order_status가 올바르지 않습니다." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     if (!shippingLabelStatus) {
       return NextResponse.json(
         { error: "shipping_label_status가 올바르지 않습니다." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -118,6 +120,7 @@ export async function POST(req: Request) {
       .update({
         shipping_method: shippingMethod,
         order_status: orderStatus,
+        memo,
       })
       .eq("order_number", orderNumber);
 
@@ -127,7 +130,7 @@ export async function POST(req: Request) {
           error: "주문상태 저장 실패",
           detail: orderError.message,
         },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -145,7 +148,7 @@ export async function POST(req: Request) {
           error: "라벨상태 저장 실패",
           detail: shippingError.message,
         },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -155,6 +158,7 @@ export async function POST(req: Request) {
       shipping_method: shippingMethod,
       order_status: orderStatus,
       shipping_label_status: shippingLabelStatus,
+      memo,
     });
   } catch (error: any) {
     return NextResponse.json(
@@ -162,7 +166,7 @@ export async function POST(req: Request) {
         error: "주문 행 저장 중 오류",
         detail: error?.message || "Unknown error",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
