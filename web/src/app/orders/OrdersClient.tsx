@@ -1234,8 +1234,8 @@ ${row.name || ""}`}
                     <td
                       style={{
                         ...tdStyle,
-                        minWidth: 720,
-                        maxWidth: 900,
+                        minWidth: 432,
+                        maxWidth: 540,
                       }}
                       title={row.item_list || ""}
                     >
