@@ -565,35 +565,49 @@ export default function DomesticOrdersPage() {
         </div>
       </section>
 
-      <section style={{ ...cardStyle, marginTop: 16 }}>
-        <div style={actionBarStyle}>
-          <div style={{ fontWeight: 800 }}>선택 {selectedIds.length}건</div>
+<section style={{ ...cardStyle, marginTop: 16 }}>
+  <div style={actionBarStyle}>
+    <div style={{ fontWeight: 800 }}>선택 {selectedIds.length}건</div>
 
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button type="button" onClick={exportExcel} style={blackButtonStyle}>
-              선택 {selectedIds.length}건 엑셀 추출
-            </button>
-            <button type="button" onClick={exportTrackingExcel} style={blueButtonStyle}>
-              운송장다운로드
-            </button>
-            <button type="button" onClick={deleteSelected} style={redButtonStyle}>
-              선택 {selectedIds.length}건 삭제
-            </button>
-            <button
-              type="button"
-              onClick={() => bulkPatch("packaged")}
-              style={orangeButtonStyle}
-            >
-              포장완료 처리
-            </button>
-            <button type="button" onClick={() => patch("tracking_uploaded")} style={purpleButtonStyle}>
-              운송장입력 처리
-            </button>
-            <button type="button" onClick={() => patch("shipping_done")} style={greenButtonStyle}>
-              배송완료 처리
-            </button>
-          </div>
-        </div>
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <button type="button" onClick={exportExcel} style={blackButtonStyle}>
+        선택 {selectedIds.length}건 엑셀 추출
+      </button>
+
+      <button type="button" onClick={exportTrackingExcel} style={blueButtonStyle}>
+        운송장다운로드
+      </button>
+
+      <button type="button" onClick={deleteSelected} style={redButtonStyle}>
+        선택 {selectedIds.length}건 삭제
+      </button>
+
+      <button
+        type="button"
+        onClick={() => patchSelected("packaged")}
+        style={orangeButtonStyle}
+      >
+        포장완료 처리
+      </button>
+
+      <button
+        type="button"
+        onClick={() => patchSelected("registered")}
+        style={purpleButtonStyle}
+      >
+        운송장등록 처리
+      </button>
+
+      <button
+        type="button"
+        onClick={() => patchSelected("done")}
+        style={greenButtonStyle}
+      >
+        배송완료 처리
+      </button>
+    </div>
+  </div>
+</section>
 
         {loading ? (
           <p>불러오는 중...</p>
