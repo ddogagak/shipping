@@ -1040,7 +1040,7 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
                 sortKey={sortKey}
                 direction={sortDirection}
                 onSort={toggleSort}
-                style={{ minWidth: 180 }}
+                style={{ minWidth: 135 }}
               />
               <SortableTh
                 label="국가"
@@ -1057,25 +1057,12 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
                 onSort={toggleSort}
               />
               <SortableTh
-                label="배송방식"
+                label="상태"
                 sortKeyValue="shipping_method"
                 sortKey={sortKey}
                 direction={sortDirection}
                 onSort={toggleSort}
-              />
-              <SortableTh
-                label="주문상태"
-                sortKeyValue="order_status"
-                sortKey={sortKey}
-                direction={sortDirection}
-                onSort={toggleSort}
-              />
-              <SortableTh
-                label="라벨상태"
-                sortKeyValue="shipping_label_status"
-                sortKey={sortKey}
-                direction={sortDirection}
-                onSort={toggleSort}
+                style={{ minWidth: 170 }}
               />
               <SortableTh
                 label="운송장번호"
@@ -1131,7 +1118,8 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
                     <td
                       style={{
                         ...tdStyle,
-                        minWidth: 180,
+                        minWidth: 135,
+                        maxWidth: 150,
                         whiteSpace: "pre-line",
                         lineHeight: 1.55,
                       }}
@@ -1148,64 +1136,65 @@ ${row.name || ""}`}
                     <td style={tdStyle}>{row.country_code || "-"}</td>
                     <td style={tdStyle}>{row.quantity ?? 0}</td>
 
-                    <td style={tdStyle}>
-                      <select
-                        value={getRowDraftValue(row, "shipping_method")}
-                        onChange={(event) =>
-                          changeRowDraft(
-                            row.order_number,
-                            "shipping_method",
-                            event.target.value,
-                          )
-                        }
-                        style={selectStyle(changed)}
-                      >
-                        {SHIPPING_METHOD_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
+                    <td style={{ ...tdStyle, minWidth: 170 }}>
+                      <div style={{ display: "grid", gap: 6 }}>
+                        <select
+                          aria-label="배송방식"
+                          value={getRowDraftValue(row, "shipping_method")}
+                          onChange={(event) =>
+                            changeRowDraft(
+                              row.order_number,
+                              "shipping_method",
+                              event.target.value,
+                            )
+                          }
+                          style={{ ...selectStyle(changed), width: "100%" }}
+                        >
+                          {SHIPPING_METHOD_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
 
-                    <td style={tdStyle}>
-                      <select
-                        value={getRowDraftValue(row, "order_status")}
-                        onChange={(event) =>
-                          changeRowDraft(
-                            row.order_number,
-                            "order_status",
-                            event.target.value,
-                          )
-                        }
-                        style={selectStyle(changed)}
-                      >
-                        {ORDER_STATUS_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
+                        <select
+                          aria-label="주문상태"
+                          value={getRowDraftValue(row, "order_status")}
+                          onChange={(event) =>
+                            changeRowDraft(
+                              row.order_number,
+                              "order_status",
+                              event.target.value,
+                            )
+                          }
+                          style={{ ...selectStyle(changed), width: "100%" }}
+                        >
+                          {ORDER_STATUS_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
 
-                    <td style={tdStyle}>
-                      <select
-                        value={getRowDraftValue(row, "shipping_label_status")}
-                        onChange={(event) =>
-                          changeRowDraft(
-                            row.order_number,
-                            "shipping_label_status",
-                            event.target.value,
-                          )
-                        }
-                        style={selectStyle(changed)}
-                      >
-                        {SHIPPING_LABEL_STATUS_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
+                        <select
+                          aria-label="라벨상태"
+                          value={getRowDraftValue(row, "shipping_label_status")}
+                          onChange={(event) =>
+                            changeRowDraft(
+                              row.order_number,
+                              "shipping_label_status",
+                              event.target.value,
+                            )
+                          }
+                          style={{ ...selectStyle(changed), width: "100%" }}
+                        >
+                          {SHIPPING_LABEL_STATUS_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </td>
 
                     <td style={tdStyle}>{row.tracking_number || "-"}</td>
@@ -1380,7 +1369,7 @@ ${row.name || ""}`}
             ) : (
               <tr>
                 <td
-                  colSpan={12}
+                  colSpan={10}
                   style={{
                     padding: 24,
                     textAlign: "center",
