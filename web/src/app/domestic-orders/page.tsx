@@ -447,6 +447,48 @@ export default function DomesticOrdersPage() {
     await patch("excel_exported");
   }
 
+  function exportTrackingExcel() {
+    const data = filteredRows
+      .filter((row) => {
+        const s = shipping(row);
+        return s?.tracking_number;
+      })
+      .map((row) => {
+        const s = shipping(row);
+
+        return {
+          운송장번호: withApostrophe(s?.tracking_number),
+          주문번호: displayOrderNo(row),
+        };
+      });
+
+    if (!data.length) {
+      alert("다운로드할 운송장 번호가 없어.");
+      return;
+    }
+
+    const worksheet = XLSX.utils.json_to_sheet(data, {
+      header: ["운송장번호", "주문번호"],
+    });
+
+    worksheet["!cols"] = [{ wch: 24 }, { wch: 24 }];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "운송장");
+
+    const now = new Date();
+    const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(
+      2,
+      "0"
+    )}${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(
+      2,
+      "0"
+    )}${String(now.getMinutes()).padStart(2, "0")}`;
+
+    XLSX.writeFile(workbook, `domestic_tracking_${stamp}.xlsx`);
+  }
+
+
   return (
     <main style={{ maxWidth: 1600, margin: "0 auto", padding: 24 }}>
       <section style={cardStyle}>
@@ -688,50 +730,6 @@ export default function DomesticOrdersPage() {
     </main>
   );
 }
-
-
-function exportTrackingExcel() {
-  const data = filteredRows
-    .filter((row) => {
-      const s = shipping(row);
-      return s?.tracking_number;
-    })
-    .map((row) => {
-      const s = shipping(row);
-
-      return {
-        운송장번호: withApostrophe(s?.tracking_number),
-        주문번호: displayOrderNo(row),
-      };
-    });
-
-  if (!data.length) {
-    alert("다운로드할 운송장 번호가 없어.");
-    return;
-  }
-
-  const worksheet = XLSX.utils.json_to_sheet(data, {
-    header: ["운송장번호", "주문번호"],
-  });
-
-  worksheet["!cols"] = [{ wch: 24 }, { wch: 24 }];
-
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, "운송장");
-
-  const now = new Date();
-  const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(
-    2,
-    "0"
-  )}${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(
-    2,
-    "0"
-  )}${String(now.getMinutes()).padStart(2, "0")}`;
-
-  XLSX.writeFile(workbook, `domestic_tracking_${stamp}.xlsx`);
-}
-
-
 
 function Summary({ label, value }: { label: string; value: number }) {
   return (
