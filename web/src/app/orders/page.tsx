@@ -18,6 +18,7 @@ type EbayOrderRow = {
   quantity: number | null;
   shipping_method: string | null;
   order_status: string | null;
+  memo: string | null;
   created_at: string | null;
 };
 
@@ -103,7 +104,9 @@ function orderStatusLabel(value: string | null) {
 }
 
 function shippingLabelStatusLabel(value: string | null) {
-  const option = SHIPPING_LABEL_STATUS_OPTIONS.find((item) => item.value === value);
+  const option = SHIPPING_LABEL_STATUS_OPTIONS.find(
+    (item) => item.value === value,
+  );
   return option?.label || value || "-";
 }
 
@@ -178,11 +181,15 @@ export default async function OrdersPage({
     next.methods.forEach((value) => urlParams.append("method", value));
 
     if (!sameValues(next.orderStatuses, DEFAULT_ORDER_STATUSES)) {
-      next.orderStatuses.forEach((value) => urlParams.append("order_status", value));
+      next.orderStatuses.forEach((value) =>
+        urlParams.append("order_status", value),
+      );
     }
 
     if (!sameValues(next.labelStatuses, DEFAULT_LABEL_STATUSES)) {
-      next.labelStatuses.forEach((value) => urlParams.append("label_status", value));
+      next.labelStatuses.forEach((value) =>
+        urlParams.append("label_status", value),
+      );
     }
 
     if (next.q) {
@@ -204,7 +211,7 @@ export default async function OrdersPage({
   const { data: orderRows, error: orderError } = await supabase
     .from("ebay_order")
     .select(
-      "id, sale_date, order_number, username, name, country, country_code, quantity, shipping_method, order_status, created_at"
+      "id, sale_date, order_number, username, name, country, country_code, quantity, shipping_method, order_status, memo, created_at",
     )
     .order("created_at", { ascending: false })
     .limit(500);
@@ -220,7 +227,9 @@ export default async function OrdersPage({
   if (orderNumbers.length) {
     const shippingResult = await supabase
       .from("ebay_shipping")
-      .select("order_number, shipping_method, shipping_label_status, tracking_number")
+      .select(
+        "order_number, shipping_method, shipping_label_status, tracking_number",
+      )
       .in("order_number", orderNumbers);
 
     shippingRows = (shippingResult.data || []) as EbayShippingRow[];
@@ -235,7 +244,9 @@ export default async function OrdersPage({
     itemError = itemResult.error;
   }
 
-  const shippingMap = new Map(shippingRows.map((row) => [row.order_number, row]));
+  const shippingMap = new Map(
+    shippingRows.map((row) => [row.order_number, row]),
+  );
   const itemMap = new Map(itemRows.map((row) => [row.order_number, row]));
 
   const mergedRows: OrderListRow[] = orders.map((order) => {
@@ -253,21 +264,25 @@ export default async function OrdersPage({
       quantity: order.quantity,
       shipping_method: order.shipping_method,
       order_status: order.order_status,
-      label_shipping_method: shipping?.shipping_method || order.shipping_method || "check",
+      label_shipping_method:
+        shipping?.shipping_method || order.shipping_method || "check",
       shipping_label_status: shipping?.shipping_label_status || "start",
       tracking_number: shipping?.tracking_number || null,
       item_list: item?.item_list || null,
       stockout_item_indexes: item?.stockout_item_indexes || [],
+      memo: order.memo || null,
     };
   });
 
   const filteredRows = mergedRows
     .filter((row) => {
-      const rowMethod = row.label_shipping_method || row.shipping_method || "check";
+      const rowMethod =
+        row.label_shipping_method || row.shipping_method || "check";
       const rowOrderStatus = row.order_status || "accepted";
       const rowLabelStatus = row.shipping_label_status || "start";
 
-      if (selectedMethods.length && !selectedMethods.includes(rowMethod)) return false;
+      if (selectedMethods.length && !selectedMethods.includes(rowMethod))
+        return false;
       if (!selectedOrderStatuses.includes(rowOrderStatus)) return false;
       if (!selectedLabelStatuses.includes(rowLabelStatus)) return false;
 
@@ -280,6 +295,7 @@ export default async function OrdersPage({
           row.country_code,
           row.item_list,
           row.tracking_number,
+          row.memo,
         ]
           .join(" ")
           .toLowerCase();
@@ -290,24 +306,36 @@ export default async function OrdersPage({
       return true;
     })
     .sort((a, b) => {
-      const labelA = LABEL_SORT_ORDER.indexOf(a.shipping_label_status || "start");
-      const labelB = LABEL_SORT_ORDER.indexOf(b.shipping_label_status || "start");
+      const labelA = LABEL_SORT_ORDER.indexOf(
+        a.shipping_label_status || "start",
+      );
+      const labelB = LABEL_SORT_ORDER.indexOf(
+        b.shipping_label_status || "start",
+      );
       if (labelA !== labelB) return labelA - labelB;
 
       const orderA = ORDER_SORT_ORDER.indexOf(a.order_status || "accepted");
       const orderB = ORDER_SORT_ORDER.indexOf(b.order_status || "accepted");
       if (orderA !== orderB) return orderA - orderB;
 
-      const nameCompare = String(a.name || "").localeCompare(String(b.name || ""));
+      const nameCompare = String(a.name || "").localeCompare(
+        String(b.name || ""),
+      );
       if (nameCompare !== 0) return nameCompare;
 
       return String(a.sale_date || "").localeCompare(String(b.sale_date || ""));
     });
 
   const totalCount = mergedRows.length;
-  const kpacketCount = mergedRows.filter((row) => row.label_shipping_method === "k-packet").length;
-  const egsCount = mergedRows.filter((row) => row.label_shipping_method === "egs").length;
-  const checkCount = mergedRows.filter((row) => row.label_shipping_method === "check").length;
+  const kpacketCount = mergedRows.filter(
+    (row) => row.label_shipping_method === "k-packet",
+  ).length;
+  const egsCount = mergedRows.filter(
+    (row) => row.label_shipping_method === "egs",
+  ).length;
+  const checkCount = mergedRows.filter(
+    (row) => row.label_shipping_method === "check",
+  ).length;
 
   return (
     <main style={{ maxWidth: 1500, margin: "0 auto", padding: 24 }}>
@@ -404,8 +432,24 @@ export default async function OrdersPage({
             <div style={{ fontWeight: 800, marginBottom: 8 }}>주문상태</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <FilterButton
+                href={buildHref({
+                  orderStatuses: ORDER_STATUS_OPTIONS.map(
+                    (option) => option.value,
+                  ),
+                })}
+                active={sameValues(
+                  selectedOrderStatuses,
+                  ORDER_STATUS_OPTIONS.map((option) => option.value),
+                )}
+              >
+                전체
+              </FilterButton>
+              <FilterButton
                 href={buildHref({ orderStatuses: DEFAULT_ORDER_STATUSES })}
-                active={sameValues(selectedOrderStatuses, DEFAULT_ORDER_STATUSES)}
+                active={sameValues(
+                  selectedOrderStatuses,
+                  DEFAULT_ORDER_STATUSES,
+                )}
               >
                 기본값
               </FilterButton>
@@ -413,7 +457,10 @@ export default async function OrdersPage({
                 <FilterButton
                   key={option.value}
                   href={buildHref({
-                    orderStatuses: toggleValue(selectedOrderStatuses, option.value),
+                    orderStatuses: toggleValue(
+                      selectedOrderStatuses,
+                      option.value,
+                    ),
                   })}
                   active={selectedOrderStatuses.includes(option.value)}
                 >
@@ -427,8 +474,24 @@ export default async function OrdersPage({
             <div style={{ fontWeight: 800, marginBottom: 8 }}>라벨상태</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <FilterButton
+                href={buildHref({
+                  labelStatuses: SHIPPING_LABEL_STATUS_OPTIONS.map(
+                    (option) => option.value,
+                  ),
+                })}
+                active={sameValues(
+                  selectedLabelStatuses,
+                  SHIPPING_LABEL_STATUS_OPTIONS.map((option) => option.value),
+                )}
+              >
+                전체
+              </FilterButton>
+              <FilterButton
                 href={buildHref({ labelStatuses: DEFAULT_LABEL_STATUSES })}
-                active={sameValues(selectedLabelStatuses, DEFAULT_LABEL_STATUSES)}
+                active={sameValues(
+                  selectedLabelStatuses,
+                  DEFAULT_LABEL_STATUSES,
+                )}
               >
                 기본값
               </FilterButton>
@@ -436,7 +499,10 @@ export default async function OrdersPage({
                 <FilterButton
                   key={option.value}
                   href={buildHref({
-                    labelStatuses: toggleValue(selectedLabelStatuses, option.value),
+                    labelStatuses: toggleValue(
+                      selectedLabelStatuses,
+                      option.value,
+                    ),
                   })}
                   active={selectedLabelStatuses.includes(option.value)}
                 >
@@ -452,7 +518,12 @@ export default async function OrdersPage({
             style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
           >
             {selectedMethods.map((value) => (
-              <input key={`method-${value}`} type="hidden" name="method" value={value} />
+              <input
+                key={`method-${value}`}
+                type="hidden"
+                name="method"
+                value={value}
+              />
             ))}
 
             {!sameValues(selectedOrderStatuses, DEFAULT_ORDER_STATUSES)
