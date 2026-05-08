@@ -506,9 +506,9 @@ export default function DomesticOrdersPage() {
             홈으로
           </Link>
 
-          <Link href="/domestic-tracking" style={secondaryButtonStyle}>
+        <Link href="/domestic-tracking" style={sortButtonStyle}>
           운송장등록
-          </Link>
+        </Link>
         </div>
 
         {message ? <p style={{ color: "#b91c1c" }}>{message}</p> : null}
