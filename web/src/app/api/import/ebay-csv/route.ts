@@ -267,7 +267,12 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const rows = Array.isArray(body.rows) ? body.rows : [];
+    // 프론트에서 rows로 보내는 새 방식과 orders로 보내던 구방식 둘 다 허용
+    const rows = Array.isArray(body.rows)
+      ? body.rows
+      : Array.isArray(body.orders)
+        ? body.orders.map((order: any) => ({ ...order, selected: true }))
+        : [];
 
     if (!rows.length) {
       return NextResponse.json({
@@ -405,21 +410,11 @@ export async function POST(req: Request) {
       );
     }
 
-await supabase.from("admin_activity_log").insert({
-  activity_type: "order_upload",
-});
+    await supabase.from("admin_activity_log").insert({
+      activity_type: "order_upload",
+    });
 
-const result = {
-  ok: true,
-  saved: freshOrders.length,
-  skipped_count: skipped.length,
-  skipped,
-};
-
-
-
-    
-    return NextResponse.json({
+        return NextResponse.json({
       ok: true,
       saved: freshOrders.length,
       skipped_count: skipped.length,
