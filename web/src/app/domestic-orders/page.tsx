@@ -505,6 +505,10 @@ export default function DomesticOrdersPage() {
           <Link href="/" style={homeButtonStyle}>
             홈으로
           </Link>
+
+          <Link href="/domestic-tracking" style={secondaryButtonStyle}>
+          운송장등록
+          </Link>
         </div>
 
         {message ? <p style={{ color: "#b91c1c" }}>{message}</p> : null}
@@ -575,8 +579,12 @@ export default function DomesticOrdersPage() {
             <button type="button" onClick={deleteSelected} style={redButtonStyle}>
               선택 {selectedIds.length}건 삭제
             </button>
-            <button type="button" onClick={() => patch("checked")} style={blueButtonStyle}>
-              재고확인 처리
+            <button
+              type="button"
+              onClick={() => bulkPatch("packaged")}
+              style={orangeButtonStyle}
+            >
+              포장완료 처리
             </button>
             <button type="button" onClick={() => patch("tracking_uploaded")} style={purpleButtonStyle}>
               운송장입력 처리
