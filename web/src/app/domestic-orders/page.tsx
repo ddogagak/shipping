@@ -457,7 +457,7 @@ export default function DomesticOrdersPage() {
         const s = shipping(row);
 
         return {
-          운송장번호: withApostrophe(s?.tracking_number),
+          운송장번호: s?.tracking_number ?? "",
           주문번호: displayOrderNo(row),
         };
       });
@@ -468,7 +468,7 @@ export default function DomesticOrdersPage() {
     }
 
     const worksheet = XLSX.utils.json_to_sheet(data, {
-      header: ["운송장번호", "주문번호"],
+      skipHeader: true,
     });
 
     worksheet["!cols"] = [{ wch: 24 }, { wch: 24 }];
