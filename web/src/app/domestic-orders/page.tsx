@@ -202,11 +202,12 @@ export default function DomesticOrdersPage() {
   const [loading, setLoading] = useState(false);
 
   const [platforms, setPlatforms] = useState<string[]>([]);
-  const [orderStatuses, setOrderStatuses] = useState<string[]>(["accepted", "checked"]);
+  const [orderStatuses, setOrderStatuses] = useState<string[]>(["accepted", "checked", "packaged"]);
   const [shippingStatuses, setShippingStatuses] = useState<string[]>([
     "start",
     "excel_exported",
     "uploaded",
+    "registered",
   ]);
   const [shippingTypes, setShippingTypes] = useState<string[]>([]);
   const [q, setQ] = useState("");
@@ -502,13 +503,14 @@ export default function DomesticOrdersPage() {
             </p>
           </div>
 
-          <Link href="/" style={homeButtonStyle}>
-            홈으로
-          </Link>
-
-        <Link href="/domestic-tracking" style={sortButtonStyle}>
-          운송장등록
-        </Link>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Link href="/" style={homeButtonStyle}>
+              홈으로
+            </Link>
+            <Link href="/domestic-tracking" style={homeButtonStyle}>
+              운송장등록
+            </Link>
+          </div>
         </div>
 
         {message ? <p style={{ color: "#b91c1c" }}>{message}</p> : null}
@@ -565,49 +567,31 @@ export default function DomesticOrdersPage() {
         </div>
       </section>
 
-<section style={{ ...cardStyle, marginTop: 16 }}>
-  <div style={actionBarStyle}>
-    <div style={{ fontWeight: 800 }}>선택 {selectedIds.length}건</div>
+      <section style={{ ...cardStyle, marginTop: 16 }}>
+        <div style={actionBarStyle}>
+          <div style={{ fontWeight: 800 }}>선택 {selectedIds.length}건</div>
 
-    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-      <button type="button" onClick={exportExcel} style={blackButtonStyle}>
-        선택 {selectedIds.length}건 엑셀 추출
-      </button>
-
-      <button type="button" onClick={exportTrackingExcel} style={blueButtonStyle}>
-        운송장다운로드
-      </button>
-
-      <button type="button" onClick={deleteSelected} style={redButtonStyle}>
-        선택 {selectedIds.length}건 삭제
-      </button>
-
-      <button
-        type="button"
-        onClick={() => patchSelected("packaged")}
-        style={orangeButtonStyle}
-      >
-        포장완료 처리
-      </button>
-
-      <button
-        type="button"
-        onClick={() => patchSelected("registered")}
-        style={purpleButtonStyle}
-      >
-        운송장등록 처리
-      </button>
-
-      <button
-        type="button"
-        onClick={() => patchSelected("done")}
-        style={greenButtonStyle}
-      >
-        배송완료 처리
-      </button>
-    </div>
-  </div>
-</section>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" onClick={exportExcel} style={blackButtonStyle}>
+              선택 {selectedIds.length}건 엑셀 추출
+            </button>
+            <button type="button" onClick={exportTrackingExcel} style={blueButtonStyle}>
+              운송장다운로드
+            </button>
+            <button type="button" onClick={deleteSelected} style={redButtonStyle}>
+              선택 {selectedIds.length}건 삭제
+            </button>
+            <button type="button" onClick={() => patch("packaged")} style={orangeButtonStyle}>
+              포장완료 처리
+            </button>
+            <button type="button" onClick={() => patch("registered")} style={purpleButtonStyle}>
+              운송장등록 처리
+            </button>
+            <button type="button" onClick={() => patch("done")} style={greenButtonStyle}>
+              배송완료 처리
+            </button>
+          </div>
+        </div>
 
         {loading ? (
           <p>불러오는 중...</p>
@@ -890,6 +874,7 @@ const blueButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#2563
 const purpleButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#7c3aed" };
 const greenButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#059669" };
 const redButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#dc2626" };
+const orangeButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#ea580c" };
 
 const smallSaveButtonStyle: CSSProperties = {
   border: 0,
