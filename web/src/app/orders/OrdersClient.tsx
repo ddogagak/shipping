@@ -1014,7 +1014,7 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
             width: "100%",
             borderCollapse: "collapse",
             fontSize: 14,
-            minWidth: 1300,
+            minWidth: 1500,
           }}
         >
           <thead>
@@ -1035,25 +1035,12 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
                 onSort={toggleSort}
               />
               <SortableTh
-                label="주문번호"
+                label="주문정보"
                 sortKeyValue="order_number"
                 sortKey={sortKey}
                 direction={sortDirection}
                 onSort={toggleSort}
-              />
-              <SortableTh
-                label="Username"
-                sortKeyValue="username"
-                sortKey={sortKey}
-                direction={sortDirection}
-                onSort={toggleSort}
-              />
-              <SortableTh
-                label="수취인"
-                sortKeyValue="name"
-                sortKey={sortKey}
-                direction={sortDirection}
-                onSort={toggleSort}
+                style={{ minWidth: 180 }}
               />
               <SortableTh
                 label="국가"
@@ -1142,14 +1129,22 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
                     <td style={tdStyle}>{formatDate(row.sale_date)}</td>
 
                     <td
-                      style={{ ...tdStyle, fontWeight: 800 }}
-                      title={row.order_number}
+                      style={{
+                        ...tdStyle,
+                        minWidth: 180,
+                        whiteSpace: "pre-line",
+                        lineHeight: 1.55,
+                      }}
+                      title={`${row.order_number}
+${row.username || ""}
+${row.name || ""}`}
                     >
-                      {shortOrderNumber(row.order_number)}
+                      <div style={{ fontWeight: 900 }}>
+                        {shortOrderNumber(row.order_number)}
+                      </div>
+                      <div style={{ color: "#374151" }}>{row.username || "-"}</div>
+                      <div style={{ color: "#6b7280" }}>{row.name || "-"}</div>
                     </td>
-
-                    <td style={tdStyle}>{row.username || "-"}</td>
-                    <td style={tdStyle}>{row.name || "-"}</td>
                     <td style={tdStyle}>{row.country_code || "-"}</td>
                     <td style={tdStyle}>{row.quantity ?? 0}</td>
 
@@ -1250,7 +1245,8 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
                     <td
                       style={{
                         ...tdStyle,
-                        maxWidth: 620,
+                        minWidth: 720,
+                        maxWidth: 900,
                       }}
                       title={row.item_list || ""}
                     >
@@ -1321,6 +1317,7 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
                                     flex: 1,
                                     minWidth: 0,
                                     wordBreak: "break-word",
+                                    whiteSpace: "normal",
                                   }}
                                 >
                                   {isStockout ? (
@@ -1383,7 +1380,7 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
             ) : (
               <tr>
                 <td
-                  colSpan={14}
+                  colSpan={12}
                   style={{
                     padding: 24,
                     textAlign: "center",
