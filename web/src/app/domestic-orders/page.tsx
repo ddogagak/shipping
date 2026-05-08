@@ -59,6 +59,7 @@ const PLATFORM_OPTIONS = [
 const ORDER_STATUS_OPTIONS = [
   { value: "accepted", label: "입력됨" },
   { value: "checked", label: "재고확인" },
+  { value: "packaged", label: "포장완료" },
   { value: "done", label: "완료" },
 ];
 
@@ -66,6 +67,7 @@ const SHIPPING_STATUS_OPTIONS = [
   { value: "start", label: "시작" },
   { value: "excel_exported", label: "엑셀 추출" },
   { value: "uploaded", label: "운송장 입력" },
+  { value: "registered", label: "운송장등록" },
   { value: "done", label: "배송완료" },
 ];
 
