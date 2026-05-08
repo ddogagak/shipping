@@ -127,7 +127,7 @@ export default function OrderUploadPage() {
         },
         body: JSON.stringify({
           mode: "save",
-          orders: selectedOrders.map((row) => row.parsed_order),
+          rows: selectedOrders,
         }),
       });
 
