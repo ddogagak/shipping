@@ -34,6 +34,19 @@ type DomesticOrder = {
 
 type Row = DomesticOrder & { selected: boolean };
 
+type CombineDraft = {
+  orderIds: string[];
+  rows: Row[];
+  customer_order_no: string;
+  first_order_date: string;
+  order_count: string;
+  item_summary: string;
+  item_total_price: string;
+  memo: string;
+  shipping_type: string;
+  tracking_number: string;
+};
+
 type SortKey =
   | "platform"
   | "order_id"
@@ -186,6 +199,16 @@ function compareRows(a: Row, b: Row, key: SortKey, direction: SortDirection) {
   return String(aValue).localeCompare(String(bValue), "ko") * factor;
 }
 
+function shortOrderNo(value?: string | null) {
+  const clean = String(value || "").trim();
+  if (!clean) return "";
+  return clean.length > 5 ? clean.slice(-5) : clean;
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean)));
+}
+
 function defaultShipping(): ShippingInfo {
   return {
     carrier: "우체국택배",
@@ -213,6 +236,7 @@ export default function DomesticOrdersPage() {
   const [q, setQ] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("first_order_date");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [combineDraft, setCombineDraft] = useState<CombineDraft | null>(null);
 
   async function load() {
     setLoading(true);
@@ -287,6 +311,35 @@ export default function DomesticOrdersPage() {
   const selectedRows = rows.filter((row) => row.selected);
   const allFilteredSelected = filteredRows.length > 0 && filteredRows.every((row) => row.selected);
 
+  const combineCandidates = useMemo(() => {
+    const groups = new Map<string, Row[]>();
+
+    rows.forEach((row) => {
+      const s = shipping(row);
+      const nickname = String(row.nickname || "").trim();
+      const orderDone = (row.order_status || "") === "done";
+      const shippingDone = (s?.shipping_status || "") === "done";
+
+      if (!nickname || orderDone || shippingDone) return;
+
+      const list = groups.get(nickname) || [];
+      list.push(row);
+      groups.set(nickname, list);
+    });
+
+    return Array.from(groups.entries())
+      .map(([nickname, list]) => {
+        const sorted = [...list].sort((a, b) =>
+          String(a.first_order_date || a.created_at || "").localeCompare(
+            String(b.first_order_date || b.created_at || "")
+          )
+        );
+        const dateSet = new Set(sorted.map((row) => row.first_order_date || "날짜없음"));
+        return { nickname, rows: sorted, dateCount: dateSet.size };
+      })
+      .filter((group) => group.rows.length >= 2 && group.dateCount >= 2);
+  }, [rows]);
+
   function toggleList(list: string[], value: string) {
     return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
   }
@@ -356,6 +409,97 @@ export default function DomesticOrdersPage() {
     }
 
     await load();
+  }
+
+  function openCombineDraft(groupRows: Row[]) {
+    if (groupRows.length < 2) {
+      alert("합배송할 주문이 2건 이상이어야 해.");
+      return;
+    }
+
+    const sorted = [...groupRows].sort((a, b) =>
+      String(a.first_order_date || a.created_at || "").localeCompare(
+        String(b.first_order_date || b.created_at || "")
+      )
+    );
+
+    const trackingNumbers = uniqueStrings(sorted.map((row) => shipping(row)?.tracking_number));
+    const shippingTypes = uniqueStrings(sorted.map((row) => shipping(row)?.shipping_type));
+    const combinedDates = uniqueStrings(
+      sorted.flatMap((row) =>
+        Array.isArray(row.source_order_dates) && row.source_order_dates.length
+          ? row.source_order_dates
+          : [row.first_order_date]
+      )
+    ).sort();
+
+    setCombineDraft({
+      orderIds: sorted.map((row) => row.order_id),
+      rows: sorted,
+      customer_order_no: sorted
+        .map((row) => shortOrderNo(row.customer_order_no || row.order_id))
+        .filter(Boolean)
+        .join("-"),
+      first_order_date: combinedDates[0] || sorted[0]?.first_order_date || "",
+      order_count: String(sorted.reduce((sum, row) => sum + Number(row.order_count || 1), 0)),
+      item_summary: sorted
+        .map((row) => String(row.item_summary || "").trim())
+        .filter(Boolean)
+        .join(" / "),
+      item_total_price: String(sorted.reduce((sum, row) => sum + Number(row.item_total_price || 0), 0)),
+      memo: [
+        String(sorted[0]?.memo || "").trim(),
+        `합배송: ${sorted.map((row) => row.customer_order_no || row.order_id).join(" + ")}`,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      shipping_type: shippingTypes[0] || "일반택배",
+      tracking_number: trackingNumbers[0] || "",
+    });
+  }
+
+  async function submitCombineDraft() {
+    if (!combineDraft) return;
+    if (combineDraft.orderIds.length < 2) {
+      alert("합배송할 주문이 2건 이상이어야 해.");
+      return;
+    }
+
+    if (!confirm(`확인한 ${combineDraft.orderIds.length}건을 합배송으로 저장할까?`)) return;
+
+    const res = await fetch("/api/domestic/orders", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        order_ids: combineDraft.orderIds,
+        action: "combine_shipping",
+        combined: {
+          customer_order_no: combineDraft.customer_order_no,
+          first_order_date: combineDraft.first_order_date,
+          order_count: Number(combineDraft.order_count || 0),
+          item_summary: combineDraft.item_summary,
+          item_total_price: Number(combineDraft.item_total_price || 0),
+          memo: combineDraft.memo,
+          shipping_type: combineDraft.shipping_type,
+          tracking_number: combineDraft.tracking_number,
+        },
+      }),
+    });
+
+    const json = await res.json();
+
+    if (!res.ok) {
+      alert(json.detail || json.error || "합배송 처리 실패");
+      return;
+    }
+
+    alert(json.message || "합배송 처리 완료");
+    setCombineDraft(null);
+    await load();
+  }
+
+  function updateCombineDraft(patch: Partial<CombineDraft>) {
+    setCombineDraft((prev) => (prev ? { ...prev, ...patch } : prev));
   }
 
   async function saveRow(row: Row) {
@@ -566,6 +710,216 @@ export default function DomesticOrdersPage() {
           </button>
         </div>
       </section>
+
+      {combineCandidates.length ? (
+        <section style={{ ...cardStyle, marginTop: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+            <div>
+              <h2 style={{ margin: 0 }}>합배송 제안</h2>
+              <p style={{ margin: "6px 0 0", color: "#6b7280", fontSize: 13 }}>
+                배송완료가 아니고, 닉네임이 같고, 주문일이 다른 주문만 표시됩니다.
+              </p>
+            </div>
+            <strong>{combineCandidates.length}건</strong>
+          </div>
+
+          <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
+            {combineCandidates.map((group) => {
+              const orderIds = group.rows.map((row) => row.order_id);
+              const dates = Array.from(
+                new Set(group.rows.map((row) => row.first_order_date || "날짜없음"))
+              ).join(" / ");
+              const totalCount = group.rows.reduce((sum, row) => sum + Number(row.order_count || 1), 0);
+              const totalPrice = group.rows.reduce((sum, row) => sum + Number(row.item_total_price || 0), 0);
+
+              return (
+                <div key={group.nickname} style={combineCardStyle}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 900, marginBottom: 6 }}>
+                      {group.nickname} · {group.rows.length}건 · 총 {totalCount}개
+                    </div>
+                    <div style={{ color: "#6b7280", fontSize: 13, marginBottom: 6 }}>
+                      주문일: {dates} / 상품합계: {formatWon(totalPrice)}
+                    </div>
+                    <div style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {group.rows.map((row) => displayOrderNo(row)).join(" + ")}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => openCombineDraft(group.rows)}
+                    style={purpleButtonStyle}
+                  >
+                    합배송 확인
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      {combineDraft ? (
+        <section style={{ ...cardStyle, marginTop: 16, borderColor: "#7c3aed" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+            <div>
+              <h2 style={{ margin: 0 }}>합배송 확인 / 수정</h2>
+              <p style={{ margin: "6px 0 0", color: "#6b7280", fontSize: 13 }}>
+                저장 전 모든 값을 확인하고 수정할 수 있습니다. 운송장은 기존 값이 있으면 자동 반영되고, 여러 개면 아래에서 선택하세요.
+              </p>
+            </div>
+            <button type="button" onClick={() => setCombineDraft(null)} style={redButtonStyle}>
+              닫기
+            </button>
+          </div>
+
+          <div style={{ overflowX: "auto", marginTop: 14 }}>
+            <table style={{ width: "100%", minWidth: 1100, borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: "#f9fafb" }}>
+                  <th style={thStyle}>주문번호</th>
+                  <th style={thStyle}>주문일</th>
+                  <th style={thStyle}>닉네임</th>
+                  <th style={thStyle}>주문건수</th>
+                  <th style={thStyle}>배송상태</th>
+                  <th style={thStyle}>배송수단</th>
+                  <th style={thStyle}>운송장</th>
+                  <th style={thStyle}>아이템</th>
+                  <th style={thStyle}>상품합계</th>
+                </tr>
+              </thead>
+              <tbody>
+                {combineDraft.rows.map((row) => {
+                  const s = shipping(row) || defaultShipping();
+                  return (
+                    <tr key={row.order_id}>
+                      <td style={tdStyle}>{displayOrderNo(row)}</td>
+                      <td style={tdStyle}>{row.first_order_date || ""}</td>
+                      <td style={tdStyle}>{row.nickname || ""}</td>
+                      <td style={tdStyle}>{row.order_count || 1}</td>
+                      <td style={tdStyle}>{label(SHIPPING_STATUS_OPTIONS, s.shipping_status || "start")}</td>
+                      <td style={tdStyle}>{s.shipping_type || "일반택배"}</td>
+                      <td style={tdStyle}>{s.tracking_number || ""}</td>
+                      <td style={{ ...tdStyle, minWidth: 300 }}>{row.item_summary || ""}</td>
+                      <td style={tdStyle}>{formatWon(row.item_total_price)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {uniqueStrings(combineDraft.rows.map((row) => shipping(row)?.tracking_number)).length > 1 ? (
+            <div style={{ marginTop: 14, padding: 12, border: "1px solid #ddd6fe", borderRadius: 12, background: "#faf5ff" }}>
+              <div style={{ fontWeight: 900, marginBottom: 8 }}>기존 운송장이 여러 개 있습니다. 사용할 운송장을 선택하세요.</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {uniqueStrings(combineDraft.rows.map((row) => shipping(row)?.tracking_number)).map((tracking) => (
+                  <label key={tracking} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 800 }}>
+                    <input
+                      type="radio"
+                      name="combineTracking"
+                      checked={combineDraft.tracking_number === tracking}
+                      onChange={() => updateCombineDraft({ tracking_number: tracking })}
+                    />
+                    {tracking}
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <div style={combineFormGridStyle}>
+            <label style={formLabelStyle}>
+              합배송 주문번호
+              <input
+                value={combineDraft.customer_order_no}
+                onChange={(event) => updateCombineDraft({ customer_order_no: event.target.value })}
+                style={wideInputStyle}
+              />
+            </label>
+
+            <label style={formLabelStyle}>
+              최초주문일
+              <input
+                value={combineDraft.first_order_date}
+                onChange={(event) => updateCombineDraft({ first_order_date: event.target.value })}
+                style={wideInputStyle}
+              />
+            </label>
+
+            <label style={formLabelStyle}>
+              주문건수
+              <input
+                value={combineDraft.order_count}
+                onChange={(event) => updateCombineDraft({ order_count: event.target.value })}
+                style={wideInputStyle}
+              />
+            </label>
+
+            <label style={formLabelStyle}>
+              상품금액합계
+              <input
+                value={combineDraft.item_total_price}
+                onChange={(event) => updateCombineDraft({ item_total_price: event.target.value })}
+                style={wideInputStyle}
+              />
+            </label>
+
+            <label style={formLabelStyle}>
+              배송수단
+              <select
+                value={combineDraft.shipping_type}
+                onChange={(event) => updateCombineDraft({ shipping_type: event.target.value })}
+                style={wideInputStyle}
+              >
+                {SHIPPING_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label style={formLabelStyle}>
+              운송장번호
+              <input
+                value={combineDraft.tracking_number}
+                onChange={(event) => updateCombineDraft({ tracking_number: event.target.value })}
+                style={wideInputStyle}
+                placeholder="기존 운송장이 없으면 비워둬도 됨"
+              />
+            </label>
+          </div>
+
+          <label style={{ ...formLabelStyle, marginTop: 12 }}>
+            아이템
+            <textarea
+              value={combineDraft.item_summary}
+              onChange={(event) => updateCombineDraft({ item_summary: event.target.value })}
+              style={textareaStyle}
+            />
+          </label>
+
+          <label style={{ ...formLabelStyle, marginTop: 12 }}>
+            메모
+            <textarea
+              value={combineDraft.memo}
+              onChange={(event) => updateCombineDraft({ memo: event.target.value })}
+              style={textareaStyle}
+            />
+          </label>
+
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
+            <button type="button" onClick={() => setCombineDraft(null)} style={redButtonStyle}>
+              취소
+            </button>
+            <button type="button" onClick={submitCombineDraft} style={purpleButtonStyle}>
+              확인 후 합배송 저장
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       <section style={{ ...cardStyle, marginTop: 16 }}>
         <div style={actionBarStyle}>
@@ -813,6 +1167,17 @@ const cardStyle: CSSProperties = {
   background: "#fff",
 };
 
+const combineCardStyle: CSSProperties = {
+  border: "1px solid #e5e7eb",
+  borderRadius: 12,
+  padding: 14,
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 12,
+  background: "#fafafa",
+};
+
 const topHeaderStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -926,6 +1291,39 @@ const thStyle: CSSProperties = {
   borderBottom: "1px solid #e5e7eb",
   padding: "10px 8px",
   whiteSpace: "nowrap",
+};
+
+const combineFormGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: 12,
+  marginTop: 14,
+};
+
+const formLabelStyle: CSSProperties = {
+  display: "grid",
+  gap: 6,
+  fontWeight: 800,
+  fontSize: 13,
+};
+
+const wideInputStyle: CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  padding: "8px 10px",
+  background: "#fff",
+};
+
+const textareaStyle: CSSProperties = {
+  width: "100%",
+  minHeight: 78,
+  boxSizing: "border-box",
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  padding: "8px 10px",
+  background: "#fff",
 };
 
 const tdStyle: CSSProperties = {
