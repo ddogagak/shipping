@@ -66,11 +66,14 @@ export async function PATCH(req: Request) {
       );
     }
 
+    const nextShippingStatus = body.shipping_status || "start";
+    const nextOrderStatus = nextShippingStatus === "done" ? "done" : body.order_status || "accepted";
+
     const { error: orderError } = await supabase
       .from("domestic_order")
       .update({
         memo: body.memo ?? null,
-        order_status: body.order_status || "accepted",
+        order_status: nextOrderStatus,
         updated_at: now,
       })
       .eq("order_id", orderId);
@@ -85,7 +88,7 @@ export async function PATCH(req: Request) {
     const { error: shippingError } = await supabase
       .from("domestic_shipping")
       .update({
-        shipping_status: body.shipping_status || "start",
+        shipping_status: nextShippingStatus,
         shipping_type: body.shipping_type || "일반택배",
         updated_at: now,
       })
