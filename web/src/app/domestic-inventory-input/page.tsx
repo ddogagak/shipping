@@ -1,7 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+type InventoryStatus =
+  | "입고전"
+  | "입고완료"
+  | "판매중"
+  | "판매완료"
+  | "보류";
 
 type PreviewItem = {
   item_name: string;
@@ -12,12 +19,32 @@ type PreviewItem = {
   yen_price: number;
   shipping_fee: number;
   total_price: number;
+  selling_price: number;
   tracking_number: string;
   image_url: string;
   quantity: number;
-  status: string;
+  status: InventoryStatus;
   memo: string;
 };
+
+const statusList: InventoryStatus[] = [
+  "입고전",
+  "입고완료",
+  "판매중",
+  "판매완료",
+  "보류",
+];
+
+const typeList = ["아크릴", "지류", "뱃지", "피규어", "키링", "기타"];
+
+const seriesList = [
+  "헌터헌터",
+  "귀멸의칼날",
+  "나의히어로아카데미아",
+  "프리렌",
+  "진격의거인",
+  "기타",
+];
 
 export default function DomesticInventoryInputPage() {
   const [rawText, setRawText] = useState("");
@@ -25,7 +52,27 @@ export default function DomesticInventoryInputPage() {
   const [trackingNumber, setTrackingNumber] = useState("");
   const [memo, setMemo] = useState("");
 
-  const preview = useMemo<PreviewItem>(() => {
+  const [editableItem, setEditableItem] = useState<PreviewItem>({
+    item_name: "",
+    item_type: "기타",
+    series_name: "기타",
+    order_number: "",
+    order_date: "",
+    yen_price: 0,
+    shipping_fee: 0,
+    total_price: 0,
+    selling_price: 0,
+    tracking_number: "",
+    image_url: "",
+    quantity: 1,
+    status: "입고전",
+    memo: "",
+  });
+
+  const [saveMessage, setSaveMessage] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  const parsedPreview = useMemo<PreviewItem>(() => {
     const orderNumber = rawText.match(/Order\s?#\s*([\d-]+)/i)?.[1] ?? "";
 
     const orderDate =
@@ -44,18 +91,17 @@ export default function DomesticInventoryInputPage() {
     const shippingFee = Number(shippingText.replaceAll(",", ""));
 
     const itemName = extractItemName(rawText);
-    const itemType = detectItemType(rawText);
-    const seriesName = detectSeriesName(rawText);
 
     return {
       item_name: itemName,
-      item_type: itemType,
-      series_name: seriesName,
+      item_type: detectItemType(rawText),
+      series_name: detectSeriesName(rawText),
       order_number: orderNumber,
       order_date: orderDate,
       yen_price: totalPrice,
       shipping_fee: shippingFee,
       total_price: totalPrice,
+      selling_price: 0,
       tracking_number: trackingNumber,
       image_url: imageUrl,
       quantity: extractQuantity(itemName),
@@ -64,28 +110,87 @@ export default function DomesticInventoryInputPage() {
     };
   }, [rawText, imageUrl, trackingNumber, memo]);
 
+  useEffect(() => {
+    setEditableItem(parsedPreview);
+  }, [parsedPreview]);
+
+  const updateEditableItem = (
+    field: keyof PreviewItem,
+    value: string
+  ) => {
+    setEditableItem((prev) => {
+      if (
+        field === "quantity" ||
+        field === "yen_price" ||
+        field === "shipping_fee" ||
+        field === "total_price" ||
+        field === "selling_price"
+      ) {
+        return {
+          ...prev,
+          [field]: Number(value),
+        };
+      }
+
+      return {
+        ...prev,
+        [field]: value,
+      };
+    });
+  };
+
+  const saveInventoryItem = async () => {
+    setSaveMessage("");
+
+    if (!editableItem.item_name.trim()) {
+      setSaveMessage("상품명을 입력해줘.");
+      return;
+    }
+
+    setIsSaving(true);
+
+    try {
+      const res = await fetch("/api/domestic-inventory/items", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...editableItem,
+          raw_text: rawText,
+        }),
+      });
+
+      const result = await res.json();
+
+      if (!res.ok || !result.ok) {
+        throw new Error(result.message || "저장 실패");
+      }
+
+      setSaveMessage("저장 완료!");
+    } catch (error) {
+      setSaveMessage(
+        error instanceof Error ? error.message : "저장 실패"
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <main style={pageStyle}>
       <div style={topBarStyle}>
         <div>
           <h1 style={titleStyle}>국내 재고 입력</h1>
           <p style={subTextStyle}>
-            아마존 주문내역 텍스트, 이미지 URL, 운송장번호를 입력해 재고를 등록합니다.
+            주문내역을 붙여넣고, 미리보기에서 필요한 값을 수정한 뒤 저장합니다.
           </p>
         </div>
 
         <div style={{ display: "flex", gap: 8 }}>
-          <Link href="/" style={linkButtonStyle}>
-            메인
-          </Link>
-
-          <Link href="/domestic-inventory-cards" style={linkButtonStyle}>
-            카드형 보기
-          </Link>
-
-          <Link href="/domestic-inventory" style={linkButtonStyle}>
-            인벤토리
-          </Link>
+          <Link href="/" style={linkButtonStyle}>메인</Link>
+          <Link href="/domestic-inventory-cards" style={linkButtonStyle}>카드형 보기</Link>
+          <Link href="/domestic-inventory" style={linkButtonStyle}>인벤토리</Link>
         </div>
       </div>
 
@@ -132,51 +237,146 @@ export default function DomesticInventoryInputPage() {
             />
           </label>
 
-          <button type="button" style={saveButtonStyle}>
-            재고 저장
+          <button
+            type="button"
+            onClick={saveInventoryItem}
+            disabled={isSaving}
+            style={{
+              ...saveButtonStyle,
+              opacity: isSaving ? 0.6 : 1,
+              cursor: isSaving ? "not-allowed" : "pointer",
+            }}
+          >
+            {isSaving ? "저장 중..." : "재고 저장"}
           </button>
+
+          {saveMessage ? (
+            <div style={messageStyle}>{saveMessage}</div>
+          ) : null}
         </section>
 
         <section style={previewPanelStyle}>
-          <h2 style={panelTitleStyle}>미리보기</h2>
+          <h2 style={{ ...panelTitleStyle, padding: 16, paddingBottom: 0 }}>
+            수정 가능한 미리보기
+          </h2>
 
-          {preview.image_url ? (
-            <img src={preview.image_url} alt="" style={imageStyle} />
+          {editableItem.image_url ? (
+            <img src={editableItem.image_url} alt="" style={imageStyle} />
           ) : (
             <div style={emptyImageStyle}>이미지 미리보기</div>
           )}
 
           <div style={previewBodyStyle}>
             <div style={badgeRowStyle}>
-              <span style={badgeStyle}>{preview.series_name}</span>
-              <span style={badgeStyle}>{preview.item_type}</span>
-              <span style={statusBadgeStyle}>{preview.status}</span>
+              <span style={badgeStyle}>{editableItem.series_name}</span>
+              <span style={badgeStyle}>{editableItem.item_type}</span>
+              <span style={statusBadgeStyle}>{editableItem.status}</span>
             </div>
 
-            <h3 style={itemNameStyle}>{preview.item_name || "상품명"}</h3>
+            <EditableField
+              label="상품명"
+              value={editableItem.item_name}
+              onChange={(value) => updateEditableItem("item_name", value)}
+              textarea
+            />
 
-            <div style={infoBoxStyle}>
-              <InfoRow label="주문번호" value={preview.order_number} />
-              <InfoRow label="주문일" value={preview.order_date} />
-              <InfoRow label="작품명" value={preview.series_name} />
-              <InfoRow label="아이템 타입" value={preview.item_type} />
-              <InfoRow label="수량" value={String(preview.quantity)} />
-              <InfoRow
+            <div style={twoColStyle}>
+              <EditableSelect
+                label="작품명"
+                value={editableItem.series_name}
+                options={seriesList}
+                onChange={(value) => updateEditableItem("series_name", value)}
+              />
+
+              <EditableSelect
+                label="아이템 타입"
+                value={editableItem.item_type}
+                options={typeList}
+                onChange={(value) => updateEditableItem("item_type", value)}
+              />
+            </div>
+
+            <div style={twoColStyle}>
+              <EditableField
+                label="주문번호"
+                value={editableItem.order_number}
+                onChange={(value) => updateEditableItem("order_number", value)}
+              />
+
+              <EditableField
+                label="주문일"
+                value={editableItem.order_date}
+                onChange={(value) => updateEditableItem("order_date", value)}
+              />
+            </div>
+
+            <div style={twoColStyle}>
+              <EditableField
+                label="수량"
+                value={String(editableItem.quantity)}
+                onChange={(value) => updateEditableItem("quantity", value)}
+                type="number"
+              />
+
+              <EditableSelect
+                label="상태"
+                value={editableItem.status}
+                options={statusList}
+                onChange={(value) => updateEditableItem("status", value)}
+              />
+            </div>
+
+            <div style={twoColStyle}>
+              <EditableField
                 label="상품금액"
-                value={`¥${preview.yen_price.toLocaleString()}`}
+                value={String(editableItem.yen_price)}
+                onChange={(value) => updateEditableItem("yen_price", value)}
+                type="number"
               />
-              <InfoRow
+
+              <EditableField
                 label="배송비"
-                value={`¥${preview.shipping_fee.toLocaleString()}`}
+                value={String(editableItem.shipping_fee)}
+                onChange={(value) => updateEditableItem("shipping_fee", value)}
+                type="number"
               />
-              <InfoRow
-                label="총액"
-                value={`¥${preview.total_price.toLocaleString()}`}
-              />
-              <InfoRow label="운송장" value={preview.tracking_number} />
             </div>
 
-            <div style={memoBoxStyle}>{preview.memo || "메모 없음"}</div>
+            <div style={twoColStyle}>
+              <EditableField
+                label="총액"
+                value={String(editableItem.total_price)}
+                onChange={(value) => updateEditableItem("total_price", value)}
+                type="number"
+              />
+
+              <EditableField
+                label="판매가"
+                value={String(editableItem.selling_price)}
+                onChange={(value) => updateEditableItem("selling_price", value)}
+                type="number"
+              />
+            </div>
+
+            <EditableField
+              label="운송장"
+              value={editableItem.tracking_number}
+              onChange={(value) => updateEditableItem("tracking_number", value)}
+            />
+
+            <EditableField
+              label="이미지 URL"
+              value={editableItem.image_url}
+              onChange={(value) => updateEditableItem("image_url", value)}
+              textarea
+            />
+
+            <EditableField
+              label="메모"
+              value={editableItem.memo}
+              onChange={(value) => updateEditableItem("memo", value)}
+              textarea
+            />
           </div>
         </section>
       </div>
@@ -184,12 +384,64 @@ export default function DomesticInventoryInputPage() {
   );
 }
 
-function InfoRow({ label, value }: { label: string; value: string }) {
+function EditableField({
+  label,
+  value,
+  onChange,
+  type = "text",
+  textarea = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  textarea?: boolean;
+}) {
   return (
-    <div style={infoRowStyle}>
-      <span style={{ color: "#6b7280" }}>{label}</span>
-      <strong style={{ textAlign: "right" }}>{value || "-"}</strong>
-    </div>
+    <label style={labelStyle}>
+      {label}
+      {textarea ? (
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          style={smallTextareaStyle}
+        />
+      ) : (
+        <input
+          type={type}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          style={inputStyle}
+        />
+      )}
+    </label>
+  );
+}
+
+function EditableSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: readonly string[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label style={labelStyle}>
+      {label}
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={inputStyle}
+      >
+        {options.map((option) => (
+          <option key={option}>{option}</option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -236,19 +488,7 @@ function extractItemName(rawText: string) {
 
   if (englishTitle) return englishTitle;
 
-  const japaneseTitle = lines.find((line) => {
-    if (!/[ぁ-んァ-ン一-龥]/.test(line)) return false;
-    if (line.includes("墨田区")) return false;
-    if (line.includes("Tokyo-to")) return false;
-    if (line.includes("Japan")) return false;
-    if (line.includes("配送")) return false;
-    if (line.includes("注文")) return false;
-    if (line.includes("支払い")) return false;
-
-    return true;
-  });
-
-  return japaneseTitle ?? "";
+  return "";
 }
 
 function extractQuantity(itemName: string) {
@@ -267,67 +507,11 @@ function extractQuantity(itemName: string) {
 function detectItemType(text: string) {
   const lower = text.toLowerCase();
 
-  if (
-    lower.includes("acrylic") ||
-    text.includes("アクリル") ||
-    text.includes("아크릴")
-  ) {
-    return "아크릴";
-  }
-
-  if (
-    lower.includes("can badge") ||
-    lower.includes("badge") ||
-    text.includes("缶バッジ") ||
-    text.includes("缶バッチ") ||
-    text.includes("バッジ") ||
-    text.includes("뱃지") ||
-    text.includes("배지")
-  ) {
-    return "뱃지";
-  }
-
-  if (
-    lower.includes("figure") ||
-    lower.includes("re-ment") ||
-    lower.includes("rement") ||
-    text.includes("フィギュア") ||
-    text.includes("리멘트") ||
-    text.includes("피규어")
-  ) {
-    return "피규어";
-  }
-
-  if (
-    lower.includes("keyring") ||
-    lower.includes("key ring") ||
-    lower.includes("keychain") ||
-    lower.includes("key chain") ||
-    lower.includes("key holder") ||
-    text.includes("キーホルダー") ||
-    text.includes("キーリング") ||
-    text.includes("키링") ||
-    text.includes("키홀더")
-  ) {
-    return "키링";
-  }
-
-  if (
-    lower.includes("photocard") ||
-    lower.includes("photo card") ||
-    lower.includes("postcard") ||
-    lower.includes("post card") ||
-    lower.includes("card") ||
-    text.includes("フォトカード") ||
-    text.includes("ポストカード") ||
-    text.includes("カード") ||
-    text.includes("브로마이드") ||
-    text.includes("포토카드") ||
-    text.includes("엽서") ||
-    text.includes("카드")
-  ) {
-    return "지류";
-  }
+  if (lower.includes("acrylic") || text.includes("アクリル") || text.includes("아크릴")) return "아크릴";
+  if (lower.includes("can badge") || lower.includes("badge") || text.includes("缶バッジ") || text.includes("缶バッチ") || text.includes("バッジ") || text.includes("뱃지") || text.includes("배지")) return "뱃지";
+  if (lower.includes("figure") || lower.includes("re-ment") || lower.includes("rement") || text.includes("フィギュア") || text.includes("리멘트") || text.includes("피규어")) return "피규어";
+  if (lower.includes("keyring") || lower.includes("key ring") || lower.includes("keychain") || lower.includes("key chain") || lower.includes("key holder") || text.includes("キーホルダー") || text.includes("キーリング") || text.includes("키링") || text.includes("키홀더")) return "키링";
+  if (lower.includes("photocard") || lower.includes("photo card") || lower.includes("postcard") || lower.includes("post card") || lower.includes("card") || text.includes("フォトカード") || text.includes("ポストカード") || text.includes("カード") || text.includes("브로마이드") || text.includes("포토카드") || text.includes("엽서") || text.includes("카드")) return "지류";
 
   return "기타";
 }
@@ -335,64 +519,11 @@ function detectItemType(text: string) {
 function detectSeriesName(text: string) {
   const lower = text.toLowerCase();
 
-  if (
-    lower.includes("hunter x hunter") ||
-    lower.includes("hunter×hunter") ||
-    lower.includes("hxh") ||
-    text.includes("HUNTER×HUNTER") ||
-    text.includes("ハンター×ハンター") ||
-    text.includes("ハンターハンター") ||
-    text.includes("헌터헌터")
-  ) {
-    return "헌터헌터";
-  }
-
-  if (
-    lower.includes("demon slayer") ||
-    lower.includes("kimetsu") ||
-    text.includes("鬼滅") ||
-    text.includes("鬼滅の刃") ||
-    text.includes("きめつ") ||
-    text.includes("귀멸") ||
-    text.includes("귀멸의 칼날")
-  ) {
-    return "귀멸의칼날";
-  }
-
-  if (
-    lower.includes("my hero academia") ||
-    lower.includes("hero academia") ||
-    lower.includes("boku no hero") ||
-    lower.includes("bnha") ||
-    lower.includes("mha") ||
-    text.includes("僕のヒーローアカデミア") ||
-    text.includes("ヒロアカ") ||
-    text.includes("나의 히어로 아카데미아") ||
-    text.includes("히로아카")
-  ) {
-    return "나의히어로아카데미아";
-  }
-
-  if (
-    lower.includes("frieren") ||
-    text.includes("葬送のフリーレン") ||
-    text.includes("フリーレン") ||
-    text.includes("프리렌") ||
-    text.includes("장송의 프리렌")
-  ) {
-    return "프리렌";
-  }
-
-  if (
-    lower.includes("attack on titan") ||
-    lower.includes("shingeki") ||
-    text.includes("進撃の巨人") ||
-    text.includes("進撃") ||
-    text.includes("진격의 거인") ||
-    text.includes("진격거")
-  ) {
-    return "진격의거인";
-  }
+  if (lower.includes("hunter x hunter") || lower.includes("hunter×hunter") || lower.includes("hxh") || text.includes("HUNTER×HUNTER") || text.includes("ハンター×ハンター") || text.includes("ハンターハンター") || text.includes("헌터헌터")) return "헌터헌터";
+  if (lower.includes("demon slayer") || lower.includes("kimetsu") || text.includes("鬼滅") || text.includes("鬼滅の刃") || text.includes("きめつ") || text.includes("귀멸") || text.includes("귀멸의 칼날")) return "귀멸의칼날";
+  if (lower.includes("my hero academia") || lower.includes("hero academia") || lower.includes("boku no hero") || lower.includes("bnha") || lower.includes("mha") || text.includes("僕のヒーローアカデミア") || text.includes("ヒロアカ") || text.includes("나의 히어로 아카데미ア") || text.includes("나의 히어로 아카데미아") || text.includes("히로아카")) return "나의히어로아카데미아";
+  if (lower.includes("frieren") || text.includes("葬送のフリーレン") || text.includes("フリーレン") || text.includes("프리렌") || text.includes("장송의 프리렌")) return "프리렌";
+  if (lower.includes("attack on titan") || lower.includes("shingeki") || text.includes("進撃の巨人") || text.includes("進撃") || text.includes("진격의 거인") || text.includes("진격거")) return "진격의거인";
 
   return "기타";
 }
@@ -439,7 +570,7 @@ const linkButtonStyle: React.CSSProperties = {
 
 const layoutStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "1fr 420px",
+  gridTemplateColumns: "1fr 480px",
   gap: 20,
   alignItems: "start",
 };
@@ -484,6 +615,12 @@ const fieldGridStyle: React.CSSProperties = {
   gap: 12,
 };
 
+const twoColStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: 10,
+};
+
 const labelStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
@@ -498,6 +635,16 @@ const inputStyle: React.CSSProperties = {
   borderRadius: 8,
   border: "1px solid #d1d5db",
   fontSize: 14,
+  background: "#fff",
+};
+
+const smallTextareaStyle: React.CSSProperties = {
+  minHeight: 72,
+  padding: 10,
+  borderRadius: 8,
+  border: "1px solid #d1d5db",
+  fontSize: 14,
+  resize: "vertical",
 };
 
 const memoTextareaStyle: React.CSSProperties = {
@@ -516,7 +663,14 @@ const saveButtonStyle: React.CSSProperties = {
   background: "#111827",
   color: "#fff",
   fontWeight: 800,
-  cursor: "pointer",
+};
+
+const messageStyle: React.CSSProperties = {
+  padding: 12,
+  borderRadius: 10,
+  background: "#f3f4f6",
+  fontSize: 14,
+  fontWeight: 700,
 };
 
 const imageStyle: React.CSSProperties = {
@@ -561,36 +715,4 @@ const badgeStyle: React.CSSProperties = {
 const statusBadgeStyle: React.CSSProperties = {
   ...badgeStyle,
   background: "#fee2e2",
-};
-
-const itemNameStyle: React.CSSProperties = {
-  margin: 0,
-  fontSize: 16,
-  lineHeight: 1.45,
-};
-
-const infoBoxStyle: React.CSSProperties = {
-  background: "#f9fafb",
-  borderRadius: 10,
-  padding: 12,
-  display: "flex",
-  flexDirection: "column",
-  gap: 8,
-};
-
-const infoRowStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 10,
-  fontSize: 13,
-};
-
-const memoBoxStyle: React.CSSProperties = {
-  minHeight: 44,
-  background: "#fff7ed",
-  borderRadius: 10,
-  padding: 12,
-  fontSize: 13,
-  color: "#374151",
-  whiteSpace: "pre-wrap",
 };
