@@ -26,17 +26,24 @@ type PreviewItem = {
   saved?: boolean;
 };
 
+type InputMode = "text" | "html";
+
 const statusList: InventoryStatus[] = ["입고전", "입고완료", "판매중", "판매완료", "보류"];
 const typeList = ["아크릴", "지류", "뱃지", "피규어", "키링", "기타"];
 const seriesList = ["헌터헌터", "귀멸의칼날", "나의히어로아카데미아", "프리렌", "진격의거인", "기타"];
 
 export default function DomesticInventoryInputPage() {
+  const [inputMode, setInputMode] = useState<InputMode>("text");
   const [rawText, setRawText] = useState("");
+  const [htmlText, setHtmlText] = useState("");
   const [items, setItems] = useState<PreviewItem[]>([]);
   const [saveMessage, setSaveMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
-  const parsedItems = useMemo(() => parseAmazonOrders(rawText), [rawText]);
+  const parsedItems = useMemo(() => {
+    if (inputMode === "html") return parseAmazonHtml(htmlText);
+    return parseAmazonOrders(rawText);
+  }, [inputMode, rawText, htmlText]);
 
   useEffect(() => {
     setItems(parsedItems);
@@ -44,7 +51,11 @@ export default function DomesticInventoryInputPage() {
 
   const checkedCount = items.filter((item) => item.checked && !item.saved).length;
 
-  const updateItem = (localId: string, field: keyof PreviewItem, value: string | boolean) => {
+  const updateItem = (
+    localId: string,
+    field: keyof PreviewItem,
+    value: string | boolean
+  ) => {
     setItems((prev) =>
       prev.map((item) => {
         if (item.local_id !== localId) return item;
@@ -66,6 +77,14 @@ export default function DomesticInventoryInputPage() {
 
   const toggleAll = (checked: boolean) => {
     setItems((prev) => prev.map((item) => ({ ...item, checked })));
+  };
+
+  const handleHtmlFile = async (file?: File) => {
+    if (!file) return;
+
+    const text = await file.text();
+    setInputMode("html");
+    setHtmlText(text);
   };
 
   const saveSelected = async () => {
@@ -115,7 +134,7 @@ export default function DomesticInventoryInputPage() {
         <div>
           <h1 style={titleStyle}>국내 재고 입력</h1>
           <p style={subTextStyle}>
-            여러 주문을 붙여넣으면 카드로 자동 분리됩니다. 체크된 항목만 DB에 저장됩니다.
+            모바일은 텍스트 붙여넣기, PC는 HTML 파일 업로드로 입력할 수 있습니다.
           </p>
         </div>
 
@@ -127,14 +146,51 @@ export default function DomesticInventoryInputPage() {
       </div>
 
       <section style={inputPanelStyle}>
-        <h2 style={panelTitleStyle}>주문내역 붙여넣기</h2>
+        <div style={modeButtonRowStyle}>
+          <button
+            type="button"
+            onClick={() => setInputMode("text")}
+            style={inputMode === "text" ? activeModeButtonStyle : modeButtonStyle}
+          >
+            텍스트 붙여넣기
+          </button>
 
-        <textarea
-          value={rawText}
-          onChange={(e) => setRawText(e.target.value)}
-          placeholder="아마존 주문 목록 텍스트를 여러 건 그대로 붙여넣기"
-          style={rawTextareaStyle}
-        />
+          <button
+            type="button"
+            onClick={() => setInputMode("html")}
+            style={inputMode === "html" ? activeModeButtonStyle : modeButtonStyle}
+          >
+            HTML 업로드
+          </button>
+        </div>
+
+        {inputMode === "text" ? (
+          <>
+            <h2 style={panelTitleStyle}>주문내역 텍스트 붙여넣기</h2>
+            <textarea
+              value={rawText}
+              onChange={(e) => setRawText(e.target.value)}
+              placeholder="모바일/PC에서 아마존 주문내역 텍스트를 여러 건 그대로 붙여넣기"
+              style={rawTextareaStyle}
+            />
+          </>
+        ) : (
+          <>
+            <h2 style={panelTitleStyle}>아마존 주문 HTML 업로드</h2>
+            <input
+              type="file"
+              accept=".html,.htm,text/html"
+              onChange={(e) => handleHtmlFile(e.target.files?.[0])}
+              style={fileInputStyle}
+            />
+            <textarea
+              value={htmlText}
+              onChange={(e) => setHtmlText(e.target.value)}
+              placeholder="또는 HTML 내용을 직접 붙여넣기"
+              style={rawTextareaStyle}
+            />
+          </>
+        )}
 
         <div style={controlBarStyle}>
           <div style={summaryBoxStyle}>
@@ -169,7 +225,7 @@ export default function DomesticInventoryInputPage() {
 
       <section style={cardsSectionStyle}>
         {items.length === 0 ? (
-          <div style={emptyStyle}>주문내역을 붙여넣으면 카드가 쪼르륵 생성됩니다.</div>
+          <div style={emptyStyle}>주문내역을 넣으면 카드가 생성됩니다.</div>
         ) : (
           items.map((item, index) => (
             <article key={item.local_id} style={compactCardStyle}>
@@ -292,6 +348,116 @@ export default function DomesticInventoryInputPage() {
   );
 }
 
+function parseAmazonHtml(htmlText: string): PreviewItem[] {
+  if (!htmlText.trim()) return [];
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(htmlText, "text/html");
+  const text = doc.body?.innerText ?? "";
+  const items = parseAmazonOrders(text);
+  const imageInfos = extractImageInfosFromHtml(doc);
+
+  return items.map((item, index) => {
+    const matched =
+      imageInfos.find((info) => isSameOrSimilarTitle(info.title, item.item_name)) ??
+      imageInfos[index];
+
+    return {
+      ...item,
+      image_url: matched?.imageUrl ?? item.image_url,
+      quantity: matched?.quantity ?? item.quantity,
+    };
+  });
+}
+
+function extractImageInfosFromHtml(doc: Document) {
+  const imgs = Array.from(doc.querySelectorAll("img"));
+
+  return imgs
+    .map((img) => {
+      const alt = img.getAttribute("alt")?.trim() ?? "";
+      const hires = img.getAttribute("data-a-hires")?.trim() ?? "";
+      const src = img.getAttribute("src")?.trim() ?? "";
+
+      let imageUrl = hires || src;
+
+      if (imageUrl.startsWith("//")) {
+        imageUrl = `https:${imageUrl}`;
+      }
+
+      const ancestorText = getNearbyText(img);
+      const qtyText =
+        findNearbyQuantityText(img) ??
+        ancestorText.match(/product-image__qty[\s\S]{0,50}?(\d+)/i)?.[1] ??
+        "";
+
+      const quantity = qtyText ? Number(qtyText) || 1 : 1;
+
+      return {
+        title: alt,
+        imageUrl,
+        quantity,
+        nearbyText: ancestorText,
+      };
+    })
+    .filter((info) => {
+      if (!info.title || !info.imageUrl) return false;
+
+      const text = `${info.title}\n${info.nearbyText}`;
+
+      if (!/buy it again|view your item|return items|track package|problem with order/i.test(text)) {
+        return false;
+      }
+
+      if (/nav|sprite|logo|timeline|history/i.test(info.imageUrl)) {
+        return false;
+      }
+
+      return true;
+    });
+}
+
+function getNearbyText(el: Element) {
+  let current: Element | null = el;
+  let bestText = "";
+
+  for (let i = 0; i < 8; i += 1) {
+    if (!current) break;
+
+    const text = current.textContent?.trim() ?? "";
+
+    if (text.length > bestText.length) {
+      bestText = text;
+    }
+
+    if (/buy it again|view your item|track package|return items/i.test(text)) {
+      return text;
+    }
+
+    current = current.parentElement;
+  }
+
+  return bestText;
+}
+
+function findNearbyQuantityText(el: Element) {
+  let current: Element | null = el;
+
+  for (let i = 0; i < 8; i += 1) {
+    if (!current) break;
+
+    const qty =
+      current.querySelector(".product-image__qty")?.textContent?.trim() ??
+      current.querySelector("[class*='qty']")?.textContent?.trim();
+
+    if (qty && /^\d+$/.test(qty)) return qty;
+
+    current = current.parentElement;
+  }
+
+  return "";
+}
+
 function parseAmazonOrders(rawText: string): PreviewItem[] {
   const chunks = rawText
     .split(/(?=Order placed\s*\n)/i)
@@ -299,20 +465,35 @@ function parseAmazonOrders(rawText: string): PreviewItem[] {
     .filter((chunk) => chunk.includes("Order #"));
 
   return chunks.flatMap((chunk, index) => {
-    const orderDate = chunk.match(/Order placed\s*\n\s*([A-Za-z]+\s\d{1,2},\s\d{4})/i)?.[1] ?? "";
-    const orderNumber = chunk.match(/Order #\s*([\d-]+)/i)?.[1] ?? "";
-    const totalText = chunk.match(/Total\s*\n\s*¥([\d,]+)/i)?.[1] ?? chunk.match(/Grand Total:\s*¥([\d,]+)/i)?.[1] ?? "0";
-    const totalPrice = Number(totalText.replaceAll(",", ""));
-    const shippingText = chunk.match(/Shipping\s*&\s*Handling:\s*¥([\d,]+)/i)?.[1] ?? "0";
-    const shippingFee = Number(shippingText.replaceAll(",", ""));
+    const orderDate =
+      chunk.match(/Order placed\s*\n\s*([A-Za-z]+\s\d{1,2},\s\d{4})/i)?.[1] ??
+      chunk.match(/ORDER PLACED\s*\n\s*([A-Za-z]+\s\d{1,2},\s\d{4})/i)?.[1] ??
+      "";
 
+    const orderNumber =
+      chunk.match(/Order #\s*([\d-]+)/i)?.[1] ??
+      chunk.match(/ORDER #\s*([\d-]+)/i)?.[1] ??
+      "";
+
+    const totalText =
+      chunk.match(/Total\s*\n\s*¥([\d,]+)/i)?.[1] ??
+      chunk.match(/TOTAL\s*\n\s*¥([\d,]+)/i)?.[1] ??
+      chunk.match(/Grand Total:\s*¥([\d,]+)/i)?.[1] ??
+      "0";
+
+    const totalPrice = Number(totalText.replaceAll(",", ""));
+
+    const shippingText =
+      chunk.match(/Shipping\s*&\s*Handling:\s*¥([\d,]+)/i)?.[1] ?? "0";
+
+    const shippingFee = Number(shippingText.replaceAll(",", ""));
     const itemBlocks = splitItemsInOrderChunk(chunk);
 
     return itemBlocks.map((itemText, itemIndex) => {
       const itemName = extractItemName(itemText);
 
       return {
-        local_id: `${orderNumber || index}-${itemIndex}-${itemName.slice(0, 10)}`,
+        local_id: `${orderNumber || index}-${itemIndex}-${itemName.slice(0, 12)}`,
         checked: true,
         item_name: itemName,
         item_type: detectItemType(itemText),
@@ -326,7 +507,7 @@ function parseAmazonOrders(rawText: string): PreviewItem[] {
         tracking_number: "",
         image_url: "",
         quantity: extractQuantity(itemText, itemName),
-        status: detectInitialStatus(chunk),
+        status: "입고전",
         memo: "",
         raw_text: itemText,
         saved: false,
@@ -393,9 +574,11 @@ function extractItemName(text: string) {
 
   const englishTitle = lines.find((line) => {
     const lower = line.toLowerCase();
+
     if (!/[a-zA-Z]/.test(line)) return false;
     if (line.includes("¥")) return false;
     if (/^\d{3}-\d{7}-\d{7}$/.test(line)) return false;
+
     return !ignoredWords.some((word) => lower.includes(word));
   });
 
@@ -405,25 +588,28 @@ function extractItemName(text: string) {
 }
 
 function extractQuantity(text: string, itemName: string) {
-  const target = `${text}\n${itemName}`;
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
 
-  const match =
-    target.match(/box\s*of\s*(\d+)/i) ||
-    target.match(/pack\s*of\s*(\d+)/i) ||
-    target.match(/set\s*of\s*(\d+)/i) ||
-    target.match(/(\d+)\s*packs?/i) ||
-    target.match(/(\d+)\s*pieces?/i) ||
-    target.match(/(\d+)\s*pcs/i) ||
-    target.match(/(\d+)\s*個入り/i) ||
-    target.match(/(\d+)\s*個セット/i) ||
-    target.match(/(\d+)\s*枚入り/i);
+  for (const line of lines) {
+    const jpMatch =
+      line.match(/個入り\s*(\d+)$/) ||
+      line.match(/パック入\s*(\d+)$/) ||
+      line.match(/枚入り\s*(\d+)$/) ||
+      line.match(/BOX商品.*?(\d+)$/) ||
+      line.match(/セット】\s*(\d+)$/);
 
-  return match ? Number(match[1]) || 1 : 1;
-}
+    if (jpMatch) return Number(jpMatch[1]) || 1;
+  }
 
-function detectInitialStatus(text: string): InventoryStatus {
-  if (/delivered/i.test(text)) return "입고완료";
-  return "입고전";
+  for (const line of lines) {
+    const enMatch =
+      line.match(/included\s*(\d+)$/i) ||
+      line.match(/box product\s*(\d+)$/i);
+
+    if (enMatch) return Number(enMatch[1]) || 1;
+  }
+
+  return 1;
 }
 
 function detectItemType(text: string) {
@@ -448,6 +634,29 @@ function detectSeriesName(text: string) {
   if (lower.includes("attack on titan") || lower.includes("shingeki") || text.includes("進撃の巨人") || text.includes("進撃") || text.includes("진격의 거인") || text.includes("진격거")) return "진격의거인";
 
   return "기타";
+}
+
+function isSameOrSimilarTitle(a: string, b: string) {
+  const na = normalizeTitle(a);
+  const nb = normalizeTitle(b);
+
+  if (!na || !nb) return false;
+  if (na.includes(nb) || nb.includes(na)) return true;
+
+  const aWords = new Set(na.split(" ").filter((word) => word.length >= 3));
+  const bWords = nb.split(" ").filter((word) => word.length >= 3);
+
+  const matched = bWords.filter((word) => aWords.has(word)).length;
+
+  return matched >= Math.min(4, bWords.length);
+}
+
+function normalizeTitle(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9ぁ-んァ-ン一-龥]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function EditableField({
@@ -504,8 +713,12 @@ const titleStyle: React.CSSProperties = { margin: 0, fontSize: 28, fontWeight: 8
 const subTextStyle: React.CSSProperties = { marginTop: 6, color: "#6b7280", fontSize: 14 };
 const linkButtonStyle: React.CSSProperties = { height: 40, padding: "0 14px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", color: "#111827", textDecoration: "none", display: "inline-flex", alignItems: "center", fontSize: 14, fontWeight: 600 };
 const inputPanelStyle: React.CSSProperties = { border: "1px solid #e5e7eb", borderRadius: 14, padding: 18, background: "#fff", marginBottom: 18 };
+const modeButtonRowStyle: React.CSSProperties = { display: "flex", gap: 8, marginBottom: 16 };
+const modeButtonStyle: React.CSSProperties = { height: 38, padding: "0 14px", borderRadius: 999, border: "1px solid #d1d5db", background: "#fff", fontWeight: 800, cursor: "pointer" };
+const activeModeButtonStyle: React.CSSProperties = { ...modeButtonStyle, background: "#111827", color: "#fff", border: "1px solid #111827" };
 const panelTitleStyle: React.CSSProperties = { margin: "0 0 12px", fontSize: 18, fontWeight: 800 };
 const rawTextareaStyle: React.CSSProperties = { width: "100%", minHeight: 180, padding: 12, borderRadius: 10, border: "1px solid #d1d5db", fontSize: 14, lineHeight: 1.5, resize: "vertical" };
+const fileInputStyle: React.CSSProperties = { display: "block", marginBottom: 12 };
 const controlBarStyle: React.CSSProperties = { marginTop: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" };
 const summaryBoxStyle: React.CSSProperties = { padding: "10px 12px", borderRadius: 10, background: "#f3f4f6", fontSize: 14 };
 const smallButtonStyle: React.CSSProperties = { height: 38, padding: "0 12px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", fontWeight: 700, cursor: "pointer" };
