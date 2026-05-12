@@ -62,10 +62,16 @@ export default async function DomesticInventoryCardsPage({
     );
   }
 
-  const { data: items = [] } = await query;
+const { data, error } = await query;
 
-  const totalCount = items.length;
-  const totalYen = items.reduce(
+if (error) {
+  console.error(error);
+}
+
+const items = data ?? [];
+
+const totalCount = items.length;
+const totalYen = items.reduce(
     (sum, item) => sum + (item.total_price ?? 0),
     0
   );
