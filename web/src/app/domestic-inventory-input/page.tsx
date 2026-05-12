@@ -377,8 +377,10 @@ function parseAmazonHtml(htmlText: string): PreviewItem[] {
 
   const parser = new DOMParser();
   const doc = parser.parseFromString(htmlText, "text/html");
-  const text = doc.body?.innerText ?? "";
 
+  doc.querySelectorAll("script, style, noscript").forEach((el) => el.remove());
+
+  const text = doc.body?.innerText ?? "";
   const items = parseAmazonOrders(text);
   const imageInfos = extractImageInfosFromHtml(doc);
 
@@ -508,7 +510,6 @@ function parseAmazonOrders(rawText: string): PreviewItem[] {
       chunk.match(/Shipping\s*&\s*Handling:\s*¥([\d,]+)/i)?.[1] ?? "0";
 
     const shippingFee = Number(shippingText.replaceAll(",", ""));
-
     const itemBlocks = splitItemsInOrderChunk(chunk);
 
     return itemBlocks.map((itemText, itemIndex) => {
@@ -640,6 +641,11 @@ function isNotProductLine(line: string) {
   if (!line.trim()) return true;
 
   return (
+    lower.includes("ue.count") ||
+    lower.includes("ordersview") ||
+    lower.includes("function") ||
+    lower.includes("window.") ||
+    lower.includes("amazonuipagejs") ||
     lower.includes("order placed") ||
     lower.includes("order #") ||
     lower.includes("invoice") ||
@@ -704,64 +710,10 @@ function detectItemType(text: string) {
   const lower = text.toLowerCase();
 
   if (lower.includes("acrylic") || text.includes("アクリル") || text.includes("아크릴")) return "아크릴";
-
-  if (
-    lower.includes("can badge") ||
-    lower.includes("tin badge") ||
-    lower.includes("badge") ||
-    text.includes("缶バッジ") ||
-    text.includes("缶バッチ") ||
-    text.includes("バッジ") ||
-    text.includes("뱃지") ||
-    text.includes("배지")
-  ) {
-    return "뱃지";
-  }
-
-  if (
-    lower.includes("figure") ||
-    lower.includes("re-ment") ||
-    lower.includes("rement") ||
-    text.includes("フィギュア") ||
-    text.includes("리멘트") ||
-    text.includes("피규어")
-  ) {
-    return "피규어";
-  }
-
-  if (
-    lower.includes("keyring") ||
-    lower.includes("key ring") ||
-    lower.includes("keychain") ||
-    lower.includes("key chain") ||
-    lower.includes("key holder") ||
-    text.includes("キーホルダー") ||
-    text.includes("キーリング") ||
-    text.includes("키링") ||
-    text.includes("키홀더")
-  ) {
-    return "키링";
-  }
-
-  if (
-    lower.includes("photocard") ||
-    lower.includes("photo card") ||
-    lower.includes("postcard") ||
-    lower.includes("post card") ||
-    lower.includes("card") ||
-    lower.includes("poster") ||
-    text.includes("フォトカード") ||
-    text.includes("ポストカード") ||
-    text.includes("カード") ||
-    text.includes("ポスター") ||
-    text.includes("紙製") ||
-    text.includes("브로마이드") ||
-    text.includes("포토카드") ||
-    text.includes("엽서") ||
-    text.includes("카드")
-  ) {
-    return "지류";
-  }
+  if (lower.includes("can badge") || lower.includes("tin badge") || lower.includes("badge") || text.includes("缶バッジ") || text.includes("缶バッチ") || text.includes("バッジ") || text.includes("뱃지") || text.includes("배지")) return "뱃지";
+  if (lower.includes("figure") || lower.includes("re-ment") || lower.includes("rement") || text.includes("フィギュア") || text.includes("리멘트") || text.includes("피규어")) return "피규어";
+  if (lower.includes("keyring") || lower.includes("key ring") || lower.includes("keychain") || lower.includes("key chain") || lower.includes("key holder") || text.includes("キーホルダー") || text.includes("キーリング") || text.includes("키링") || text.includes("키홀더")) return "키링";
+  if (lower.includes("photocard") || lower.includes("photo card") || lower.includes("postcard") || lower.includes("post card") || lower.includes("card") || lower.includes("poster") || text.includes("フォトカード") || text.includes("ポストカード") || text.includes("カード") || text.includes("ポスター") || text.includes("紙製") || text.includes("브로마이드") || text.includes("포토카드") || text.includes("엽서") || text.includes("카드")) return "지류";
 
   return "기타";
 }
@@ -769,64 +721,11 @@ function detectItemType(text: string) {
 function detectSeriesName(text: string) {
   const lower = text.toLowerCase();
 
-  if (
-    lower.includes("hunter x hunter") ||
-    lower.includes("hunter×hunter") ||
-    lower.includes("hxh") ||
-    text.includes("HUNTER×HUNTER") ||
-    text.includes("ハンター×ハンター") ||
-    text.includes("ハンターハンター") ||
-    text.includes("헌터헌터")
-  ) {
-    return "헌터헌터";
-  }
-
-  if (
-    lower.includes("demon slayer") ||
-    lower.includes("kimetsu") ||
-    text.includes("鬼滅") ||
-    text.includes("鬼滅の刃") ||
-    text.includes("きめつ") ||
-    text.includes("귀멸") ||
-    text.includes("귀멸의 칼날")
-  ) {
-    return "귀멸의칼날";
-  }
-
-  if (
-    lower.includes("my hero academia") ||
-    lower.includes("hero academia") ||
-    lower.includes("boku no hero") ||
-    lower.includes("bnha") ||
-    lower.includes("mha") ||
-    text.includes("僕のヒーローアカデミア") ||
-    text.includes("ヒロアカ") ||
-    text.includes("나의 히어로 아카데미아") ||
-    text.includes("히로아카")
-  ) {
-    return "나의히어로아카데미아";
-  }
-
-  if (
-    lower.includes("frieren") ||
-    text.includes("葬送のフリーレン") ||
-    text.includes("フリーレン") ||
-    text.includes("프리렌") ||
-    text.includes("장송의 프리렌")
-  ) {
-    return "프리렌";
-  }
-
-  if (
-    lower.includes("attack on titan") ||
-    lower.includes("shingeki") ||
-    text.includes("進撃の巨人") ||
-    text.includes("進撃") ||
-    text.includes("진격의 거인") ||
-    text.includes("진격거")
-  ) {
-    return "진격의거인";
-  }
+  if (lower.includes("hunter x hunter") || lower.includes("hunter×hunter") || lower.includes("hxh") || text.includes("HUNTER×HUNTER") || text.includes("ハンター×ハンター") || text.includes("ハンターハンター") || text.includes("헌터헌터")) return "헌터헌터";
+  if (lower.includes("demon slayer") || lower.includes("kimetsu") || text.includes("鬼滅") || text.includes("鬼滅の刃") || text.includes("きめつ") || text.includes("귀멸") || text.includes("귀멸의 칼날")) return "귀멸의칼날";
+  if (lower.includes("my hero academia") || lower.includes("hero academia") || lower.includes("boku no hero") || lower.includes("bnha") || lower.includes("mha") || text.includes("僕のヒーローアカデミア") || text.includes("ヒロアカ") || text.includes("나의 히어로 아카데미아") || text.includes("히로아카")) return "나의히어로아카데미아";
+  if (lower.includes("frieren") || text.includes("葬送のフリーレン") || text.includes("フリーレン") || text.includes("프리렌") || text.includes("장송의 프리렌")) return "프리렌";
+  if (lower.includes("attack on titan") || lower.includes("shingeki") || text.includes("進撃の巨人") || text.includes("進撃") || text.includes("진격의 거인") || text.includes("진격거")) return "진격의거인";
 
   return "기타";
 }
