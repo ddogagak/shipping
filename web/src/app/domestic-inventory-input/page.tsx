@@ -3,14 +3,11 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-type InventoryStatus =
-  | "입고전"
-  | "입고완료"
-  | "판매중"
-  | "판매완료"
-  | "보류";
+type InventoryStatus = "입고전" | "입고완료" | "판매중" | "판매완료" | "보류";
 
 type PreviewItem = {
+  local_id: string;
+  checked: boolean;
   item_name: string;
   item_type: string;
   series_name: string;
@@ -25,156 +22,91 @@ type PreviewItem = {
   quantity: number;
   status: InventoryStatus;
   memo: string;
+  raw_text: string;
+  saved?: boolean;
 };
 
-const statusList: InventoryStatus[] = [
-  "입고전",
-  "입고완료",
-  "판매중",
-  "판매완료",
-  "보류",
-];
-
+const statusList: InventoryStatus[] = ["입고전", "입고완료", "판매중", "판매완료", "보류"];
 const typeList = ["아크릴", "지류", "뱃지", "피규어", "키링", "기타"];
-
-const seriesList = [
-  "헌터헌터",
-  "귀멸의칼날",
-  "나의히어로아카데미아",
-  "프리렌",
-  "진격의거인",
-  "기타",
-];
+const seriesList = ["헌터헌터", "귀멸의칼날", "나의히어로아카데미아", "프리렌", "진격의거인", "기타"];
 
 export default function DomesticInventoryInputPage() {
   const [rawText, setRawText] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
-  const [trackingNumber, setTrackingNumber] = useState("");
-  const [memo, setMemo] = useState("");
-
-  const [editableItem, setEditableItem] = useState<PreviewItem>({
-    item_name: "",
-    item_type: "기타",
-    series_name: "기타",
-    order_number: "",
-    order_date: "",
-    yen_price: 0,
-    shipping_fee: 0,
-    total_price: 0,
-    selling_price: 0,
-    tracking_number: "",
-    image_url: "",
-    quantity: 1,
-    status: "입고전",
-    memo: "",
-  });
-
+  const [items, setItems] = useState<PreviewItem[]>([]);
   const [saveMessage, setSaveMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
-  const parsedPreview = useMemo<PreviewItem>(() => {
-    const orderNumber = rawText.match(/Order\s?#\s*([\d-]+)/i)?.[1] ?? "";
-
-    const orderDate =
-      rawText.match(/Order placed\s*([A-Za-z]+\s\d{1,2},\s\d{4})/i)?.[1] ??
-      "";
-
-    const grandTotalText =
-      rawText.match(/Grand Total:\s*¥([\d,]+)/i)?.[1] ??
-      rawText.match(/Total:\s*¥([\d,]+)/i)?.[1] ??
-      "0";
-
-    const shippingText =
-      rawText.match(/Shipping\s*&\s*Handling:\s*¥([\d,]+)/i)?.[1] ?? "0";
-
-    const totalPrice = Number(grandTotalText.replaceAll(",", ""));
-    const shippingFee = Number(shippingText.replaceAll(",", ""));
-
-    const itemName = extractItemName(rawText);
-
-    return {
-      item_name: itemName,
-      item_type: detectItemType(rawText),
-      series_name: detectSeriesName(rawText),
-      order_number: orderNumber,
-      order_date: orderDate,
-      yen_price: totalPrice,
-      shipping_fee: shippingFee,
-      total_price: totalPrice,
-      selling_price: 0,
-      tracking_number: trackingNumber,
-      image_url: imageUrl,
-      quantity: extractQuantity(itemName),
-      status: "입고전",
-      memo,
-    };
-  }, [rawText, imageUrl, trackingNumber, memo]);
+  const parsedItems = useMemo(() => parseAmazonOrders(rawText), [rawText]);
 
   useEffect(() => {
-    setEditableItem(parsedPreview);
-  }, [parsedPreview]);
+    setItems(parsedItems);
+  }, [parsedItems]);
 
-  const updateEditableItem = (
-    field: keyof PreviewItem,
-    value: string
-  ) => {
-    setEditableItem((prev) => {
-      if (
-        field === "quantity" ||
-        field === "yen_price" ||
-        field === "shipping_fee" ||
-        field === "total_price" ||
-        field === "selling_price"
-      ) {
-        return {
-          ...prev,
-          [field]: Number(value),
-        };
-      }
+  const checkedCount = items.filter((item) => item.checked && !item.saved).length;
 
-      return {
-        ...prev,
-        [field]: value,
-      };
-    });
+  const updateItem = (localId: string, field: keyof PreviewItem, value: string | boolean) => {
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.local_id !== localId) return item;
+
+        if (
+          field === "quantity" ||
+          field === "yen_price" ||
+          field === "shipping_fee" ||
+          field === "total_price" ||
+          field === "selling_price"
+        ) {
+          return { ...item, [field]: Number(value), saved: false };
+        }
+
+        return { ...item, [field]: value, saved: false };
+      })
+    );
   };
 
-  const saveInventoryItem = async () => {
+  const toggleAll = (checked: boolean) => {
+    setItems((prev) => prev.map((item) => ({ ...item, checked })));
+  };
+
+  const saveSelected = async () => {
     setSaveMessage("");
-
-    if (!editableItem.item_name.trim()) {
-      setSaveMessage("상품명을 입력해줘.");
-      return;
-    }
-
     setIsSaving(true);
 
-    try {
+    const targets = items.filter((item) => item.checked && !item.saved);
+    let successCount = 0;
+
+    for (const item of targets) {
+      if (!item.item_name.trim()) {
+        setSaveMessage("상품명이 없는 항목이 있어 저장을 중단했어.");
+        break;
+      }
+
       const res = await fetch("/api/domestic-inventory/items", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ...editableItem,
-          raw_text: rawText,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(item),
       });
 
       const result = await res.json();
 
       if (!res.ok || !result.ok) {
-        throw new Error(result.message || "저장 실패");
+        setSaveMessage(result.message || "저장 실패");
+        break;
       }
 
-      setSaveMessage("저장 완료!");
-    } catch (error) {
-      setSaveMessage(
-        error instanceof Error ? error.message : "저장 실패"
+      successCount += 1;
+
+      setItems((prev) =>
+        prev.map((prevItem) =>
+          prevItem.local_id === item.local_id
+            ? { ...prevItem, saved: true, checked: false }
+            : prevItem
+        )
       );
-    } finally {
-      setIsSaving(false);
     }
+
+    setIsSaving(false);
+    setSaveMessage(`${successCount}건 저장 완료`);
   };
 
   return (
@@ -183,7 +115,7 @@ export default function DomesticInventoryInputPage() {
         <div>
           <h1 style={titleStyle}>국내 재고 입력</h1>
           <p style={subTextStyle}>
-            주문내역을 붙여넣고, 미리보기에서 필요한 값을 수정한 뒤 저장합니다.
+            여러 주문을 붙여넣으면 카드로 자동 분리됩니다. 체크된 항목만 DB에 저장됩니다.
           </p>
         </div>
 
@@ -194,262 +126,243 @@ export default function DomesticInventoryInputPage() {
         </div>
       </div>
 
-      <div style={layoutStyle}>
-        <section style={panelStyle}>
-          <h2 style={panelTitleStyle}>주문내역 입력</h2>
+      <section style={inputPanelStyle}>
+        <h2 style={panelTitleStyle}>주문내역 붙여넣기</h2>
 
-          <textarea
-            value={rawText}
-            onChange={(e) => setRawText(e.target.value)}
-            placeholder="아마존 Order Details 텍스트를 붙여넣기"
-            style={rawTextareaStyle}
-          />
+        <textarea
+          value={rawText}
+          onChange={(e) => setRawText(e.target.value)}
+          placeholder="아마존 주문 목록 텍스트를 여러 건 그대로 붙여넣기"
+          style={rawTextareaStyle}
+        />
 
-          <div style={fieldGridStyle}>
-            <label style={labelStyle}>
-              이미지 URL
-              <input
-                value={imageUrl}
-                onChange={(e) => setImageUrl(e.target.value)}
-                placeholder="https://..."
-                style={inputStyle}
-              />
-            </label>
-
-            <label style={labelStyle}>
-              운송장번호
-              <input
-                value={trackingNumber}
-                onChange={(e) => setTrackingNumber(e.target.value)}
-                placeholder="운송장번호 직접 입력"
-                style={inputStyle}
-              />
-            </label>
+        <div style={controlBarStyle}>
+          <div style={summaryBoxStyle}>
+            자동 인식 <strong>{items.length}</strong>건 / 저장대상{" "}
+            <strong>{checkedCount}</strong>건
           </div>
 
-          <label style={labelStyle}>
-            메모
-            <textarea
-              value={memo}
-              onChange={(e) => setMemo(e.target.value)}
-              placeholder="메모"
-              style={memoTextareaStyle}
-            />
-          </label>
+          <button type="button" onClick={() => toggleAll(true)} style={smallButtonStyle}>
+            전체선택
+          </button>
+
+          <button type="button" onClick={() => toggleAll(false)} style={smallButtonStyle}>
+            전체해제
+          </button>
 
           <button
             type="button"
-            onClick={saveInventoryItem}
-            disabled={isSaving}
+            onClick={saveSelected}
+            disabled={isSaving || checkedCount === 0}
             style={{
               ...saveButtonStyle,
-              opacity: isSaving ? 0.6 : 1,
-              cursor: isSaving ? "not-allowed" : "pointer",
+              opacity: isSaving || checkedCount === 0 ? 0.6 : 1,
+              cursor: isSaving || checkedCount === 0 ? "not-allowed" : "pointer",
             }}
           >
-            {isSaving ? "저장 중..." : "재고 저장"}
+            {isSaving ? "저장 중..." : `체크한 항목 저장 (${checkedCount}건)`}
           </button>
+        </div>
 
-          {saveMessage ? (
-            <div style={messageStyle}>{saveMessage}</div>
-          ) : null}
-        </section>
+        {saveMessage ? <div style={messageStyle}>{saveMessage}</div> : null}
+      </section>
 
-        <section style={previewPanelStyle}>
-          <h2 style={{ ...panelTitleStyle, padding: 16, paddingBottom: 0 }}>
-            수정 가능한 미리보기
-          </h2>
+      <section style={cardsSectionStyle}>
+        {items.length === 0 ? (
+          <div style={emptyStyle}>주문내역을 붙여넣으면 카드가 쪼르륵 생성됩니다.</div>
+        ) : (
+          items.map((item, index) => (
+            <article key={item.local_id} style={compactCardStyle}>
+              <div style={checkAreaStyle}>
+                <input
+                  type="checkbox"
+                  checked={item.checked}
+                  onChange={(e) => updateItem(item.local_id, "checked", e.target.checked)}
+                  style={{ width: 18, height: 18 }}
+                />
+                <strong>#{index + 1}</strong>
+              </div>
 
-          {editableItem.image_url ? (
-            <img src={editableItem.image_url} alt="" style={imageStyle} />
-          ) : (
-            <div style={emptyImageStyle}>이미지 미리보기</div>
-          )}
+              <div style={thumbBoxStyle}>
+                {item.image_url ? (
+                  <img src={item.image_url} alt="" style={thumbStyle} />
+                ) : (
+                  <div style={emptyThumbStyle}>IMG</div>
+                )}
+              </div>
 
-          <div style={previewBodyStyle}>
-            <div style={badgeRowStyle}>
-              <span style={badgeStyle}>{editableItem.series_name}</span>
-              <span style={badgeStyle}>{editableItem.item_type}</span>
-              <span style={statusBadgeStyle}>{editableItem.status}</span>
-            </div>
+              <div style={cardMainStyle}>
+                <div style={badgeRowStyle}>
+                  <span style={badgeStyle}>{item.series_name}</span>
+                  <span style={typeBadgeStyle}>{item.item_type}</span>
+                  <span style={statusBadgeStyle}>{item.status}</span>
+                  {item.saved ? <span style={savedBadgeStyle}>저장완료</span> : null}
+                </div>
 
-            <EditableField
-              label="상품명"
-              value={editableItem.item_name}
-              onChange={(value) => updateEditableItem("item_name", value)}
-              textarea
-            />
+                <EditableField
+                  label="상품명"
+                  value={item.item_name}
+                  onChange={(value) => updateItem(item.local_id, "item_name", value)}
+                  textarea
+                />
 
-            <div style={twoColStyle}>
-              <EditableSelect
-                label="작품명"
-                value={editableItem.series_name}
-                options={seriesList}
-                onChange={(value) => updateEditableItem("series_name", value)}
-              />
+                <div style={grid4Style}>
+                  <EditableSelect
+                    label="작품명"
+                    value={item.series_name}
+                    options={seriesList}
+                    onChange={(value) => updateItem(item.local_id, "series_name", value)}
+                  />
 
-              <EditableSelect
-                label="아이템 타입"
-                value={editableItem.item_type}
-                options={typeList}
-                onChange={(value) => updateEditableItem("item_type", value)}
-              />
-            </div>
+                  <EditableSelect
+                    label="타입"
+                    value={item.item_type}
+                    options={typeList}
+                    onChange={(value) => updateItem(item.local_id, "item_type", value)}
+                  />
 
-            <div style={twoColStyle}>
-              <EditableField
-                label="주문번호"
-                value={editableItem.order_number}
-                onChange={(value) => updateEditableItem("order_number", value)}
-              />
+                  <EditableSelect
+                    label="상태"
+                    value={item.status}
+                    options={statusList}
+                    onChange={(value) => updateItem(item.local_id, "status", value)}
+                  />
 
-              <EditableField
-                label="주문일"
-                value={editableItem.order_date}
-                onChange={(value) => updateEditableItem("order_date", value)}
-              />
-            </div>
+                  <EditableField
+                    label="수량"
+                    value={String(item.quantity)}
+                    type="number"
+                    onChange={(value) => updateItem(item.local_id, "quantity", value)}
+                  />
+                </div>
 
-            <div style={twoColStyle}>
-              <EditableField
-                label="수량"
-                value={String(editableItem.quantity)}
-                onChange={(value) => updateEditableItem("quantity", value)}
-                type="number"
-              />
+                <div style={grid4Style}>
+                  <EditableField
+                    label="주문일"
+                    value={item.order_date}
+                    onChange={(value) => updateItem(item.local_id, "order_date", value)}
+                  />
 
-              <EditableSelect
-                label="상태"
-                value={editableItem.status}
-                options={statusList}
-                onChange={(value) => updateEditableItem("status", value)}
-              />
-            </div>
+                  <EditableField
+                    label="주문번호"
+                    value={item.order_number}
+                    onChange={(value) => updateItem(item.local_id, "order_number", value)}
+                  />
 
-            <div style={twoColStyle}>
-              <EditableField
-                label="상품금액"
-                value={String(editableItem.yen_price)}
-                onChange={(value) => updateEditableItem("yen_price", value)}
-                type="number"
-              />
+                  <EditableField
+                    label="총액(¥)"
+                    value={String(item.total_price)}
+                    type="number"
+                    onChange={(value) => updateItem(item.local_id, "total_price", value)}
+                  />
 
-              <EditableField
-                label="배송비"
-                value={String(editableItem.shipping_fee)}
-                onChange={(value) => updateEditableItem("shipping_fee", value)}
-                type="number"
-              />
-            </div>
+                  <EditableField
+                    label="판매가"
+                    value={String(item.selling_price)}
+                    type="number"
+                    onChange={(value) => updateItem(item.local_id, "selling_price", value)}
+                  />
+                </div>
 
-            <div style={twoColStyle}>
-              <EditableField
-                label="총액"
-                value={String(editableItem.total_price)}
-                onChange={(value) => updateEditableItem("total_price", value)}
-                type="number"
-              />
+                <div style={grid3Style}>
+                  <EditableField
+                    label="이미지 URL"
+                    value={item.image_url}
+                    onChange={(value) => updateItem(item.local_id, "image_url", value)}
+                  />
 
-              <EditableField
-                label="판매가"
-                value={String(editableItem.selling_price)}
-                onChange={(value) => updateEditableItem("selling_price", value)}
-                type="number"
-              />
-            </div>
+                  <EditableField
+                    label="운송장"
+                    value={item.tracking_number}
+                    onChange={(value) => updateItem(item.local_id, "tracking_number", value)}
+                  />
 
-            <EditableField
-              label="운송장"
-              value={editableItem.tracking_number}
-              onChange={(value) => updateEditableItem("tracking_number", value)}
-            />
-
-            <EditableField
-              label="이미지 URL"
-              value={editableItem.image_url}
-              onChange={(value) => updateEditableItem("image_url", value)}
-              textarea
-            />
-
-            <EditableField
-              label="메모"
-              value={editableItem.memo}
-              onChange={(value) => updateEditableItem("memo", value)}
-              textarea
-            />
-          </div>
-        </section>
-      </div>
+                  <EditableField
+                    label="메모"
+                    value={item.memo}
+                    onChange={(value) => updateItem(item.local_id, "memo", value)}
+                  />
+                </div>
+              </div>
+            </article>
+          ))
+        )}
+      </section>
     </main>
   );
 }
 
-function EditableField({
-  label,
-  value,
-  onChange,
-  type = "text",
-  textarea = false,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  type?: string;
-  textarea?: boolean;
-}) {
-  return (
-    <label style={labelStyle}>
-      {label}
-      {textarea ? (
-        <textarea
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          style={smallTextareaStyle}
-        />
-      ) : (
-        <input
-          type={type}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          style={inputStyle}
-        />
-      )}
-    </label>
-  );
+function parseAmazonOrders(rawText: string): PreviewItem[] {
+  const chunks = rawText
+    .split(/(?=Order placed\s*\n)/i)
+    .map((chunk) => chunk.trim())
+    .filter((chunk) => chunk.includes("Order #"));
+
+  return chunks.flatMap((chunk, index) => {
+    const orderDate = chunk.match(/Order placed\s*\n\s*([A-Za-z]+\s\d{1,2},\s\d{4})/i)?.[1] ?? "";
+    const orderNumber = chunk.match(/Order #\s*([\d-]+)/i)?.[1] ?? "";
+    const totalText = chunk.match(/Total\s*\n\s*¥([\d,]+)/i)?.[1] ?? chunk.match(/Grand Total:\s*¥([\d,]+)/i)?.[1] ?? "0";
+    const totalPrice = Number(totalText.replaceAll(",", ""));
+    const shippingText = chunk.match(/Shipping\s*&\s*Handling:\s*¥([\d,]+)/i)?.[1] ?? "0";
+    const shippingFee = Number(shippingText.replaceAll(",", ""));
+
+    const itemBlocks = splitItemsInOrderChunk(chunk);
+
+    return itemBlocks.map((itemText, itemIndex) => {
+      const itemName = extractItemName(itemText);
+
+      return {
+        local_id: `${orderNumber || index}-${itemIndex}-${itemName.slice(0, 10)}`,
+        checked: true,
+        item_name: itemName,
+        item_type: detectItemType(itemText),
+        series_name: detectSeriesName(itemText),
+        order_number: orderNumber,
+        order_date: orderDate,
+        yen_price: totalPrice,
+        shipping_fee: shippingFee,
+        total_price: totalPrice,
+        selling_price: 0,
+        tracking_number: "",
+        image_url: "",
+        quantity: extractQuantity(itemText, itemName),
+        status: detectInitialStatus(chunk),
+        memo: "",
+        raw_text: itemText,
+        saved: false,
+      };
+    });
+  });
 }
 
-function EditableSelect({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: readonly string[];
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label style={labelStyle}>
-      {label}
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        style={inputStyle}
-      >
-        {options.map((option) => (
-          <option key={option}>{option}</option>
-        ))}
-      </select>
-    </label>
-  );
+function splitItemsInOrderChunk(chunk: string) {
+  const lines = chunk.split("\n").map((line) => line.trim()).filter(Boolean);
+  const result: string[] = [];
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const next = lines[i + 1] ?? "";
+
+    const looksLikeItem =
+      /[ぁ-んァ-ン一-龥]/.test(line) &&
+      !line.includes("Order") &&
+      !line.includes("Ship to") &&
+      !line.includes("Delivered") &&
+      !line.includes("Total") &&
+      !line.includes("Invoice");
+
+    if (looksLikeItem) {
+      result.push(`${line}\n${next}`);
+    }
+  }
+
+  if (result.length) return result;
+
+  return [chunk];
 }
 
-function extractItemName(rawText: string) {
-  const lines = rawText
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
+function extractItemName(text: string) {
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
 
   const ignoredWords = [
     "order details",
@@ -473,45 +386,54 @@ function extractItemName(rawText: string) {
     "track package",
     "share gift receipt",
     "write a product review",
+    "problem with order",
+    "leave seller feedback",
     "amazon.co.jp",
   ];
 
   const englishTitle = lines.find((line) => {
     const lower = line.toLowerCase();
-
     if (!/[a-zA-Z]/.test(line)) return false;
     if (line.includes("¥")) return false;
     if (/^\d{3}-\d{7}-\d{7}$/.test(line)) return false;
-
     return !ignoredWords.some((word) => lower.includes(word));
   });
 
   if (englishTitle) return englishTitle;
 
-  return "";
+  return lines.find((line) => /[ぁ-んァ-ン一-龥]/.test(line)) ?? "";
 }
 
-function extractQuantity(itemName: string) {
-  const boxMatch =
-    itemName.match(/box\s*of\s*(\d+)/i) ||
-    itemName.match(/(\d+)\s*pcs/i) ||
-    itemName.match(/(\d+)\s*pieces/i) ||
-    itemName.match(/(\d+)\s*個入り/i) ||
-    itemName.match(/(\d+)\s*点/i);
+function extractQuantity(text: string, itemName: string) {
+  const target = `${text}\n${itemName}`;
 
-  if (!boxMatch) return 1;
+  const match =
+    target.match(/box\s*of\s*(\d+)/i) ||
+    target.match(/pack\s*of\s*(\d+)/i) ||
+    target.match(/set\s*of\s*(\d+)/i) ||
+    target.match(/(\d+)\s*packs?/i) ||
+    target.match(/(\d+)\s*pieces?/i) ||
+    target.match(/(\d+)\s*pcs/i) ||
+    target.match(/(\d+)\s*個入り/i) ||
+    target.match(/(\d+)\s*個セット/i) ||
+    target.match(/(\d+)\s*枚入り/i);
 
-  return Number(boxMatch[1]) || 1;
+  return match ? Number(match[1]) || 1 : 1;
+}
+
+function detectInitialStatus(text: string): InventoryStatus {
+  if (/delivered/i.test(text)) return "입고완료";
+  return "입고전";
 }
 
 function detectItemType(text: string) {
   const lower = text.toLowerCase();
 
   if (lower.includes("acrylic") || text.includes("アクリル") || text.includes("아크릴")) return "아크릴";
-  if (lower.includes("can badge") || lower.includes("badge") || text.includes("缶バッジ") || text.includes("缶バッチ") || text.includes("バッジ") || text.includes("뱃지") || text.includes("배지")) return "뱃지";
+  if (lower.includes("can badge") || lower.includes("tin badge") || lower.includes("badge") || text.includes("缶バッジ") || text.includes("缶バッチ") || text.includes("バッジ") || text.includes("뱃지") || text.includes("배지")) return "뱃지";
   if (lower.includes("figure") || lower.includes("re-ment") || lower.includes("rement") || text.includes("フィギュア") || text.includes("리멘트") || text.includes("피규어")) return "피규어";
   if (lower.includes("keyring") || lower.includes("key ring") || lower.includes("keychain") || lower.includes("key chain") || lower.includes("key holder") || text.includes("キーホルダー") || text.includes("キーリング") || text.includes("키링") || text.includes("키홀더")) return "키링";
-  if (lower.includes("photocard") || lower.includes("photo card") || lower.includes("postcard") || lower.includes("post card") || lower.includes("card") || text.includes("フォトカード") || text.includes("ポストカード") || text.includes("カード") || text.includes("브로마이드") || text.includes("포토카드") || text.includes("엽서") || text.includes("카드")) return "지류";
+  if (lower.includes("photocard") || lower.includes("photo card") || lower.includes("postcard") || lower.includes("post card") || lower.includes("card") || lower.includes("poster") || text.includes("フォトカード") || text.includes("ポストカード") || text.includes("カード") || text.includes("ポスター") || text.includes("紙製") || text.includes("브로마이드") || text.includes("포토카드") || text.includes("엽서") || text.includes("카드")) return "지류";
 
   return "기타";
 }
@@ -521,198 +443,89 @@ function detectSeriesName(text: string) {
 
   if (lower.includes("hunter x hunter") || lower.includes("hunter×hunter") || lower.includes("hxh") || text.includes("HUNTER×HUNTER") || text.includes("ハンター×ハンター") || text.includes("ハンターハンター") || text.includes("헌터헌터")) return "헌터헌터";
   if (lower.includes("demon slayer") || lower.includes("kimetsu") || text.includes("鬼滅") || text.includes("鬼滅の刃") || text.includes("きめつ") || text.includes("귀멸") || text.includes("귀멸의 칼날")) return "귀멸의칼날";
-  if (lower.includes("my hero academia") || lower.includes("hero academia") || lower.includes("boku no hero") || lower.includes("bnha") || lower.includes("mha") || text.includes("僕のヒーローアカデミア") || text.includes("ヒロアカ") || text.includes("나의 히어로 아카데미ア") || text.includes("나의 히어로 아카데미아") || text.includes("히로아카")) return "나의히어로아카데미아";
+  if (lower.includes("my hero academia") || lower.includes("hero academia") || lower.includes("boku no hero") || lower.includes("bnha") || lower.includes("mha") || text.includes("僕のヒーローアカデミア") || text.includes("ヒロアカ") || text.includes("나의 히어로 아카데미아") || text.includes("히로아카")) return "나의히어로아카데미아";
   if (lower.includes("frieren") || text.includes("葬送のフリーレン") || text.includes("フリーレン") || text.includes("프리렌") || text.includes("장송의 프리렌")) return "프리렌";
   if (lower.includes("attack on titan") || lower.includes("shingeki") || text.includes("進撃の巨人") || text.includes("進撃") || text.includes("진격의 거인") || text.includes("진격거")) return "진격의거인";
 
   return "기타";
 }
 
-const pageStyle: React.CSSProperties = {
-  padding: 24,
-  background: "#f9fafb",
-  minHeight: "100vh",
-};
+function EditableField({
+  label,
+  value,
+  onChange,
+  type = "text",
+  textarea = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  textarea?: boolean;
+}) {
+  return (
+    <label style={labelStyle}>
+      {label}
+      {textarea ? (
+        <textarea value={value} onChange={(e) => onChange(e.target.value)} style={textareaStyle} />
+      ) : (
+        <input type={type} value={value} onChange={(e) => onChange(e.target.value)} style={inputStyle} />
+      )}
+    </label>
+  );
+}
 
-const topBarStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 16,
-  alignItems: "flex-start",
-  marginBottom: 20,
-};
+function EditableSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: readonly string[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label style={labelStyle}>
+      {label}
+      <select value={value} onChange={(e) => onChange(e.target.value)} style={inputStyle}>
+        {options.map((option) => (
+          <option key={option}>{option}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
 
-const titleStyle: React.CSSProperties = {
-  margin: 0,
-  fontSize: 28,
-  fontWeight: 800,
-};
-
-const subTextStyle: React.CSSProperties = {
-  marginTop: 6,
-  color: "#6b7280",
-  fontSize: 14,
-};
-
-const linkButtonStyle: React.CSSProperties = {
-  height: 40,
-  padding: "0 14px",
-  borderRadius: 8,
-  border: "1px solid #d1d5db",
-  background: "#fff",
-  color: "#111827",
-  textDecoration: "none",
-  display: "inline-flex",
-  alignItems: "center",
-  fontSize: 14,
-  fontWeight: 600,
-};
-
-const layoutStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 480px",
-  gap: 20,
-  alignItems: "start",
-};
-
-const panelStyle: React.CSSProperties = {
-  border: "1px solid #e5e7eb",
-  borderRadius: 14,
-  padding: 20,
-  background: "#fff",
-  display: "flex",
-  flexDirection: "column",
-  gap: 16,
-};
-
-const previewPanelStyle: React.CSSProperties = {
-  border: "1px solid #e5e7eb",
-  borderRadius: 14,
-  background: "#fff",
-  overflow: "hidden",
-};
-
-const panelTitleStyle: React.CSSProperties = {
-  margin: 0,
-  fontSize: 18,
-  fontWeight: 800,
-};
-
-const rawTextareaStyle: React.CSSProperties = {
-  width: "100%",
-  minHeight: 360,
-  padding: 12,
-  borderRadius: 10,
-  border: "1px solid #d1d5db",
-  fontSize: 14,
-  lineHeight: 1.5,
-  resize: "vertical",
-};
-
-const fieldGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: 12,
-};
-
-const twoColStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: 10,
-};
-
-const labelStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 6,
-  fontSize: 13,
-  fontWeight: 700,
-};
-
-const inputStyle: React.CSSProperties = {
-  height: 42,
-  padding: "0 12px",
-  borderRadius: 8,
-  border: "1px solid #d1d5db",
-  fontSize: 14,
-  background: "#fff",
-};
-
-const smallTextareaStyle: React.CSSProperties = {
-  minHeight: 72,
-  padding: 10,
-  borderRadius: 8,
-  border: "1px solid #d1d5db",
-  fontSize: 14,
-  resize: "vertical",
-};
-
-const memoTextareaStyle: React.CSSProperties = {
-  minHeight: 100,
-  padding: 12,
-  borderRadius: 8,
-  border: "1px solid #d1d5db",
-  fontSize: 14,
-  resize: "vertical",
-};
-
-const saveButtonStyle: React.CSSProperties = {
-  height: 46,
-  border: "none",
-  borderRadius: 10,
-  background: "#111827",
-  color: "#fff",
-  fontWeight: 800,
-};
-
-const messageStyle: React.CSSProperties = {
-  padding: 12,
-  borderRadius: 10,
-  background: "#f3f4f6",
-  fontSize: 14,
-  fontWeight: 700,
-};
-
-const imageStyle: React.CSSProperties = {
-  width: "100%",
-  aspectRatio: "1 / 1",
-  objectFit: "cover",
-  background: "#f3f4f6",
-};
-
-const emptyImageStyle: React.CSSProperties = {
-  width: "100%",
-  aspectRatio: "1 / 1",
-  background: "#f3f4f6",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  color: "#9ca3af",
-  fontSize: 14,
-};
-
-const previewBodyStyle: React.CSSProperties = {
-  padding: 16,
-  display: "flex",
-  flexDirection: "column",
-  gap: 12,
-};
-
-const badgeRowStyle: React.CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 6,
-};
-
-const badgeStyle: React.CSSProperties = {
-  padding: "5px 9px",
-  borderRadius: 999,
-  background: "#eef2ff",
-  fontSize: 12,
-  fontWeight: 800,
-};
-
-const statusBadgeStyle: React.CSSProperties = {
-  ...badgeStyle,
-  background: "#fee2e2",
-};
+const pageStyle: React.CSSProperties = { padding: 24, background: "#f9fafb", minHeight: "100vh" };
+const topBarStyle: React.CSSProperties = { display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", marginBottom: 20 };
+const titleStyle: React.CSSProperties = { margin: 0, fontSize: 28, fontWeight: 800 };
+const subTextStyle: React.CSSProperties = { marginTop: 6, color: "#6b7280", fontSize: 14 };
+const linkButtonStyle: React.CSSProperties = { height: 40, padding: "0 14px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", color: "#111827", textDecoration: "none", display: "inline-flex", alignItems: "center", fontSize: 14, fontWeight: 600 };
+const inputPanelStyle: React.CSSProperties = { border: "1px solid #e5e7eb", borderRadius: 14, padding: 18, background: "#fff", marginBottom: 18 };
+const panelTitleStyle: React.CSSProperties = { margin: "0 0 12px", fontSize: 18, fontWeight: 800 };
+const rawTextareaStyle: React.CSSProperties = { width: "100%", minHeight: 180, padding: 12, borderRadius: 10, border: "1px solid #d1d5db", fontSize: 14, lineHeight: 1.5, resize: "vertical" };
+const controlBarStyle: React.CSSProperties = { marginTop: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" };
+const summaryBoxStyle: React.CSSProperties = { padding: "10px 12px", borderRadius: 10, background: "#f3f4f6", fontSize: 14 };
+const smallButtonStyle: React.CSSProperties = { height: 38, padding: "0 12px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", fontWeight: 700, cursor: "pointer" };
+const saveButtonStyle: React.CSSProperties = { height: 38, padding: "0 14px", border: "none", borderRadius: 8, background: "#111827", color: "#fff", fontWeight: 800 };
+const messageStyle: React.CSSProperties = { marginTop: 10, padding: 10, borderRadius: 10, background: "#f3f4f6", fontSize: 14, fontWeight: 700 };
+const cardsSectionStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 10 };
+const compactCardStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "70px 84px 1fr", gap: 12, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 14, padding: 12, alignItems: "start" };
+const checkAreaStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems: "center", paddingTop: 8 };
+const thumbBoxStyle: React.CSSProperties = { width: 84, height: 84 };
+const thumbStyle: React.CSSProperties = { width: 84, height: 84, objectFit: "cover", borderRadius: 10, border: "1px solid #e5e7eb" };
+const emptyThumbStyle: React.CSSProperties = { width: 84, height: 84, borderRadius: 10, background: "#f3f4f6", color: "#9ca3af", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12 };
+const cardMainStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 8 };
+const badgeRowStyle: React.CSSProperties = { display: "flex", gap: 6, flexWrap: "wrap" };
+const badgeStyle: React.CSSProperties = { padding: "4px 8px", borderRadius: 999, background: "#eef2ff", fontSize: 12, fontWeight: 800 };
+const typeBadgeStyle: React.CSSProperties = { ...badgeStyle, background: "#fef3c7" };
+const statusBadgeStyle: React.CSSProperties = { ...badgeStyle, background: "#fee2e2" };
+const savedBadgeStyle: React.CSSProperties = { ...badgeStyle, background: "#dcfce7" };
+const grid4Style: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(4, minmax(120px, 1fr))", gap: 8 };
+const grid3Style: React.CSSProperties = { display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr", gap: 8 };
+const labelStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 700 };
+const inputStyle: React.CSSProperties = { height: 34, padding: "0 9px", borderRadius: 7, border: "1px solid #d1d5db", fontSize: 13, background: "#fff" };
+const textareaStyle: React.CSSProperties = { minHeight: 48, padding: 9, borderRadius: 7, border: "1px solid #d1d5db", fontSize: 13, resize: "vertical" };
+const emptyStyle: React.CSSProperties = { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 14, padding: 32, textAlign: "center", color: "#6b7280" };
