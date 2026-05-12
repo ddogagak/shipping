@@ -116,38 +116,57 @@ export default function DomesticInventoryInputPage() {
     const targets = items.filter((item) => item.checked && !item.saved);
     let successCount = 0;
 
-    for (const item of targets) {
-      if (!item.item_name.trim()) {
-        setSaveMessage("상품명이 없는 항목이 있어 저장을 중단했어.");
-        break;
+    try {
+      for (const item of targets) {
+        if (!item.item_name.trim()) {
+          throw new Error("상품명이 없는 항목이 있어 저장을 중단했어.");
+        }
+
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 15000);
+
+        const res = await fetch("/api/domestic-inventory/items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(item),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timer);
+
+        const text = await res.text();
+
+        let result: { ok?: boolean; message?: string } = {};
+
+        try {
+          result = text ? JSON.parse(text) : {};
+        } catch {
+          throw new Error(`API 응답이 JSON이 아님: ${text.slice(0, 200)}`);
+        }
+
+        if (!res.ok || !result.ok) {
+          throw new Error(result.message || `저장 실패: ${res.status}`);
+        }
+
+        successCount += 1;
+
+        setItems((prev) =>
+          prev.map((prevItem) =>
+            prevItem.local_id === item.local_id
+              ? { ...prevItem, saved: true, checked: false }
+              : prevItem
+          )
+        );
       }
 
-      const res = await fetch("/api/domestic-inventory/items", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(item),
-      });
-
-      const result = await res.json();
-
-      if (!res.ok || !result.ok) {
-        setSaveMessage(result.message || "저장 실패");
-        break;
-      }
-
-      successCount += 1;
-
-      setItems((prev) =>
-        prev.map((prevItem) =>
-          prevItem.local_id === item.local_id
-            ? { ...prevItem, saved: true, checked: false }
-            : prevItem
-        )
+      setSaveMessage(`${successCount}건 저장 완료`);
+    } catch (error) {
+      setSaveMessage(
+        error instanceof Error ? `저장 실패: ${error.message}` : "저장 실패"
       );
+    } finally {
+      setIsSaving(false);
     }
-
-    setIsSaving(false);
-    setSaveMessage(`${successCount}건 저장 완료`);
   };
 
   return (
@@ -161,9 +180,15 @@ export default function DomesticInventoryInputPage() {
         </div>
 
         <div style={{ display: "flex", gap: 8 }}>
-          <Link href="/" style={linkButtonStyle}>메인</Link>
-          <Link href="/domestic-inventory-cards" style={linkButtonStyle}>카드형 보기</Link>
-          <Link href="/domestic-inventory" style={linkButtonStyle}>인벤토리</Link>
+          <Link href="/" style={linkButtonStyle}>
+            메인
+          </Link>
+          <Link href="/domestic-inventory-cards" style={linkButtonStyle}>
+            카드형 보기
+          </Link>
+          <Link href="/domestic-inventory" style={linkButtonStyle}>
+            인벤토리
+          </Link>
         </div>
       </div>
 
@@ -180,7 +205,9 @@ export default function DomesticInventoryInputPage() {
           <button
             type="button"
             onClick={() => setInputMode("amazonHtml")}
-            style={inputMode === "amazonHtml" ? activeModeButtonStyle : modeButtonStyle}
+            style={
+              inputMode === "amazonHtml" ? activeModeButtonStyle : modeButtonStyle
+            }
           >
             Amazon HTML 업로드
           </button>
@@ -255,7 +282,9 @@ export default function DomesticInventoryInputPage() {
                 <input
                   type="checkbox"
                   checked={item.checked}
-                  onChange={(e) => updateItem(item.local_id, "checked", e.target.checked)}
+                  onChange={(e) =>
+                    updateItem(item.local_id, "checked", e.target.checked)
+                  }
                   style={{ width: 18, height: 18 }}
                 />
                 <strong>#{index + 1}</strong>
@@ -289,7 +318,9 @@ export default function DomesticInventoryInputPage() {
                     label="작품명"
                     value={item.series_name}
                     options={seriesList}
-                    onChange={(value) => updateItem(item.local_id, "series_name", value)}
+                    onChange={(value) =>
+                      updateItem(item.local_id, "series_name", value)
+                    }
                   />
 
                   <EditableSelect
@@ -324,7 +355,9 @@ export default function DomesticInventoryInputPage() {
                   <EditableField
                     label="주문번호"
                     value={item.order_number}
-                    onChange={(value) => updateItem(item.local_id, "order_number", value)}
+                    onChange={(value) =>
+                      updateItem(item.local_id, "order_number", value)
+                    }
                   />
 
                   <EditableField
@@ -354,7 +387,9 @@ export default function DomesticInventoryInputPage() {
                   <EditableField
                     label="운송장"
                     value={item.tracking_number}
-                    onChange={(value) => updateItem(item.local_id, "tracking_number", value)}
+                    onChange={(value) =>
+                      updateItem(item.local_id, "tracking_number", value)
+                    }
                   />
 
                   <EditableField
@@ -602,8 +637,7 @@ function splitItemsInOrderChunk(chunk: string) {
 
     const looksLikeJapaneseProduct =
       /[ぁ-んァ-ン一-龥]/.test(line) &&
-      (
-        line.includes("アニメ") ||
+      (line.includes("アニメ") ||
         line.includes("ヒーロー") ||
         line.includes("HUNTER") ||
         line.includes("鬼滅") ||
@@ -616,13 +650,11 @@ function splitItemsInOrderChunk(chunk: string) {
         line.includes("カード") ||
         line.includes("缶バッジ") ||
         line.includes("BOX") ||
-        line.includes("食玩")
-      );
+        line.includes("食玩"));
 
     const looksLikeEnglishProduct =
       /[a-zA-Z]/.test(line) &&
-      (
-        lower.includes("my hero") ||
+      (lower.includes("my hero") ||
         lower.includes("hunter") ||
         lower.includes("demon slayer") ||
         lower.includes("frieren") ||
@@ -633,8 +665,7 @@ function splitItemsInOrderChunk(chunk: string) {
         lower.includes("figure") ||
         lower.includes("re-ment") ||
         lower.includes("rement") ||
-        lower.includes("box")
-      );
+        lower.includes("box"));
 
     if (looksLikeJapaneseProduct || looksLikeEnglishProduct) {
       const block = next && !isNotProductLine(next) ? `${line}\n${next}` : line;
@@ -742,8 +773,7 @@ function extractQuantity(text: string) {
 
   for (const line of lines) {
     const enMatch =
-      line.match(/included\s*(\d+)$/i) ||
-      line.match(/box product\s*(\d+)$/i);
+      line.match(/included\s*(\d+)$/i) || line.match(/box product\s*(\d+)$/i);
 
     if (enMatch) return Number(enMatch[1]) || 1;
   }
@@ -754,11 +784,58 @@ function extractQuantity(text: string) {
 function detectItemType(text: string) {
   const lower = text.toLowerCase();
 
-  if (lower.includes("acrylic") || text.includes("アクリル") || text.includes("아크릴")) return "아크릴";
-  if (lower.includes("can badge") || lower.includes("tin badge") || lower.includes("badge") || text.includes("缶バッジ") || text.includes("缶バッチ") || text.includes("バッジ") || text.includes("뱃지") || text.includes("배지")) return "뱃지";
-  if (lower.includes("figure") || lower.includes("re-ment") || lower.includes("rement") || text.includes("フィギュア") || text.includes("리멘트") || text.includes("피규어")) return "피규어";
-  if (lower.includes("keyring") || lower.includes("key ring") || lower.includes("keychain") || lower.includes("key chain") || lower.includes("key holder") || text.includes("キーホルダー") || text.includes("キーリング") || text.includes("키링") || text.includes("키홀더")) return "키링";
-  if (lower.includes("photocard") || lower.includes("photo card") || lower.includes("postcard") || lower.includes("post card") || lower.includes("card") || lower.includes("poster") || text.includes("フォトカード") || text.includes("ポストカード") || text.includes("カード") || text.includes("ポスター") || text.includes("紙製") || text.includes("브로마이드") || text.includes("포토카드") || text.includes("엽서") || text.includes("카드")) return "지류";
+  if (lower.includes("acrylic") || text.includes("アクリル") || text.includes("아크릴"))
+    return "아크릴";
+  if (
+    lower.includes("can badge") ||
+    lower.includes("tin badge") ||
+    lower.includes("badge") ||
+    text.includes("缶バッジ") ||
+    text.includes("缶バッチ") ||
+    text.includes("バッジ") ||
+    text.includes("뱃지") ||
+    text.includes("배지")
+  )
+    return "뱃지";
+  if (
+    lower.includes("figure") ||
+    lower.includes("re-ment") ||
+    lower.includes("rement") ||
+    text.includes("フィギュア") ||
+    text.includes("리멘트") ||
+    text.includes("피규어")
+  )
+    return "피규어";
+  if (
+    lower.includes("keyring") ||
+    lower.includes("key ring") ||
+    lower.includes("keychain") ||
+    lower.includes("key chain") ||
+    lower.includes("key holder") ||
+    text.includes("キーホルダー") ||
+    text.includes("キーリング") ||
+    text.includes("키링") ||
+    text.includes("키홀더")
+  )
+    return "키링";
+  if (
+    lower.includes("photocard") ||
+    lower.includes("photo card") ||
+    lower.includes("postcard") ||
+    lower.includes("post card") ||
+    lower.includes("card") ||
+    lower.includes("poster") ||
+    text.includes("フォトカード") ||
+    text.includes("ポストカード") ||
+    text.includes("カード") ||
+    text.includes("ポスター") ||
+    text.includes("紙製") ||
+    text.includes("브로마이드") ||
+    text.includes("포토카드") ||
+    text.includes("엽서") ||
+    text.includes("카드")
+  )
+    return "지류";
 
   return "기타";
 }
@@ -766,27 +843,57 @@ function detectItemType(text: string) {
 function detectSeriesName(text: string) {
   const lower = text.toLowerCase();
 
-  if (lower.includes("hunter x hunter") || lower.includes("hunter×hunter") || lower.includes("hxh") || text.includes("HUNTER×HUNTER") || text.includes("ハンター×ハンター") || text.includes("ハンターハンター") || text.includes("헌터헌터")) return "헌터헌터";
-  if (lower.includes("demon slayer") || lower.includes("kimetsu") || text.includes("鬼滅") || text.includes("鬼滅の刃") || text.includes("きめつ") || text.includes("귀멸") || text.includes("귀멸의 칼날")) return "귀멸의칼날";
-  if (lower.includes("my hero academia") || lower.includes("hero academia") || lower.includes("boku no hero") || lower.includes("bnha") || lower.includes("mha") || text.includes("僕のヒーローアカデミア") || text.includes("ヒロアカ") || text.includes("나의 히어로 아카데미아") || text.includes("히로아카")) return "나의히어로아카데미아";
-  if (lower.includes("frieren") || text.includes("葬送のフリーレン") || text.includes("フリーレン") || text.includes("프리렌") || text.includes("장송의 프리렌")) return "프리렌";
-  if (lower.includes("attack on titan") || lower.includes("shingeki") || text.includes("進撃の巨人") || text.includes("進撃") || text.includes("진격의 거인") || text.includes("진격거")) return "진격의거인";
+  if (
+    lower.includes("hunter x hunter") ||
+    lower.includes("hunter×hunter") ||
+    lower.includes("hxh") ||
+    text.includes("HUNTER×HUNTER") ||
+    text.includes("ハンター×ハンター") ||
+    text.includes("ハンターハンター") ||
+    text.includes("헌터헌터")
+  )
+    return "헌터헌터";
+  if (
+    lower.includes("demon slayer") ||
+    lower.includes("kimetsu") ||
+    text.includes("鬼滅") ||
+    text.includes("鬼滅の刃") ||
+    text.includes("きめつ") ||
+    text.includes("귀멸") ||
+    text.includes("귀멸의 칼날")
+  )
+    return "귀멸의칼날";
+  if (
+    lower.includes("my hero academia") ||
+    lower.includes("hero academia") ||
+    lower.includes("boku no hero") ||
+    lower.includes("bnha") ||
+    lower.includes("mha") ||
+    text.includes("僕のヒーローアカデミア") ||
+    text.includes("ヒロアカ") ||
+    text.includes("나의 히어로 아카데미아") ||
+    text.includes("히로아카")
+  )
+    return "나의히어로아카데미아";
+  if (
+    lower.includes("frieren") ||
+    text.includes("葬送のフリーレン") ||
+    text.includes("フリーレン") ||
+    text.includes("프리렌") ||
+    text.includes("장송의 프리렌")
+  )
+    return "프리렌";
+  if (
+    lower.includes("attack on titan") ||
+    lower.includes("shingeki") ||
+    text.includes("進撃の巨人") ||
+    text.includes("進撃") ||
+    text.includes("진격의 거인") ||
+    text.includes("진격거")
+  )
+    return "진격의거인";
 
   return "기타";
-}
-
-function isSameOrSimilarTitle(a: string, b: string) {
-  const na = normalizeTitle(a);
-  const nb = normalizeTitle(b);
-
-  if (!na || !nb) return false;
-  if (na.includes(nb) || nb.includes(na)) return true;
-
-  const aWords = new Set(na.split(" ").filter((word) => word.length >= 3));
-  const bWords = nb.split(" ").filter((word) => word.length >= 3);
-  const matched = bWords.filter((word) => aWords.has(word)).length;
-
-  return matched >= Math.min(4, bWords.length);
 }
 
 function normalizeTitle(value: string) {
