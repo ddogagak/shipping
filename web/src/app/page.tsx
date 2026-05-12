@@ -34,11 +34,13 @@ export default async function HomePage() {
     <main style={{ maxWidth: 1100, margin: "0 auto", padding: 32 }}>
       <section>
         <h1 style={{ marginTop: 0 }}>Shipping Admin</h1>
+
         <p style={{ color: "#6b7280" }}>
-          주문 업로드, 주문 관리, 운송장 업로드를 처리합니다.
+          주문 업로드, 주문 관리, 운송장 업로드, 재고 관리를 처리합니다.
         </p>
 
-        <h2 style={{ marginTop: 28, marginBottom: 12 }}>Overseas</h2>
+        <h2 style={sectionTitleMarginStyle}>Overseas</h2>
+
         <div style={gridStyle}>
           <Link href="/orders" style={cardStyle("#fff", "#e5e7eb")}>
             <div style={titleStyle}>Overseas Order</div>
@@ -65,7 +67,8 @@ export default async function HomePage() {
           </Link>
         </div>
 
-        <h2 style={{ marginTop: 28, marginBottom: 12 }}>Domestic</h2>
+        <h2 style={sectionTitleMarginStyle}>Domestic</h2>
+
         <div style={gridStyle}>
           <Link href="/domestic-upload" style={cardStyle("#f9fafb", "#e5e7eb")}>
             <div style={titleStyle}>Domestic Upload</div>
@@ -77,10 +80,7 @@ export default async function HomePage() {
             <p style={descStyle}>국내 주문 조회 및 상태 관리</p>
           </Link>
 
-          <Link
-            href="/domestic-tracking"
-            style={cardStyle("#f9fafb", "#e5e7eb")}
-          >
+          <Link href="/domestic-tracking" style={cardStyle("#f9fafb", "#e5e7eb")}>
             <div style={titleStyle}>Domestic Tracking</div>
             <p style={descStyle}>국내 운송장 매칭/업데이트</p>
           </Link>
@@ -91,8 +91,34 @@ export default async function HomePage() {
               PDF / 엑셀 파일을 업로드하고 내려받습니다.
             </p>
           </Link>
+        </div>
 
-          
+        <h2 style={sectionTitleMarginStyle}>Inventory</h2>
+
+        <div style={gridStyle}>
+          <Link
+            href="/domestic-inventory-input"
+            style={cardStyle("#fff7ed", "#fdba74")}
+          >
+            <div style={titleStyle}>Inventory Input</div>
+            <p style={descStyle}>주문내역 / 이미지 URL 기반 재고 등록</p>
+          </Link>
+
+          <Link
+            href="/domestic-inventory-cards"
+            style={cardStyle("#f5f3ff", "#c4b5fd")}
+          >
+            <div style={titleStyle}>Inventory Cards</div>
+            <p style={descStyle}>카드형 이미지 기반 재고 관리</p>
+          </Link>
+
+          <Link
+            href="/domestic-inventory"
+            style={cardStyle("#f0fdf4", "#86efac")}
+          >
+            <div style={titleStyle}>Inventory DB</div>
+            <p style={descStyle}>DB 테이블 형태 전체 재고 관리</p>
+          </Link>
         </div>
       </section>
     </main>
@@ -120,8 +146,15 @@ function cardStyle(bg: string, border: string): React.CSSProperties {
     borderRadius: 16,
     background: bg,
     display: "block",
+    transition: "0.15s ease",
+    boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
   };
 }
+
+const sectionTitleMarginStyle: React.CSSProperties = {
+  marginTop: 28,
+  marginBottom: 12,
+};
 
 const gridStyle: React.CSSProperties = {
   display: "grid",
