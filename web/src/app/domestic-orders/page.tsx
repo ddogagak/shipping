@@ -67,6 +67,7 @@ const PLATFORM_OPTIONS = [
   { value: "wise", label: "Wise" },
   { value: "x", label: "X" },
   { value: "bunjang", label: "번개장터" },
+  { value: "Kuji", label: "Kuji" },
 ];
 
 const ORDER_STATUS_OPTIONS = [
