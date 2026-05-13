@@ -1,0 +1,24 @@
+{
+  "rewrites": [
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "ddoga.site"
+        }
+      ],
+      "destination": "/public-request"
+    },
+    {
+      "source": "/status",
+      "has": [
+        {
+          "type": "host",
+          "value": "ddoga.site"
+        }
+      ],
+      "destination": "/public-request-status"
+    }
+  ]
+}
