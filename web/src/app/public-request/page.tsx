@@ -37,6 +37,17 @@ export default function PublicRequestPage() {
     setMessage("");
   };
 
+  const copyOrderId = async () => {
+    if (!savedOrderId) return;
+
+    try {
+      await navigator.clipboard.writeText(savedOrderId);
+      setMessage("접수번호가 복사되었습니다.");
+    } catch {
+      setMessage("복사에 실패했습니다. 접수번호를 직접 선택해서 복사해주세요.");
+    }
+  };
+
   const submitRequest = async () => {
     setMessage("");
     setSavedOrderId("");
@@ -115,7 +126,7 @@ export default function PublicRequestPage() {
             label="닉네임"
             required
             value={form.nickname}
-            placeholder="예: ddong"
+            placeholder="밴드닉네임을 입력해주세요."
             onChange={(value) => updateForm("nickname", value)}
           />
 
@@ -143,14 +154,22 @@ export default function PublicRequestPage() {
             onChange={(value) => updateForm("postal_code", value)}
           />
 
-          <Field
-            label="주소"
-            required
-            value={form.address}
-            placeholder="기본주소 + 상세주소를 함께 입력해주세요."
-            onChange={(value) => updateForm("address", value)}
-            textarea
-          />
+          <div>
+            <Field
+              label="주소"
+              required
+              value={form.address}
+              placeholder="기본주소 + 상세주소"
+              onChange={(value) => updateForm("address", value)}
+              textarea
+            />
+
+            <p style={addressGuideStyle}>
+              기본주소+상세주소를 정확하게 입력해주세요. 전산으로 바로
+              처리되기 때문에 주소 오기재로 인한 문제 발생 시 책임지지
+              않습니다.
+            </p>
+          </div>
 
           <Field
             label="신청 물품"
@@ -185,8 +204,26 @@ export default function PublicRequestPage() {
           {message ? (
             <div style={messageStyle}>
               <strong>{message}</strong>
+
               {savedOrderId ? (
-                <p style={orderIdStyle}>접수번호: {savedOrderId}</p>
+                <div style={orderIdBoxStyle}>
+                  <div style={orderIdRowStyle}>
+                    <span style={orderIdStyle}>접수번호: {savedOrderId}</span>
+
+                    <button
+                      type="button"
+                      onClick={copyOrderId}
+                      style={copyButtonStyle}
+                    >
+                      복사
+                    </button>
+                  </div>
+
+                  <p style={guideTextStyle}>
+                    본인확인을 위해 해당 접수 번호를 복사해서 배송안내
+                    페이지에 댓글로 붙여넣기 부탁드립니다.
+                  </p>
+                </div>
               ) : null}
             </div>
           ) : null}
@@ -311,6 +348,14 @@ const textareaStyle: React.CSSProperties = {
   lineHeight: 1.5,
 };
 
+const addressGuideStyle: React.CSSProperties = {
+  margin: "6px 0 0",
+  color: "#dc2626",
+  fontSize: 13,
+  lineHeight: 1.5,
+  fontWeight: 700,
+};
+
 const submitButtonStyle: React.CSSProperties = {
   height: 48,
   border: "none",
@@ -329,7 +374,38 @@ const messageStyle: React.CSSProperties = {
   lineHeight: 1.5,
 };
 
+const orderIdBoxStyle: React.CSSProperties = {
+  marginTop: 8,
+};
+
+const orderIdRowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  flexWrap: "wrap",
+};
+
 const orderIdStyle: React.CSSProperties = {
-  margin: "6px 0 0",
   color: "#4b5563",
+  fontWeight: 800,
+};
+
+const copyButtonStyle: React.CSSProperties = {
+  height: 30,
+  padding: "0 10px",
+  borderRadius: 8,
+  border: "1px solid #93c5fd",
+  background: "#eff6ff",
+  color: "#1d4ed8",
+  fontSize: 13,
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
+const guideTextStyle: React.CSSProperties = {
+  margin: "8px 0 0",
+  color: "#2563eb",
+  fontSize: 14,
+  lineHeight: 1.5,
+  fontWeight: 700,
 };
