@@ -1,3 +1,18 @@
+const host = request.headers.get("host") ?? "";
+const pathname = request.nextUrl.pathname;
+
+if (host === "ddoga.site" || host === "www.ddoga.site") {
+  if (
+    pathname === "/" ||
+    pathname.startsWith("/public-request") ||
+    pathname.startsWith("/public-request-status") ||
+    pathname.startsWith("/api/public-request")
+  ) {
+    return NextResponse.next();
+  }
+}
+
+
 import { NextRequest, NextResponse } from "next/server";
 
 const PASSWORD = "1021"; // 원하는 비밀번호
