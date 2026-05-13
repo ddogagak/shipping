@@ -1,33 +1,33 @@
-const host = request.headers.get("host") ?? "";
-const pathname = request.nextUrl.pathname;
-
-if (host === "ddoga.site" || host === "www.ddoga.site") {
-  if (
-    pathname === "/" ||
-    pathname.startsWith("/public-request") ||
-    pathname.startsWith("/public-request-status") ||
-    pathname.startsWith("/api/public-request")
-  ) {
-    return NextResponse.next();
-  }
-}
-
-
 import { NextRequest, NextResponse } from "next/server";
 
-const PASSWORD = "1021"; // 원하는 비밀번호
+const PASSWORD = "1021";
 
 export function middleware(req: NextRequest) {
+  const host = req.headers.get("host") ?? "";
+  const pathname = req.nextUrl.pathname;
+
+  // ddoga.site 공개 페이지는 비밀번호 없이 통과
+  if (host === "ddoga.site" || host === "www.ddoga.site") {
+    if (
+      pathname === "/" ||
+      pathname.startsWith("/public-request") ||
+      pathname.startsWith("/public-request-status") ||
+      pathname.startsWith("/api/public-request")
+    ) {
+      return NextResponse.next();
+    }
+
+    return NextResponse.redirect(new URL("/", req.url));
+  }
+
   const url = req.nextUrl;
 
-  // 이미 인증했으면 통과
   const auth = req.cookies.get("simple_auth");
 
   if (auth?.value === PASSWORD) {
     return NextResponse.next();
   }
 
-  // login 파라미터로 들어오면 쿠키 저장
   const pw = url.searchParams.get("pw");
 
   if (pw === PASSWORD) {
