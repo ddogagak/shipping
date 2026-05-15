@@ -75,30 +75,23 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
   const saveItem = async (item: InventoryItem) => {
     setMessage("");
 
-    const res = await fetch(`/api/domestic-inventory/items/${item.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(item),
-    });
+    try {
+      const res = await fetch(`/api/domestic-inventory/items/${item.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(item),
+      });
 
-    const result = await res.json();
+      const result = await res.json();
 
-    if (!res.ok || !result.ok) {
-      setMessage(result.message || "저장 실패");
-      return;
+      if (!res.ok || !result.ok) {
+        throw new Error(result.message || "저장 실패");
+      }
+
+      setMessage("저장 완료");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "저장 실패");
     }
-
-    setMessage("저장 완료");
-  };
-
-  const saveTracking = async (item: InventoryItem) => {
-    const next = {
-      ...item,
-      status: item.tracking_number ? "해외배송" : item.status,
-    };
-
-    setItems((prev) => prev.map((x) => (x.id === item.id ? next : x)));
-    await saveItem(next);
   };
 
   return (
@@ -139,169 +132,370 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
 
       {message ? <div style={messageStyle}>{message}</div> : null}
 
-      <div style={tableWrapStyle}>
-        <table style={tableStyle}>
-          <thead>
-            <tr>
-              <th style={thStyle}>이미지</th>
-              <th style={thStyle}>상품명</th>
-              <th style={thStyle}>작품명</th>
-              <th style={thStyle}>타입</th>
-              <th style={thStyle}>상태</th>
-              <th style={thStyle}>수량</th>
-              <th style={thStyle}>총액</th>
-              <th style={thStyle}>일본내배송비</th>
-              <th style={thStyle}>주문번호</th>
-              <th style={thStyle}>주문일</th>
-              <th style={thStyle}>운송장</th>
-              <th style={thStyle}>메모</th>
-              <th style={thStyle}>저장</th>
-            </tr>
-          </thead>
+      <section style={listStyle}>
+        {filtered.length === 0 ? (
+          <div style={emptyStyle}>조건에 맞는 재고가 없습니다.</div>
+        ) : (
+          filtered.map((item) => (
+            <article key={item.id} style={cardStyle}>
+              <div style={imageWrapStyle}>
+                {item.image_url ? (
+                  <img src={item.image_url} alt="" style={imgStyle} />
+                ) : (
+                  <div style={emptyImgStyle}>IMG</div>
+                )}
+              </div>
 
-          <tbody>
-            {filtered.map((item) => (
-              <tr key={item.id}>
-                <td style={tdStyle}>
-                  {item.image_url ? (
-                    <img src={item.image_url} alt="" style={imgStyle} />
-                  ) : (
-                    <div style={emptyImgStyle}>IMG</div>
-                  )}
-                </td>
+              <div style={bodyStyle}>
+                <div style={badgeRowStyle}>
+                  <span style={badgeStyle}>{item.series_name || "기타"}</span>
+                  <span style={typeBadgeStyle}>{item.item_type || "기타"}</span>
+                  <span style={statusBadgeStyle}>{item.status || "입고전"}</span>
+                </div>
 
-                <td style={tdStyle}>
+                <label style={labelStyle}>
+                  상품명
                   <textarea
                     value={item.item_name ?? ""}
                     onChange={(e) => updateItem(item.id, "item_name", e.target.value)}
-                    style={textareaStyle}
+                    style={titleTextareaStyle}
                   />
-                </td>
+                </label>
 
-                <td style={tdStyle}>
-                  <select
+                <div style={grid4Style}>
+                  <FieldSelect
+                    label="작품명"
                     value={item.series_name ?? "기타"}
-                    onChange={(e) => updateItem(item.id, "series_name", e.target.value)}
-                    style={inputStyle}
-                  >
-                    {seriesList.filter((v) => v !== "전체").map((v) => <option key={v}>{v}</option>)}
-                  </select>
-                </td>
+                    options={seriesList.filter((v) => v !== "전체")}
+                    onChange={(value) => updateItem(item.id, "series_name", value)}
+                  />
 
-                <td style={tdStyle}>
-                  <select
+                  <FieldSelect
+                    label="타입"
                     value={item.item_type ?? "기타"}
-                    onChange={(e) => updateItem(item.id, "item_type", e.target.value)}
-                    style={inputStyle}
-                  >
-                    {typeList.filter((v) => v !== "전체").map((v) => <option key={v}>{v}</option>)}
-                  </select>
-                </td>
+                    options={typeList.filter((v) => v !== "전체")}
+                    onChange={(value) => updateItem(item.id, "item_type", value)}
+                  />
 
-                <td style={tdStyle}>
-                  <select
+                  <FieldSelect
+                    label="상태"
                     value={item.status ?? "입고전"}
-                    onChange={(e) => updateItem(item.id, "status", e.target.value)}
-                    style={inputStyle}
-                  >
-                    {statusList.filter((v) => v !== "전체").map((v) => <option key={v}>{v}</option>)}
-                  </select>
-                </td>
-
-                <td style={tdStyle}>
-                  <input
-                    type="number"
-                    value={item.quantity ?? 1}
-                    onChange={(e) => updateItem(item.id, "quantity", e.target.value)}
-                    style={numStyle}
+                    options={statusList.filter((v) => v !== "전체")}
+                    onChange={(value) => updateItem(item.id, "status", value)}
                   />
-                </td>
 
-                <td style={tdStyle}>
-                  <input
+                  <FieldInput
+                    label="수량"
                     type="number"
-                    value={item.total_price ?? 0}
-                    onChange={(e) => updateItem(item.id, "total_price", e.target.value)}
-                    style={numStyle}
+                    value={String(item.quantity ?? 1)}
+                    onChange={(value) => updateItem(item.id, "quantity", value)}
                   />
-                </td>
+                </div>
 
-                <td style={tdStyle}>
-                  <input
+                <div style={grid4Style}>
+                  <FieldInput
+                    label="총액(¥)"
                     type="number"
-                    value={item.domestic_shipping_fee ?? 0}
-                    onChange={(e) => updateItem(item.id, "domestic_shipping_fee", e.target.value)}
-                    style={numStyle}
+                    value={String(item.total_price ?? 0)}
+                    onChange={(value) => updateItem(item.id, "total_price", value)}
                   />
-                </td>
 
-                <td style={tdStyle}>
-                  <input
+                  <FieldInput
+                    label="일본내배송비"
+                    type="number"
+                    value={String(item.domestic_shipping_fee ?? 0)}
+                    onChange={(value) => updateItem(item.id, "domestic_shipping_fee", value)}
+                  />
+
+                  <FieldInput
+                    label="주문번호"
                     value={item.order_number ?? ""}
-                    onChange={(e) => updateItem(item.id, "order_number", e.target.value)}
-                    style={inputStyle}
+                    onChange={(value) => updateItem(item.id, "order_number", value)}
                   />
-                </td>
 
-                <td style={tdStyle}>
-                  <input
+                  <FieldInput
+                    label="주문일"
                     value={item.order_date ?? ""}
-                    onChange={(e) => updateItem(item.id, "order_date", e.target.value)}
-                    style={inputStyle}
+                    onChange={(value) => updateItem(item.id, "order_date", value)}
                   />
-                </td>
+                </div>
 
-                <td style={tdStyle}>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <input
-                      value={item.tracking_number ?? ""}
-                      onChange={(e) => updateItem(item.id, "tracking_number", e.target.value)}
-                      style={inputStyle}
-                    />
-                    <button type="button" onClick={() => saveTracking(item)} style={smallBtnStyle}>
-                      운송장
-                    </button>
-                  </div>
-                </td>
+                <div style={grid2Style}>
+                  <FieldInput
+                    label="운송장"
+                    value={item.tracking_number ?? ""}
+                    onChange={(value) => updateItem(item.id, "tracking_number", value)}
+                  />
 
-                <td style={tdStyle}>
+                  <FieldInput
+                    label="이미지 URL"
+                    value={item.image_url ?? ""}
+                    onChange={(value) => updateItem(item.id, "image_url", value)}
+                  />
+                </div>
+
+                <label style={labelStyle}>
+                  메모
                   <textarea
                     value={item.memo ?? ""}
                     onChange={(e) => updateItem(item.id, "memo", e.target.value)}
                     style={memoStyle}
                   />
-                </td>
+                </label>
 
-                <td style={tdStyle}>
+                <div style={buttonRowStyle}>
                   <button type="button" onClick={() => saveItem(item)} style={saveBtnStyle}>
                     저장
                   </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                </div>
+              </div>
+            </article>
+          ))
+        )}
+      </section>
     </main>
   );
 }
 
-const pageStyle: React.CSSProperties = { padding: 24, background: "#f9fafb", minHeight: "100vh" };
-const topStyle: React.CSSProperties = { display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 16 };
-const linkStyle: React.CSSProperties = { height: 38, padding: "0 12px", border: "1px solid #d1d5db", borderRadius: 8, background: "#fff", color: "#111827", textDecoration: "none", display: "inline-flex", alignItems: "center", fontWeight: 700 };
-const filterStyle: React.CSSProperties = { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 };
-const searchStyle: React.CSSProperties = { flex: 1, minWidth: 260, height: 40, border: "1px solid #d1d5db", borderRadius: 8, padding: "0 10px" };
-const selectStyle: React.CSSProperties = { height: 40, border: "1px solid #d1d5db", borderRadius: 8, padding: "0 10px", background: "#fff" };
-const messageStyle: React.CSSProperties = { padding: 10, background: "#eef2ff", borderRadius: 10, marginBottom: 12, fontWeight: 800 };
-const tableWrapStyle: React.CSSProperties = { overflowX: "auto", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 14 };
-const tableStyle: React.CSSProperties = { width: "100%", minWidth: 1800, borderCollapse: "collapse" };
-const thStyle: React.CSSProperties = { background: "#f3f4f6", padding: 10, textAlign: "left", fontSize: 13, borderBottom: "1px solid #e5e7eb" };
-const tdStyle: React.CSSProperties = { padding: 8, borderBottom: "1px solid #f1f5f9", verticalAlign: "top" };
-const imgStyle: React.CSSProperties = { width: 64, height: 64, objectFit: "cover", borderRadius: 8 };
-const emptyImgStyle: React.CSSProperties = { width: 64, height: 64, borderRadius: 8, background: "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center", color: "#9ca3af", fontSize: 12 };
-const inputStyle: React.CSSProperties = { width: 150, height: 34, border: "1px solid #d1d5db", borderRadius: 7, padding: "0 8px", background: "#fff" };
-const numStyle: React.CSSProperties = { width: 90, height: 34, border: "1px solid #d1d5db", borderRadius: 7, padding: "0 8px" };
-const textareaStyle: React.CSSProperties = { width: 300, minHeight: 62, border: "1px solid #d1d5db", borderRadius: 7, padding: 8 };
-const memoStyle: React.CSSProperties = { width: 200, minHeight: 62, border: "1px solid #d1d5db", borderRadius: 7, padding: 8 };
-const saveBtnStyle: React.CSSProperties = { height: 34, padding: "0 12px", border: "none", borderRadius: 7, background: "#111827", color: "#fff", fontWeight: 800, cursor: "pointer" };
-const smallBtnStyle: React.CSSProperties = { height: 34, padding: "0 10px", border: "none", borderRadius: 7, background: "#2563eb", color: "#fff", fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" };
+function FieldInput({
+  label,
+  value,
+  onChange,
+  type = "text",
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+}) {
+  return (
+    <label style={labelStyle}>
+      {label}
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={inputStyle}
+      />
+    </label>
+  );
+}
+
+function FieldSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label style={labelStyle}>
+      {label}
+      <select value={value} onChange={(e) => onChange(e.target.value)} style={inputStyle}>
+        {options.map((v) => <option key={v}>{v}</option>)}
+      </select>
+    </label>
+  );
+}
+
+const pageStyle: React.CSSProperties = {
+  padding: 24,
+  background: "#f9fafb",
+  minHeight: "100vh",
+};
+
+const topStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  marginBottom: 16,
+};
+
+const linkStyle: React.CSSProperties = {
+  height: 38,
+  padding: "0 12px",
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  background: "#fff",
+  color: "#111827",
+  textDecoration: "none",
+  display: "inline-flex",
+  alignItems: "center",
+  fontWeight: 700,
+};
+
+const filterStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+  marginBottom: 14,
+};
+
+const searchStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: 260,
+  height: 40,
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  padding: "0 10px",
+};
+
+const selectStyle: React.CSSProperties = {
+  height: 40,
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  padding: "0 10px",
+  background: "#fff",
+};
+
+const messageStyle: React.CSSProperties = {
+  padding: 10,
+  background: "#eef2ff",
+  borderRadius: 10,
+  marginBottom: 12,
+  fontWeight: 800,
+};
+
+const listStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 14,
+};
+
+const cardStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "120px 1fr",
+  gap: 16,
+  padding: 16,
+  background: "#fff",
+  border: "1px solid #e5e7eb",
+  borderRadius: 16,
+};
+
+const imageWrapStyle: React.CSSProperties = {
+  width: 120,
+  height: 120,
+};
+
+const imgStyle: React.CSSProperties = {
+  width: 120,
+  height: 120,
+  objectFit: "cover",
+  borderRadius: 12,
+  border: "1px solid #e5e7eb",
+};
+
+const emptyImgStyle: React.CSSProperties = {
+  width: 120,
+  height: 120,
+  borderRadius: 12,
+  background: "#f3f4f6",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  color: "#9ca3af",
+  fontWeight: 800,
+};
+
+const bodyStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 10,
+};
+
+const badgeRowStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 6,
+  flexWrap: "wrap",
+};
+
+const badgeStyle: React.CSSProperties = {
+  padding: "4px 8px",
+  borderRadius: 999,
+  background: "#eef2ff",
+  fontSize: 12,
+  fontWeight: 800,
+};
+
+const typeBadgeStyle: React.CSSProperties = {
+  ...badgeStyle,
+  background: "#fef3c7",
+};
+
+const statusBadgeStyle: React.CSSProperties = {
+  ...badgeStyle,
+  background: "#fee2e2",
+};
+
+const labelStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+  fontSize: 12,
+  fontWeight: 800,
+};
+
+const inputStyle: React.CSSProperties = {
+  height: 36,
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  padding: "0 9px",
+  background: "#fff",
+};
+
+const titleTextareaStyle: React.CSSProperties = {
+  minHeight: 54,
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  padding: 9,
+  resize: "vertical",
+};
+
+const memoStyle: React.CSSProperties = {
+  minHeight: 54,
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  padding: 9,
+  resize: "vertical",
+};
+
+const grid4Style: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(4, minmax(120px, 1fr))",
+  gap: 8,
+};
+
+const grid2Style: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: 8,
+};
+
+const buttonRowStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "flex-end",
+};
+
+const saveBtnStyle: React.CSSProperties = {
+  height: 38,
+  padding: "0 18px",
+  border: "none",
+  borderRadius: 8,
+  background: "#111827",
+  color: "#fff",
+  fontWeight: 900,
+  cursor: "pointer",
+};
+
+const emptyStyle: React.CSSProperties = {
+  background: "#fff",
+  border: "1px solid #e5e7eb",
+  borderRadius: 16,
+  padding: 32,
+  textAlign: "center",
+  color: "#6b7280",
+};
