@@ -31,26 +31,79 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
   const [status, setStatus] = useState("전체");
   const [type, setType] = useState("전체");
   const [series, setSeries] = useState("전체");
+
+  const [trackingFilter, setTrackingFilter] =
+    useState("전체");
+
   const [message, setMessage] = useState("");
 
+
   const filtered = useMemo(() => {
-    return items.filter((item) => {
-      const q = keyword.trim().toLowerCase();
+  return items.filter((item) => {
+    const q = keyword.trim().toLowerCase();
 
-      const matchKeyword =
-        !q ||
-        String(item.item_name ?? "").toLowerCase().includes(q) ||
-        String(item.order_number ?? "").toLowerCase().includes(q) ||
-        String(item.tracking_number ?? "").toLowerCase().includes(q) ||
-        String(item.memo ?? "").toLowerCase().includes(q);
+    const matchKeyword =
+      !q ||
+      String(item.item_name ?? "")
+        .toLowerCase()
+        .includes(q) ||
 
-      const matchStatus = status === "전체" || item.status === status;
-      const matchType = type === "전체" || item.item_type === type;
-      const matchSeries = series === "전체" || item.series_name === series;
+      String(item.order_number ?? "")
+        .toLowerCase()
+        .includes(q) ||
 
-      return matchKeyword && matchStatus && matchType && matchSeries;
-    });
-  }, [items, keyword, status, type, series]);
+      String(item.tracking_number ?? "")
+        .toLowerCase()
+        .includes(q) ||
+
+      String(item.memo ?? "")
+        .toLowerCase()
+        .includes(q);
+
+    const matchStatus =
+      status === "전체" ||
+      item.status === status;
+
+    const matchType =
+      type === "전체" ||
+      item.item_type === type;
+
+    const matchSeries =
+      series === "전체" ||
+      item.series_name === series;
+
+    const matchTracking =
+      trackingFilter === "전체" ||
+
+      (
+        trackingFilter === "운송장없음" &&
+        !item.tracking_number
+      ) ||
+
+      (
+        trackingFilter === "운송장있음" &&
+        !!item.tracking_number
+      );
+
+    return (
+      matchKeyword &&
+      matchStatus &&
+      matchType &&
+      matchSeries &&
+      matchTracking
+    );
+  });
+}, [
+  items,
+  keyword,
+  status,
+  type,
+  series,
+  trackingFilter,
+]);
+
+
+  
 
   const updateItem = (id: string | number, field: keyof InventoryItem, value: string) => {
     setItems((prev) =>
@@ -128,6 +181,21 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
         <select value={type} onChange={(e) => setType(e.target.value)} style={selectStyle}>
           {typeList.map((v) => <option key={v}>{v}</option>)}
         </select>
+
+        <select
+          value={trackingFilter}
+          onChange={(e) =>
+            setTrackingFilter(e.target.value)
+          }
+          style={selectStyle}
+        >
+          <option>전체</option>
+          <option>운송장없음</option>
+          <option>운송장있음</option>
+        </select>
+
+
+        
       </section>
 
       {message ? <div style={messageStyle}>{message}</div> : null}
