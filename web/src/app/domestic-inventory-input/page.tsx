@@ -501,7 +501,7 @@ function parseFixedInventoryText(rawText: string): PreviewItem[] {
 }
 
 function getField(text: string, key: string) {
-  const regex = new RegExp(`^${key}:\\s*(.*)$`, "im");
+  const regex = new RegExp(`^${key}:[ \\t]*(.*)$`, "im");
   return text.match(regex)?.[1]?.trim() ?? "";
 }
 
