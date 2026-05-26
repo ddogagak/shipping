@@ -19,6 +19,8 @@ type InventoryItem = {
   total_price: number | null;
   status: string | null;
   memo: string | null;
+  component_count: number | null;
+  unit_sale_price: number | null;
 };
 
 const statusList = ["전체", "입고전", "해외배송", "입고완료", "판매중", "판매완료", "보류"];
