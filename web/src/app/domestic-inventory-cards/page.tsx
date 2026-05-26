@@ -12,8 +12,16 @@ export default async function DomesticInventoryCardsPage() {
     .order("created_at", { ascending: false });
 
   if (error) {
-    return <main style={{ padding: 24 }}>DB 조회 실패: {error.message}</main>;
+    return (
+      <main style={{ padding: 24 }}>
+        DB 조회 실패: {error.message}
+      </main>
+    );
   }
 
-  return <InventoryCardsClient initialItems={data ?? []} />;
+  return (
+    <InventoryCardsClient
+      initialItems={data ?? []}
+    />
+  );
 }
