@@ -39,6 +39,9 @@ export async function POST(req: Request) {
         memo: body.memo ?? "",
 
         raw_text: body.raw_text ?? "",
+
+        component_count: body.component_count ? Number(body.component_count) : null,
+        unit_sale_price: body.unit_sale_price ? Number(body.unit_sale_price) : null,
       })
       .select()
       .single();
