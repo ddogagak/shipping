@@ -304,6 +304,20 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
                   />
                 </div>
 
+                                <FieldInput
+                  label="구성품개수"
+                  type="number"
+                  value={String(item.component_count ?? "")}
+                  onChange={(value) => updateItem(item.id, "component_count", value)}
+                />
+                
+                <FieldInput
+                  label="개당판매가"
+                  type="number"
+                  value={String(item.unit_sale_price ?? "")}
+                  onChange={(value) => updateItem(item.id, "unit_sale_price", value)}
+                />
+
                 <label style={labelStyle}>
                   메모
                   <textarea
