@@ -54,11 +54,11 @@ const seriesList = [
 ];
 
 export default function InventoryCardsClient({
-  initialItems,
+  initialItems = [],
 }: {
-  initialItems: InventoryItem[];
+  initialItems?: InventoryItem[];
 }) {
-  const [items, setItems] = useState<InventoryItem[]>(initialItems);
+  const [items, setItems] = useState<InventoryItem[]>(initialItems ?? []);
 
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("판매완료/보류 제외");
@@ -70,7 +70,7 @@ export default function InventoryCardsClient({
   const [savedId, setSavedId] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
-    return items.filter((item) => {
+    return (items ?? []).filter((item) => {
       const keyword = q.trim().toLowerCase();
 
       const matchKeyword =
