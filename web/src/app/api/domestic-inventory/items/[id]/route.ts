@@ -29,6 +29,8 @@ export async function PATCH(
         total_price: Number(body.total_price ?? 0),
         status: body.status ?? "입고전",
         memo: body.memo ?? "",
+        component_count: body.component_count ? Number(body.component_count) : null,
+        unit_sale_price: body.unit_sale_price ? Number(body.unit_sale_price) : null,
       })
       .eq("id", id)
       .select()
