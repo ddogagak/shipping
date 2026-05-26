@@ -259,8 +259,14 @@ function calcInventoryProfit(item: {
       : null;
 
   const profit =
-    componentCount > 0 && unitSalePrice > 0
-      ? Math.round(unitSalePrice * componentCount - cost)
+    componentCount > 0 &&
+    unitSalePrice > 0 &&
+    unitPrice !== null
+      ? Math.round(
+          (unitSalePrice - unitPrice)
+          *
+          componentCount
+        )
       : null;
 
   return {
