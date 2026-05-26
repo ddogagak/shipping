@@ -117,7 +117,9 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
           field === "yen_price" ||
           field === "shipping_fee" ||
           field === "domestic_shipping_fee" ||
-          field === "total_price"
+          field === "component_count" ||
+          field === "unit_sale_price" ||
+          field === "total_price" 
         ) {
           return { ...item, [field]: Number(value) };
         }
