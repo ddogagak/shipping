@@ -251,11 +251,11 @@ function calcInventoryProfit(item: {
   const roundedCost = Math.round(cost);
 
   const unitPrice =
-    componentCount > 0 ? Math.ceil((cost * 1.6) / componentCount) : null;
+    componentCount > 0 ? Math.ceil((cost * 1.2) / componentCount) : null;
 
   const minMarginPrice =
     componentCount > 0
-      ? Math.ceil((cost * 1.6) / componentCount + 10000 / componentCount)
+      ? Math.ceil((cost * 1.2) / componentCount + 10000 / componentCount)
       : null;
 
   const profit =
