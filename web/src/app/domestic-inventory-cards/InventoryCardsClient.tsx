@@ -18,10 +18,40 @@ type InventoryItem = {
   unit_sale_price: number | null;
 };
 
-const statusList = ["입고전", "해외배송", "입고완료", "판매중", "판매완료", "보류"];
-const filterStatusList = ["전체", ...statusList];
-const typeList = ["전체", "아크릴", "지류", "뱃지", "피규어", "키링", "기타"];
-const seriesList = ["전체", "헌터헌터", "귀멸의칼날", "나의히어로아카데미아", "프리렌", "진격의거인", "기타"];
+const statusList = [
+  "입고전",
+  "해외배송",
+  "입고완료",
+  "판매중",
+  "판매완료",
+  "보류",
+];
+
+const filterStatusList = [
+  "판매완료/보류 제외",
+  "전체",
+  ...statusList,
+];
+
+const typeList = [
+  "전체",
+  "아크릴",
+  "지류",
+  "뱃지",
+  "피규어",
+  "키링",
+  "기타",
+];
+
+const seriesList = [
+  "전체",
+  "헌터헌터",
+  "귀멸의칼날",
+  "나의히어로아카데미아",
+  "프리렌",
+  "진격의거인",
+  "기타",
+];
 
 export default function InventoryCardsClient({
   initialItems,
@@ -29,11 +59,15 @@ export default function InventoryCardsClient({
   initialItems: InventoryItem[];
 }) {
   const [items, setItems] = useState<InventoryItem[]>(initialItems);
+
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState("전체");
+  const [status, setStatus] = useState("판매완료/보류 제외");
   const [type, setType] = useState("전체");
   const [series, setSeries] = useState("전체");
+
   const [message, setMessage] = useState("");
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [savedId, setSavedId] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     return items.filter((item) => {
@@ -44,7 +78,13 @@ export default function InventoryCardsClient({
         String(item.item_name ?? "").toLowerCase().includes(keyword) ||
         String(item.memo ?? "").toLowerCase().includes(keyword);
 
-      const matchStatus = status === "전체" || item.status === status;
+      const matchStatus =
+        status === "전체" ||
+        (status === "판매완료/보류 제외" &&
+          item.status !== "판매완료" &&
+          item.status !== "보류") ||
+        item.status === status;
+
       const matchType = type === "전체" || item.item_type === type;
       const matchSeries = series === "전체" || item.series_name === series;
 
@@ -82,11 +122,15 @@ export default function InventoryCardsClient({
 
   const saveItem = async (item: InventoryItem) => {
     setMessage("");
+    setSavingId(item.id);
+    setSavedId(null);
 
     try {
       const res = await fetch(`/api/domestic-inventory/items/${item.id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify(item),
       });
 
@@ -97,8 +141,19 @@ export default function InventoryCardsClient({
       }
 
       setMessage("저장 완료");
+      setSavedId(item.id);
+
+      setTimeout(() => {
+        setSavedId((current) => (current === item.id ? null : current));
+      }, 1800);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "저장 실패");
+      const errorMessage =
+        error instanceof Error ? error.message : "저장 실패";
+
+      setMessage(errorMessage);
+      alert(errorMessage);
+    } finally {
+      setSavingId(null);
     }
   };
 
@@ -107,13 +162,21 @@ export default function InventoryCardsClient({
       <div style={topBarStyle}>
         <div>
           <h1 style={titleStyle}>국내 재고 카드 관리</h1>
-          <p style={subTextStyle}>카드별 상태 / 구성품 / 판매가 수정 및 수익 계산</p>
+          <p style={subTextStyle}>
+            카드별 상태 / 구성품 / 판매가 수정 및 수익 계산
+          </p>
         </div>
 
         <div style={{ display: "flex", gap: 8 }}>
-          <Link href="/" style={linkButtonStyle}>메인</Link>
-          <Link href="/domestic-inventory-input" style={linkButtonStyle}>재고 입력</Link>
-          <Link href="/domestic-inventory" style={linkButtonStyle}>인벤토리</Link>
+          <Link href="/" style={linkButtonStyle}>
+            메인
+          </Link>
+          <Link href="/domestic-inventory-input" style={linkButtonStyle}>
+            재고 입력
+          </Link>
+          <Link href="/domestic-inventory" style={linkButtonStyle}>
+            인벤토리
+          </Link>
         </div>
       </div>
 
@@ -125,16 +188,34 @@ export default function InventoryCardsClient({
           style={searchInputStyle}
         />
 
-        <select value={status} onChange={(e) => setStatus(e.target.value)} style={selectStyle}>
-          {filterStatusList.map((value) => <option key={value}>{value}</option>)}
+        <select
+          value={status}
+          onChange={(e) => setStatus(e.target.value)}
+          style={selectStyle}
+        >
+          {filterStatusList.map((value) => (
+            <option key={value}>{value}</option>
+          ))}
         </select>
 
-        <select value={type} onChange={(e) => setType(e.target.value)} style={selectStyle}>
-          {typeList.map((value) => <option key={value}>{value}</option>)}
+        <select
+          value={type}
+          onChange={(e) => setType(e.target.value)}
+          style={selectStyle}
+        >
+          {typeList.map((value) => (
+            <option key={value}>{value}</option>
+          ))}
         </select>
 
-        <select value={series} onChange={(e) => setSeries(e.target.value)} style={selectStyle}>
-          {seriesList.map((value) => <option key={value}>{value}</option>)}
+        <select
+          value={series}
+          onChange={(e) => setSeries(e.target.value)}
+          style={selectStyle}
+        >
+          {seriesList.map((value) => (
+            <option key={value}>{value}</option>
+          ))}
         </select>
       </section>
 
@@ -158,7 +239,9 @@ export default function InventoryCardsClient({
 
                   <select
                     value={item.status || "입고전"}
-                    onChange={(e) => updateItem(item.id, "status", e.target.value)}
+                    onChange={(e) =>
+                      updateItem(item.id, "status", e.target.value)
+                    }
                     style={statusSelectStyle}
                   >
                     {statusList.map((value) => (
@@ -169,26 +252,40 @@ export default function InventoryCardsClient({
 
                 <div style={cardBodyStyle}>
                   <div style={badgeRowStyle}>
-                    <span style={seriesBadgeStyle}>{item.series_name || "기타"}</span>
-                    <span style={typeBadgeStyle}>{item.item_type || "기타"}</span>
+                    <span style={seriesBadgeStyle}>
+                      {item.series_name || "기타"}
+                    </span>
+                    <span style={typeBadgeStyle}>
+                      {item.item_type || "기타"}
+                    </span>
                   </div>
 
                   <div style={itemNameStyle}>{item.item_name}</div>
 
                   <div style={infoGridStyle}>
-                    <InfoItem label="수량" value={String(item.quantity ?? 1)} />
+                    <InfoItem
+                      label="수량"
+                      value={String(item.quantity ?? 1)}
+                    />
 
                     <InfoItem
                       label="금액"
-                      value={`¥${Number(item.total_price ?? 0).toLocaleString()}`}
+                      value={`¥${Number(
+                        item.total_price ?? 0
+                      ).toLocaleString()}`}
                     />
 
-                    <InfoItem label="원가" value={formatWon(profitInfo.cost)} />
+                    <InfoItem
+                      label="원가"
+                      value={formatWon(profitInfo.cost)}
+                    />
 
                     <EditableInfoItem
                       label="구성품개수"
                       value={item.component_count}
-                      onChange={(value) => updateItem(item.id, "component_count", value)}
+                      onChange={(value) =>
+                        updateItem(item.id, "component_count", value)
+                      }
                     />
 
                     <InfoItem
@@ -204,7 +301,9 @@ export default function InventoryCardsClient({
                     <EditableInfoItem
                       label="개당판매가"
                       value={item.unit_sale_price}
-                      onChange={(value) => updateItem(item.id, "unit_sale_price", value)}
+                      onChange={(value) =>
+                        updateItem(item.id, "unit_sale_price", value)
+                      }
                     />
 
                     <InfoItem
@@ -219,9 +318,21 @@ export default function InventoryCardsClient({
                   <button
                     type="button"
                     onClick={() => saveItem(item)}
-                    style={saveButtonStyle}
+                    disabled={savingId === item.id}
+                    style={{
+                      ...saveButtonStyle,
+                      opacity: savingId === item.id ? 0.6 : 1,
+                      background:
+                        savedId === item.id
+                          ? "#16a34a"
+                          : saveButtonStyle.background,
+                    }}
                   >
-                    저장
+                    {savingId === item.id
+                      ? "저장 중..."
+                      : savedId === item.id
+                      ? "저장완료"
+                      : "저장"}
                   </button>
                 </div>
               </article>
@@ -259,14 +370,8 @@ function calcInventoryProfit(item: {
       : null;
 
   const profit =
-    componentCount > 0 &&
-    unitSalePrice > 0 &&
-    unitPrice !== null
-      ? Math.round(
-          (unitSalePrice - unitPrice)
-          *
-          componentCount
-        )
+    componentCount > 0 && unitSalePrice > 0 && unitPrice !== null
+      ? Math.round((unitSalePrice - unitPrice) * componentCount)
       : null;
 
   return {
