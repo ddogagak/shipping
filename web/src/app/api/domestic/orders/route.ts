@@ -85,16 +85,20 @@ export async function PATCH(req: Request) {
         { status: 500 }
       );
     }
+  
+      const { error: shippingError } = await supabase
+    .from("domestic_shipping")
+    .update({
+      shipping_status: nextShippingStatus,
+      shipping_type: body.shipping_type || "일반택배",
+      tracking_number: body.tracking_number
+        ? String(body.tracking_number).trim()
+        : null,
+      updated_at: now,
+    })
+    .eq("order_id", orderId);
 
-    const { error: shippingError } = await supabase
-      .from("domestic_shipping")
-      .update({
-        shipping_status: nextShippingStatus,
-        shipping_type: body.shipping_type || "일반택배",
-        updated_at: now,
-      })
-      .eq("order_id", orderId);
-
+    
     if (shippingError) {
       return NextResponse.json(
         { error: "국내 배송 행 저장 실패", detail: shippingError.message },
