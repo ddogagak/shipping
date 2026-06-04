@@ -253,8 +253,21 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
                     label="상태"
                     value={item.status ?? "입고전"}
                     options={statusList.filter((v) => v !== "전체")}
-                    onChange={(value) => updateItem(item.id, "status", value)}
-                  />
+                    onChange={async (value) => {
+                      const nextItem = {
+                        ...item,
+                        status: value,
+                      };
+
+    setItems((prev) =>
+      prev.map((prevItem) =>
+        prevItem.id === item.id ? nextItem : prevItem
+      )
+    );
+
+    await saveItem(nextItem);
+  }}
+/>
 
                   <FieldInput
                     label="수량"
