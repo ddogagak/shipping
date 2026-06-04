@@ -54,11 +54,11 @@ const seriesList = [
 ];
 
 export default function InventoryCardsClient({
-  initialItems,
+  initialItems = [],
 }: {
-  initialItems: InventoryItem[];
+  initialItems?: InventoryItem[];
 }) {
-  const [items, setItems] = useState<InventoryItem[]>(initialItems);
+  const [items, setItems] = useState<InventoryItem[]>(initialItems ?? []);
 
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("판매완료/보류 제외");
@@ -70,7 +70,7 @@ export default function InventoryCardsClient({
   const [savedId, setSavedId] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
-    return items.filter((item) => {
+    return (items ?? []).filter((item) => {
       const keyword = q.trim().toLowerCase();
 
       const matchKeyword =
@@ -157,6 +157,24 @@ export default function InventoryCardsClient({
     }
   };
 
+  const saveStatusImmediately = async (
+    item: InventoryItem,
+    nextStatus: string
+  ) => {
+    const nextItem: InventoryItem = {
+      ...item,
+      status: nextStatus,
+    };
+
+    setItems((prev) =>
+      prev.map((prevItem) =>
+        prevItem.id === item.id ? nextItem : prevItem
+      )
+    );
+
+    await saveItem(nextItem);
+  };
+
   return (
     <main style={pageStyle}>
       <div style={topBarStyle}>
@@ -240,8 +258,9 @@ export default function InventoryCardsClient({
                   <select
                     value={item.status || "입고전"}
                     onChange={(e) =>
-                      updateItem(item.id, "status", e.target.value)
+                      saveStatusImmediately(item, e.target.value)
                     }
+                    disabled={savingId === item.id}
                     style={statusSelectStyle}
                   >
                     {statusList.map((value) => (
