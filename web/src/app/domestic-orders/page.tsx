@@ -193,4 +193,199 @@ function compareRows(a: Row, b: Row, key: SortKey, direction: SortDirection) {
   const bValue = sortValue(b, key);
   const factor = direction === "asc" ? 1 : -1;
 
-  if
+  if (typeof aValue === "number" && typeof bValue === "number") {
+    return (aValue - bValue) * factor;
+  }
+
+  return String(aValue).localeCompare(String(bValue), "ko") * factor;
+}
+
+function shortOrderNo(value?: string | null) {
+  const clean = String(value || "").trim();
+  if (!clean) return "";
+  return clean.length > 5 ? clean.slice(-5) : clean;
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean)));
+}
+
+function defaultShipping(): ShippingInfo {
+  return {
+    carrier: "우체국택배",
+    shipping_type: "일반택배",
+    tracking_number: null,
+    shipping_status: "start",
+    excel_exported_at: null,
+  };
+}
+
+export default function DomesticOrdersPage() {
+  const [rows, setRows] = useState<Row[]>([]);
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [savingRowId, setSavingRowId] = useState<string | null>(null);
+
+  const [platforms, setPlatforms] = useState<string[]>([]);
+  const [orderStatuses, setOrderStatuses] = useState<string[]>(["accepted", "checked", "packaged"]);
+  const [shippingStatuses, setShippingStatuses] = useState<string[]>([
+    "start",
+    "excel_exported",
+    "uploaded",
+    "registered",
+  ]);
+  const [shippingTypes, setShippingTypes] = useState<string[]>([]);
+  const [q, setQ] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("first_order_date");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [combineDraft, setCombineDraft] = useState<CombineDraft | null>(null);
+
+  async function load() {
+    setLoading(true);
+    setMessage("");
+
+    try {
+      const res = await fetch("/api/domestic/orders", { cache: "no-store" });
+      const json = await res.json();
+
+      if (!res.ok) {
+        setMessage(json.detail || json.error || "조회 실패");
+        return;
+      }
+
+      setRows(
+        (json.orders || []).map((row: DomesticOrder) => ({
+          ...row,
+          selected: false,
+        }))
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "알 수 없는 오류");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const filteredRows = useMemo(() => {
+    return rows
+      .filter((row) => {
+        const s = shipping(row);
+        const shippingStatus = s?.shipping_status || "start";
+        const shippingType = s?.shipping_type || "일반택배";
+
+        if (platforms.length && !platforms.includes(row.platform)) return false;
+        if (orderStatuses.length && !orderStatuses.includes(row.order_status || "accepted")) return false;
+        if (shippingStatuses.length && !shippingStatuses.includes(shippingStatus)) return false;
+        if (shippingTypes.length && !shippingTypes.includes(shippingType)) return false;
+
+        if (q.trim()) {
+          const text = [
+            row.order_id,
+            row.customer_order_no,
+            row.platform,
+            row.nickname,
+            row.recipient_name,
+            row.phone,
+            row.postal_code,
+            row.address,
+            row.first_order_date,
+            row.item_summary,
+            row.memo,
+            s?.tracking_number,
+            shippingType,
+          ]
+            .join(" ")
+            .toLowerCase();
+
+          if (!text.includes(q.trim().toLowerCase())) return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => compareRows(a, b, sortKey, sortDirection));
+  }, [rows, platforms, orderStatuses, shippingStatuses, shippingTypes, q, sortKey, sortDirection]);
+
+  const selectedIds = rows.filter((row) => row.selected).map((row) => row.order_id);
+  const selectedRows = rows.filter((row) => row.selected);
+  const allFilteredSelected = filteredRows.length > 0 && filteredRows.every((row) => row.selected);
+
+  const combineCandidates = useMemo(() => {
+    const groups = new Map<string, Row[]>();
+
+    rows.forEach((row) => {
+      const s = shipping(row);
+      const nickname = String(row.nickname || "").trim();
+      const orderDone = (row.order_status || "") === "done";
+      const shippingDone = (s?.shipping_status || "") === "done";
+
+      if (!nickname || orderDone || shippingDone) return;
+
+      const list = groups.get(nickname) || [];
+      list.push(row);
+      groups.set(nickname, list);
+    });
+
+    return Array.from(groups.entries())
+      .map(([nickname, list]) => {
+        const sorted = [...list].sort((a, b) =>
+          String(a.first_order_date || a.created_at || "").localeCompare(
+            String(b.first_order_date || b.created_at || "")
+          )
+        );
+        const dateSet = new Set(sorted.map((row) => row.first_order_date || "날짜없음"));
+        return { nickname, rows: sorted, dateCount: dateSet.size };
+      })
+      .filter((group) => group.rows.length >= 2 && group.dateCount >= 2);
+  }, [rows]);
+
+  function toggleList(list: string[], value: string) {
+    return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
+  }
+
+  function updateSelected(orderId: string, selected: boolean) {
+    setRows((prev) =>
+      prev.map((row) => (row.order_id === orderId ? { ...row, selected } : row))
+    );
+  }
+
+  function updateRowValue(orderId: string, patch: Partial<Row>) {
+    setRows((prev) =>
+      prev.map((row) => (row.order_id === orderId ? { ...row, ...patch } : row))
+    );
+  }
+
+  function updateShippingValue(orderId: string, patch: Partial<ShippingInfo>) {
+    setRows((prev) =>
+      prev.map((row) => {
+        if (row.order_id !== orderId) return row;
+        const current = shipping(row) || defaultShipping();
+
+        return {
+          ...row,
+          domestic_shipping: {
+            ...current,
+            ...patch,
+          },
+        };
+      })
+    );
+  }
+
+  function makeRowWithPatch(row: Row, patchRow: Partial<Row>, patchShipping?: Partial<ShippingInfo>): Row {
+    const currentShipping = shipping(row) || defaultShipping();
+
+    return {
+      ...row,
+      ...patchRow,
+      domestic_shipping: {
+        ...currentShipping,
+        ...(patchShipping || {}),
+      },
+    };
+  }
+
+  function toggle
