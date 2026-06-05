@@ -341,7 +341,27 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
                     style={memoStyle}
                   />
                 </label>
+const deleteItem = async (item: InventoryItem) => {
+  if (!confirm(`이 재고를 삭제할까?\n\n${item.item_name || ""}`)) {
+    return;
+  }
 
+  const res = await fetch(`/api/domestic-inventory/items/${item.id}`, {
+    method: "DELETE",
+  });
+
+  const result = await res.json();
+
+  if (!res.ok || !result.ok) {
+    alert(result.message || "삭제 실패");
+    return;
+  }
+
+  setRows((prev) => prev.filter((row) => row.id !== item.id));
+  setMessage("삭제 완료");
+};
+
+                
                 <div style={buttonRowStyle}>
                   <button type="button" onClick={() => saveItem(item)} style={saveBtnStyle}>
                     저장
