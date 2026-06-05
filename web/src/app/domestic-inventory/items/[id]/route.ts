@@ -49,3 +49,38 @@ export async function PATCH(
     );
   }
 }
+
+
+
+export async function DELETE(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+
+    const supabase = createServiceRoleClient();
+
+    const { error } = await supabase
+      .from("inventory_items")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      return NextResponse.json(
+        { ok: false, message: error.message },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        ok: false,
+        message: error instanceof Error ? error.message : "삭제 실패",
+      },
+      { status: 500 }
+    );
+  }
+}
