@@ -28,84 +28,39 @@ const typeList = ["전체", "아크릴", "지류", "뱃지", "피규어", "키�
 const seriesList = ["전체", "헌터헌터", "귀멸의칼날", "나의히어로아카데미아", "프리렌", "진격의거인", "기타"];
 
 export default function InventoryClient({ initialItems }: { initialItems: InventoryItem[] }) {
-  const [items, setItems] = useState<InventoryItem[]>(initialItems);
+  const [items, setItems] = useState<InventoryItem[]>(initialItems ?? []);
   const [keyword, setKeyword] = useState("");
   const [status, setStatus] = useState("전체");
   const [type, setType] = useState("전체");
   const [series, setSeries] = useState("전체");
-
-  const [trackingFilter, setTrackingFilter] =
-    useState("전체");
-
+  const [trackingFilter, setTrackingFilter] = useState("전체");
   const [message, setMessage] = useState("");
-
+  const [savingId, setSavingId] = useState<string | number | null>(null);
+  const [deletingId, setDeletingId] = useState<string | number | null>(null);
 
   const filtered = useMemo(() => {
-  return items.filter((item) => {
-    const q = keyword.trim().toLowerCase();
+    return items.filter((item) => {
+      const q = keyword.trim().toLowerCase();
 
-    const matchKeyword =
-      !q ||
-      String(item.item_name ?? "")
-        .toLowerCase()
-        .includes(q) ||
+      const matchKeyword =
+        !q ||
+        String(item.item_name ?? "").toLowerCase().includes(q) ||
+        String(item.order_number ?? "").toLowerCase().includes(q) ||
+        String(item.tracking_number ?? "").toLowerCase().includes(q) ||
+        String(item.memo ?? "").toLowerCase().includes(q);
 
-      String(item.order_number ?? "")
-        .toLowerCase()
-        .includes(q) ||
+      const matchStatus = status === "전체" || item.status === status;
+      const matchType = type === "전체" || item.item_type === type;
+      const matchSeries = series === "전체" || item.series_name === series;
 
-      String(item.tracking_number ?? "")
-        .toLowerCase()
-        .includes(q) ||
+      const matchTracking =
+        trackingFilter === "전체" ||
+        (trackingFilter === "운송장없음" && !item.tracking_number) ||
+        (trackingFilter === "운송장있음" && !!item.tracking_number);
 
-      String(item.memo ?? "")
-        .toLowerCase()
-        .includes(q);
-
-    const matchStatus =
-      status === "전체" ||
-      item.status === status;
-
-    const matchType =
-      type === "전체" ||
-      item.item_type === type;
-
-    const matchSeries =
-      series === "전체" ||
-      item.series_name === series;
-
-    const matchTracking =
-      trackingFilter === "전체" ||
-
-      (
-        trackingFilter === "운송장없음" &&
-        !item.tracking_number
-      ) ||
-
-      (
-        trackingFilter === "운송장있음" &&
-        !!item.tracking_number
-      );
-
-    return (
-      matchKeyword &&
-      matchStatus &&
-      matchType &&
-      matchSeries &&
-      matchTracking
-    );
-  });
-}, [
-  items,
-  keyword,
-  status,
-  type,
-  series,
-  trackingFilter,
-]);
-
-
-  
+      return matchKeyword && matchStatus && matchType && matchSeries && matchTracking;
+    });
+  }, [items, keyword, status, type, series, trackingFilter]);
 
   const updateItem = (id: string | number, field: keyof InventoryItem, value: string) => {
     setItems((prev) =>
@@ -119,9 +74,12 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
           field === "domestic_shipping_fee" ||
           field === "component_count" ||
           field === "unit_sale_price" ||
-          field === "total_price" 
+          field === "total_price"
         ) {
-          return { ...item, [field]: Number(value) };
+          return {
+            ...item,
+            [field]: value === "" ? null : Number(value),
+          };
         }
 
         return { ...item, [field]: value };
@@ -131,6 +89,7 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
 
   const saveItem = async (item: InventoryItem) => {
     setMessage("");
+    setSavingId(item.id);
 
     try {
       const res = await fetch(`/api/domestic-inventory/items/${item.id}`, {
@@ -147,7 +106,56 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
 
       setMessage("저장 완료");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "저장 실패");
+      const errorMessage = error instanceof Error ? error.message : "저장 실패";
+      setMessage(errorMessage);
+      alert(errorMessage);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const saveStatusImmediately = async (item: InventoryItem, nextStatus: string) => {
+    const nextItem = {
+      ...item,
+      status: nextStatus,
+    };
+
+    setItems((prev) =>
+      prev.map((prevItem) =>
+        prevItem.id === item.id ? nextItem : prevItem
+      )
+    );
+
+    await saveItem(nextItem);
+  };
+
+  const deleteItem = async (item: InventoryItem) => {
+    if (!confirm(`이 재고를 삭제할까?\n\n${item.item_name || ""}`)) {
+      return;
+    }
+
+    setMessage("");
+    setDeletingId(item.id);
+
+    try {
+      const res = await fetch(`/api/domestic-inventory/items/${item.id}`, {
+        method: "DELETE",
+      });
+
+      const result = await res.json();
+
+      if (!res.ok || !result.ok) {
+        throw new Error(result.message || "삭제 실패");
+      }
+
+      setItems((prev) => prev.filter((row) => row.id !== item.id));
+      setMessage("삭제 완료");
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "삭제 실패";
+      setMessage(errorMessage);
+      alert(errorMessage);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -188,18 +196,13 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
 
         <select
           value={trackingFilter}
-          onChange={(e) =>
-            setTrackingFilter(e.target.value)
-          }
+          onChange={(e) => setTrackingFilter(e.target.value)}
           style={selectStyle}
         >
           <option>전체</option>
           <option>운송장없음</option>
           <option>운송장있음</option>
         </select>
-
-
-        
       </section>
 
       {message ? <div style={messageStyle}>{message}</div> : null}
@@ -253,21 +256,8 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
                     label="상태"
                     value={item.status ?? "입고전"}
                     options={statusList.filter((v) => v !== "전체")}
-                    onChange={async (value) => {
-                      const nextItem = {
-                        ...item,
-                        status: value,
-                      };
-
-    setItems((prev) =>
-      prev.map((prevItem) =>
-        prevItem.id === item.id ? nextItem : prevItem
-      )
-    );
-
-    await saveItem(nextItem);
-  }}
-/>
+                    onChange={(value) => saveStatusImmediately(item, value)}
+                  />
 
                   <FieldInput
                     label="수량"
@@ -319,19 +309,21 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
                   />
                 </div>
 
-                                <FieldInput
-                  label="구성품개수"
-                  type="number"
-                  value={String(item.component_count ?? "")}
-                  onChange={(value) => updateItem(item.id, "component_count", value)}
-                />
-                
-                <FieldInput
-                  label="개당판매가"
-                  type="number"
-                  value={String(item.unit_sale_price ?? "")}
-                  onChange={(value) => updateItem(item.id, "unit_sale_price", value)}
-                />
+                <div style={grid2Style}>
+                  <FieldInput
+                    label="구성품개수"
+                    type="number"
+                    value={String(item.component_count ?? "")}
+                    onChange={(value) => updateItem(item.id, "component_count", value)}
+                  />
+
+                  <FieldInput
+                    label="개당판매가"
+                    type="number"
+                    value={String(item.unit_sale_price ?? "")}
+                    onChange={(value) => updateItem(item.id, "unit_sale_price", value)}
+                  />
+                </div>
 
                 <label style={labelStyle}>
                   메모
@@ -341,30 +333,24 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
                     style={memoStyle}
                   />
                 </label>
-const deleteItem = async (item: InventoryItem) => {
-  if (!confirm(`이 재고를 삭제할까?\n\n${item.item_name || ""}`)) {
-    return;
-  }
 
-  const res = await fetch(`/api/domestic-inventory/items/${item.id}`, {
-    method: "DELETE",
-  });
-
-  const result = await res.json();
-
-  if (!res.ok || !result.ok) {
-    alert(result.message || "삭제 실패");
-    return;
-  }
-
-  setRows((prev) => prev.filter((row) => row.id !== item.id));
-  setMessage("삭제 완료");
-};
-
-                
                 <div style={buttonRowStyle}>
-                  <button type="button" onClick={() => saveItem(item)} style={saveBtnStyle}>
-                    저장
+                  <button
+                    type="button"
+                    onClick={() => saveItem(item)}
+                    style={saveBtnStyle}
+                    disabled={savingId === item.id}
+                  >
+                    {savingId === item.id ? "저장중" : "저장"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => deleteItem(item)}
+                    style={deleteBtnStyle}
+                    disabled={deletingId === item.id}
+                  >
+                    {deletingId === item.id ? "삭제중" : "삭제"}
                   </button>
                 </div>
               </div>
@@ -597,6 +583,7 @@ const grid2Style: React.CSSProperties = {
 const buttonRowStyle: React.CSSProperties = {
   display: "flex",
   justifyContent: "flex-end",
+  gap: 8,
 };
 
 const saveBtnStyle: React.CSSProperties = {
@@ -605,6 +592,17 @@ const saveBtnStyle: React.CSSProperties = {
   border: "none",
   borderRadius: 8,
   background: "#111827",
+  color: "#fff",
+  fontWeight: 900,
+  cursor: "pointer",
+};
+
+const deleteBtnStyle: React.CSSProperties = {
+  height: 38,
+  padding: "0 18px",
+  border: "none",
+  borderRadius: 8,
+  background: "#dc2626",
   color: "#fff",
   fontWeight: 900,
   cursor: "pointer",
