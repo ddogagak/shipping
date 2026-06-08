@@ -125,7 +125,9 @@ function normalizePhone(value: unknown) {
     .replace(/\s+/g, "-");
 }
 
-function makeExportData(exportData: Record<string, unknown>) {
+function makeExportData(
+  exportData: Record<string, unknown>
+): Record<string, unknown> {
   return {
     ...exportData,
 
