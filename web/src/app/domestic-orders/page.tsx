@@ -341,6 +341,41 @@ export default function DomesticOrdersPage() {
       .filter((group) => group.rows.length >= 2 && group.dateCount >= 2);
   }, [rows]);
 
+
+  const selectedCombineGroups = useMemo(() => {
+    const groups = new Map<string, Row[]>();
+
+    selectedRows.forEach((row) => {
+      const s = shipping(row);
+      const nickname = String(row.nickname || "미지정").trim() || "미지정";
+      const orderDone = (row.order_status || "") === "done";
+      const shippingDone = (s?.shipping_status || "") === "done";
+
+      if (orderDone || shippingDone) return;
+
+      const list = groups.get(nickname) || [];
+      list.push(row);
+      groups.set(nickname, list);
+    });
+
+    return Array.from(groups.entries())
+      .map(([nickname, list]) => {
+        const sorted = [...list].sort((a, b) =>
+          String(a.first_order_date || a.created_at || "").localeCompare(
+            String(b.first_order_date || b.created_at || "")
+          )
+        );
+
+        return {
+          nickname,
+          rows: sorted,
+          totalCount: sorted.reduce((sum, row) => sum + Number(row.order_count || 1), 0),
+          totalPrice: sorted.reduce((sum, row) => sum + Number(row.item_total_price || 0), 0),
+        };
+      })
+      .filter((group) => group.rows.length >= 2);
+  }, [selectedRows]);
+
   function toggleList(list: string[], value: string) {
     return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
   }
@@ -810,6 +845,59 @@ export default function DomesticOrdersPage() {
         </div>
       </section>
 
+      {selectedCombineGroups.length ? (
+        <section style={{ ...cardStyle, marginTop: 16, borderColor: "#7c3aed" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+            <div>
+              <h2 style={{ margin: 0 }}>체크한 주문 합배송 목록</h2>
+              <p style={{ margin: "6px 0 0", color: "#6b7280", fontSize: 13 }}>
+                체크한 주문을 닉네임별로 묶어서 보여줍니다. 각 묶음마다 확인/수정 후 합배송 저장할 수 있습니다.
+              </p>
+            </div>
+            <strong>{selectedCombineGroups.length}묶음</strong>
+          </div>
+
+          <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
+            {selectedCombineGroups.map((group) => {
+              const dates = Array.from(
+                new Set(group.rows.map((row) => row.first_order_date || "날짜없음"))
+              ).join(" / ");
+
+              return (
+                <div key={`selected-${group.nickname}`} style={selectedCombineCardStyle}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 900, marginBottom: 6 }}>
+                      {group.nickname} · {group.rows.length}건 · 총 {group.totalCount}개
+                    </div>
+                    <div style={{ color: "#6b7280", fontSize: 13, marginBottom: 6 }}>
+                      주문일: {dates} / 상품합계: {formatWon(group.totalPrice)}
+                    </div>
+                    <div style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {group.rows.map((row) => displayOrderNo(row)).join(" + ")}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => buildCombineDraft(group.rows)}
+                    style={purpleButtonStyle}
+                  >
+                    이 묶음 합배송
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : selectedRows.length >= 2 ? (
+        <section style={{ ...cardStyle, marginTop: 16, borderColor: "#f59e0b" }}>
+          <strong>체크한 주문 중 합배송 가능한 묶음이 없습니다.</strong>
+          <p style={{ marginBottom: 0, color: "#6b7280", fontSize: 13 }}>
+            배송완료/주문완료 주문은 제외됩니다. 같은 닉네임 주문을 2건 이상 체크하면 합배송 묶음이 표시됩니다.
+          </p>
+        </section>
+      ) : null}
+
       {combineCandidates.length ? (
         <section style={{ ...cardStyle, marginTop: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
@@ -1229,6 +1317,13 @@ const combineCardStyle: CSSProperties = {
   alignItems: "center",
   gap: 12,
   background: "#fafafa",
+};
+
+
+const selectedCombineCardStyle: CSSProperties = {
+  ...combineCardStyle,
+  border: "1px solid #c4b5fd",
+  background: "#faf5ff",
 };
 
 const warningBoxStyle: CSSProperties = {
