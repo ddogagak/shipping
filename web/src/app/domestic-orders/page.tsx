@@ -232,6 +232,7 @@ export default function DomesticOrdersPage() {
   const [sortKey, setSortKey] = useState<SortKey>("first_order_date");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [combineDraft, setCombineDraft] = useState<CombineDraft | null>(null);
+  const [selectedCombineKeys, setSelectedCombineKeys] = useState<string[]>([]);
 
   async function load() {
     setLoading(true);
@@ -341,41 +342,6 @@ export default function DomesticOrdersPage() {
       .filter((group) => group.rows.length >= 2 && group.dateCount >= 2);
   }, [rows]);
 
-
-  const selectedCombineGroups = useMemo(() => {
-    const groups = new Map<string, Row[]>();
-
-    selectedRows.forEach((row) => {
-      const s = shipping(row);
-      const nickname = String(row.nickname || "미지정").trim() || "미지정";
-      const orderDone = (row.order_status || "") === "done";
-      const shippingDone = (s?.shipping_status || "") === "done";
-
-      if (orderDone || shippingDone) return;
-
-      const list = groups.get(nickname) || [];
-      list.push(row);
-      groups.set(nickname, list);
-    });
-
-    return Array.from(groups.entries())
-      .map(([nickname, list]) => {
-        const sorted = [...list].sort((a, b) =>
-          String(a.first_order_date || a.created_at || "").localeCompare(
-            String(b.first_order_date || b.created_at || "")
-          )
-        );
-
-        return {
-          nickname,
-          rows: sorted,
-          totalCount: sorted.reduce((sum, row) => sum + Number(row.order_count || 1), 0),
-          totalPrice: sorted.reduce((sum, row) => sum + Number(row.item_total_price || 0), 0),
-        };
-      })
-      .filter((group) => group.rows.length >= 2);
-  }, [selectedRows]);
-
   function toggleList(list: string[], value: string) {
     return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
   }
@@ -443,6 +409,39 @@ export default function DomesticOrdersPage() {
 
     setSortKey(key);
     setSortDirection("asc");
+  }
+
+  function toggleCombineGroup(key: string) {
+    setSelectedCombineKeys((prev) =>
+      prev.includes(key)
+        ? prev.filter((item) => item !== key)
+        : [...prev, key]
+    );
+  }
+
+  function clearCombineGroups() {
+    setSelectedCombineKeys([]);
+  }
+
+  function buildSelectedCombineDrafts() {
+    const selectedGroups = combineCandidates.filter((group) =>
+      selectedCombineKeys.includes(group.nickname)
+    );
+
+    if (!selectedGroups.length) {
+      alert("합배송 묶음을 선택해줘.");
+      return;
+    }
+
+    // 여러 묶음을 한 번에 저장하는 대신, 먼저 첫 번째 묶음부터 확인창을 열어.
+    // 각 묶음은 주문번호/운송장/아이템을 수정해야 하므로 확인창 단계를 유지함.
+    buildCombineDraft(selectedGroups[0].rows);
+
+    if (selectedGroups.length > 1) {
+      setMessage(
+        `합배송 묶음 ${selectedGroups.length}개 선택됨. 현재 첫 번째 묶음부터 확인 후 저장해줘.`
+      );
+    }
   }
 
   function buildCombineDraft(targetRows: Row[]) {
@@ -845,152 +844,113 @@ export default function DomesticOrdersPage() {
         </div>
       </section>
 
-      {selectedCombineGroups.length ? (
-        <section style={{ ...cardStyle, marginTop: 16, borderColor: "#7c3aed" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-            <div>
-              <h2 style={{ margin: 0 }}>체크한 주문 합배송 목록</h2>
-              <p style={{ margin: "6px 0 0", color: "#6b7280", fontSize: 13 }}>
-                체크한 주문을 닉네임별로 묶어서 보여줍니다. 각 묶음마다 확인/수정 후 합배송 저장할 수 있습니다.
-              </p>
-            </div>
-            <strong>{selectedCombineGroups.length}묶음</strong>
-          </div>
-
-          <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
-            {selectedCombineGroups.map((group) => {
-              const dates = Array.from(
-                new Set(group.rows.map((row) => row.first_order_date || "날짜없음"))
-              ).join(" / ");
-
-              return (
-                <div key={`selected-${group.nickname}`} style={selectedCombineCardStyle}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 900, marginBottom: 6 }}>
-                      {group.nickname} · {group.rows.length}건 · 총 {group.totalCount}개
-                    </div>
-                    <div style={{ color: "#6b7280", fontSize: 13, marginBottom: 6 }}>
-                      주문일: {dates} / 상품합계: {formatWon(group.totalPrice)}
-                    </div>
-                    <div style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {group.rows.map((row) => displayOrderNo(row)).join(" + ")}
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => buildCombineDraft(group.rows)}
-                    style={purpleButtonStyle}
-                  >
-                    이 묶음 합배송
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      ) : selectedRows.length >= 2 ? (
-        <section style={{ ...cardStyle, marginTop: 16, borderColor: "#f59e0b" }}>
-          <strong>체크한 주문 중 합배송 가능한 묶음이 없습니다.</strong>
-          <p style={{ marginBottom: 0, color: "#6b7280", fontSize: 13 }}>
-            배송완료/주문완료 주문은 제외됩니다. 같은 닉네임 주문을 2건 이상 체크하면 합배송 묶음이 표시됩니다.
-          </p>
-        </section>
-      ) : null}
-
       {combineCandidates.length ? (
         <section style={{ ...cardStyle, marginTop: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
             <div>
               <h2 style={{ margin: 0 }}>합배송 제안</h2>
               <p style={{ margin: "6px 0 0", color: "#6b7280", fontSize: 13 }}>
-                닉네임이 같고 주문일이 다른 주문을 묶어서 보여줍니다. 필요한 주문만 체크한 뒤 합배송하세요.
+                주문별 체크가 아니라 합배송 묶음 단위로 선택합니다.
               </p>
             </div>
             <strong>{combineCandidates.length}건</strong>
           </div>
 
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
+            <button
+              type="button"
+              onClick={() =>
+                setSelectedCombineKeys(combineCandidates.map((group) => group.nickname))
+              }
+              style={smallOutlineButtonStyle}
+            >
+              제안 전체체크
+            </button>
+
+            <button
+              type="button"
+              onClick={clearCombineGroups}
+              style={smallOutlineButtonStyle}
+            >
+              체크해제
+            </button>
+
+            <button
+              type="button"
+              onClick={buildSelectedCombineDrafts}
+              style={purpleButtonStyle}
+            >
+              선택한 합배송 묶음 처리
+            </button>
+          </div>
+
           <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
-            {combineCandidates.map((group) => {
+            {combineCandidates.map((group, index) => {
+              const checked = selectedCombineKeys.includes(group.nickname);
+
               const dates = Array.from(
                 new Set(group.rows.map((row) => row.first_order_date || "날짜없음"))
               ).join(" / ");
 
-              const checkedRows = group.rows.filter((row) => row.selected);
+              const orderNos = group.rows.map((row) => displayOrderNo(row));
+              const baseNo = baseOrderNo(orderNos[0] || "");
+              const count = orderNos.reduce((sum, no) => sum + combineCount(no), 0);
+              const finalOrderNo = `${baseNo}-C${count}`;
+
+              const trackingNumbers = group.rows
+                .map((row) => shipping(row)?.tracking_number)
+                .map((value) => String(value || "").trim())
+                .filter(Boolean);
+              const uniqueTrackingNumbers = Array.from(new Set(trackingNumbers));
 
               return (
-                <div key={group.nickname} style={combineCardBlockStyle}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 900, marginBottom: 6 }}>
-                        {group.nickname} · 제안 {group.rows.length}건 · 총 {group.totalCount}개
-                      </div>
-                      <div style={{ color: "#6b7280", fontSize: 13, marginBottom: 6 }}>
-                        주문일: {dates} / 상품합계: {formatWon(group.totalPrice)}
-                      </div>
+                <label
+                  key={group.nickname}
+                  style={{
+                    ...combineGroupCheckCardStyle,
+                    borderColor: checked ? "#7c3aed" : "#e5e7eb",
+                    background: checked ? "#faf5ff" : "#fafafa",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleCombineGroup(group.nickname)}
+                    style={{ marginTop: 4 }}
+                  />
+
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 900, marginBottom: 6 }}>
+                      합배송{index + 1} · {group.nickname} · {group.rows.length}건 → {finalOrderNo}
                     </div>
 
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          group.rows.forEach((row) => updateSelected(row.order_id, true));
-                        }}
-                        style={smallOutlineButtonStyle}
-                      >
-                        이 묶음 전체체크
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          group.rows.forEach((row) => updateSelected(row.order_id, false));
-                        }}
-                        style={smallOutlineButtonStyle}
-                      >
-                        체크해제
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => buildCombineDraft(checkedRows)}
-                        style={purpleButtonStyle}
-                      >
-                        선택한 주문 합배송
-                      </button>
+                    <div style={{ color: "#6b7280", fontSize: 13, marginBottom: 6 }}>
+                      주문일: {dates} / 총 {group.totalCount}개 / 상품합계: {formatWon(group.totalPrice)}
                     </div>
+
+                    <div style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {orderNos.join(" + ")}
+                    </div>
+
+                    {uniqueTrackingNumbers.length ? (
+                      <div style={{ color: uniqueTrackingNumbers.length > 1 ? "#b45309" : "#6b7280", fontSize: 13, marginTop: 6 }}>
+                        운송장: {uniqueTrackingNumbers.join(" / ")}
+                        {uniqueTrackingNumbers.length > 1 ? " / 충돌 시 마지막 운송장 사용" : ""}
+                      </div>
+                    ) : null}
                   </div>
 
-                  <div style={combineRowsWrapStyle}>
-                    {group.rows.map((row) => {
-                      const s = shipping(row) || defaultShipping();
-
-                      return (
-                        <label key={row.order_id} style={combineRowCheckStyle}>
-                          <input
-                            type="checkbox"
-                            checked={row.selected}
-                            onChange={(event) =>
-                              updateSelected(row.order_id, event.target.checked)
-                            }
-                          />
-
-                          <span style={{ fontWeight: 800 }}>
-                            {displayOrderNo(row)}
-                          </span>
-
-                          <span>{row.first_order_date || ""}</span>
-
-                          <span>{s.tracking_number || "-"}</span>
-
-                          <span title={row.item_summary || ""} style={combineItemTextStyle}>
-                            {row.item_summary || ""}
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      buildCombineDraft(group.rows);
+                    }}
+                    style={purpleButtonStyle}
+                  >
+                    이 묶음 수정/합배송
+                  </button>
+                </label>
               );
             })}
           </div>
@@ -1373,41 +1333,14 @@ const combineCardStyle: CSSProperties = {
 };
 
 
-const selectedCombineCardStyle: CSSProperties = {
-  ...combineCardStyle,
-  border: "1px solid #c4b5fd",
-  background: "#faf5ff",
-};
-
-
-const combineCardBlockStyle: CSSProperties = {
+const combineGroupCheckCardStyle: CSSProperties = {
   border: "1px solid #e5e7eb",
   borderRadius: 12,
   padding: 14,
-  background: "#fafafa",
-};
-
-const combineRowsWrapStyle: CSSProperties = {
   display: "grid",
-  gap: 0,
-  marginTop: 12,
-  borderTop: "1px solid #e5e7eb",
-};
-
-const combineRowCheckStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "24px 160px 120px 160px minmax(320px, 1fr)",
-  gap: 8,
-  alignItems: "center",
-  padding: "8px 0",
-  borderBottom: "1px solid #e5e7eb",
-  fontSize: 13,
-};
-
-const combineItemTextStyle: CSSProperties = {
-  whiteSpace: "nowrap",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
+  gridTemplateColumns: "24px minmax(0, 1fr) auto",
+  alignItems: "flex-start",
+  gap: 12,
 };
 
 const smallOutlineButtonStyle: CSSProperties = {
