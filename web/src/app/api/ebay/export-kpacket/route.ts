@@ -118,6 +118,31 @@ function todayFileDate() {
   return `${yyyy}${mm}${dd}`;
 }
 
+function normalizePhone(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .replace(/^\+/, "")
+    .replace(/\s+/g, "-");
+}
+
+function makeExportData(exportData: Record<string, unknown>) {
+  return {
+    ...exportData,
+
+    "★상품구분": "Merchandise",
+    "★14전화번호": normalizePhone(exportData["★14전화번호"]),
+
+    생산지: "KR",
+
+    "사업자번호(숫자10자리)": "7764800598",
+    "수출화주이름 또는 상호(수출우편물 정보관세청 제공 동의시 필수)": "KTEMS",
+    "수출화주 주소(수출우편물 정보관세청 제공 동의시 필수)": "Daejeon, Korea",
+
+    "EMS : EEMS 프리미엄 : PK-Packet : K등기소형 :R": "K",
+    "EMS 비서류 : em,     EMS 서류 : ee, K-Packet : rl, 소형포장물 : re": "rl",
+  };
+}
+
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as ExportRequestBody;
@@ -164,7 +189,7 @@ export async function POST(req: Request) {
     const csvRows = [
       OUTPUT_HEADERS,
       ...orderedRows.map((row) => {
-        const exportData = row.export_data || {};
+        const exportData = makeExportData(row.export_data || {});
         return OUTPUT_HEADERS.map((header) => cellValue(exportData[header]));
       }),
     ];
