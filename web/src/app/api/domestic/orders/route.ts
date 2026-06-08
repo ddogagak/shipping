@@ -166,9 +166,7 @@ export async function PATCH(req: Request) {
           ? [order.domestic_shipping]
           : [];
 
-      const shippingDone = shippingRows.some(
-        (s: any) => s?.shipping_status === "done"
-      );
+      const shippingDone = shippingRows.some((s: any) => s?.shipping_status === "done");
 
       return order.order_status !== "done" && !shippingDone;
     });
