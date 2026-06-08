@@ -904,39 +904,92 @@ export default function DomesticOrdersPage() {
             <div>
               <h2 style={{ margin: 0 }}>합배송 제안</h2>
               <p style={{ margin: "6px 0 0", color: "#6b7280", fontSize: 13 }}>
-                배송완료가 아니고 닉네임이 같으며 주문일이 다른 주문만 제안됩니다.
+                닉네임이 같고 주문일이 다른 주문을 묶어서 보여줍니다. 필요한 주문만 체크한 뒤 합배송하세요.
               </p>
             </div>
             <strong>{combineCandidates.length}건</strong>
           </div>
 
-          <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
+          <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
             {combineCandidates.map((group) => {
               const dates = Array.from(
                 new Set(group.rows.map((row) => row.first_order_date || "날짜없음"))
               ).join(" / ");
 
+              const checkedRows = group.rows.filter((row) => row.selected);
+
               return (
-                <div key={group.nickname} style={combineCardStyle}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 900, marginBottom: 6 }}>
-                      {group.nickname} · {group.rows.length}건 · 총 {group.totalCount}개
+                <div key={group.nickname} style={combineCardBlockStyle}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 900, marginBottom: 6 }}>
+                        {group.nickname} · 제안 {group.rows.length}건 · 총 {group.totalCount}개
+                      </div>
+                      <div style={{ color: "#6b7280", fontSize: 13, marginBottom: 6 }}>
+                        주문일: {dates} / 상품합계: {formatWon(group.totalPrice)}
+                      </div>
                     </div>
-                    <div style={{ color: "#6b7280", fontSize: 13, marginBottom: 6 }}>
-                      주문일: {dates} / 상품합계: {formatWon(group.totalPrice)}
-                    </div>
-                    <div style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {group.rows.map((row) => displayOrderNo(row)).join(" + ")}
+
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          group.rows.forEach((row) => updateSelected(row.order_id, true));
+                        }}
+                        style={smallOutlineButtonStyle}
+                      >
+                        이 묶음 전체체크
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          group.rows.forEach((row) => updateSelected(row.order_id, false));
+                        }}
+                        style={smallOutlineButtonStyle}
+                      >
+                        체크해제
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => buildCombineDraft(checkedRows)}
+                        style={purpleButtonStyle}
+                      >
+                        선택한 주문 합배송
+                      </button>
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => buildCombineDraft(group.rows)}
-                    style={purpleButtonStyle}
-                  >
-                    합배송 확인
-                  </button>
+                  <div style={combineRowsWrapStyle}>
+                    {group.rows.map((row) => {
+                      const s = shipping(row) || defaultShipping();
+
+                      return (
+                        <label key={row.order_id} style={combineRowCheckStyle}>
+                          <input
+                            type="checkbox"
+                            checked={row.selected}
+                            onChange={(event) =>
+                              updateSelected(row.order_id, event.target.checked)
+                            }
+                          />
+
+                          <span style={{ fontWeight: 800 }}>
+                            {displayOrderNo(row)}
+                          </span>
+
+                          <span>{row.first_order_date || ""}</span>
+
+                          <span>{s.tracking_number || "-"}</span>
+
+                          <span title={row.item_summary || ""} style={combineItemTextStyle}>
+                            {row.item_summary || ""}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
               );
             })}
@@ -1324,6 +1377,47 @@ const selectedCombineCardStyle: CSSProperties = {
   ...combineCardStyle,
   border: "1px solid #c4b5fd",
   background: "#faf5ff",
+};
+
+
+const combineCardBlockStyle: CSSProperties = {
+  border: "1px solid #e5e7eb",
+  borderRadius: 12,
+  padding: 14,
+  background: "#fafafa",
+};
+
+const combineRowsWrapStyle: CSSProperties = {
+  display: "grid",
+  gap: 0,
+  marginTop: 12,
+  borderTop: "1px solid #e5e7eb",
+};
+
+const combineRowCheckStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "24px 160px 120px 160px minmax(320px, 1fr)",
+  gap: 8,
+  alignItems: "center",
+  padding: "8px 0",
+  borderBottom: "1px solid #e5e7eb",
+  fontSize: 13,
+};
+
+const combineItemTextStyle: CSSProperties = {
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
+
+const smallOutlineButtonStyle: CSSProperties = {
+  border: "1px solid #d1d5db",
+  borderRadius: 10,
+  padding: "10px 12px",
+  background: "#fff",
+  color: "#111827",
+  fontWeight: 800,
+  cursor: "pointer",
 };
 
 const warningBoxStyle: CSSProperties = {
