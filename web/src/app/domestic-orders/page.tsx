@@ -38,6 +38,7 @@ type CombineDraft = {
   orderIds: string[];
   rows: Row[];
   customer_order_no: string;
+  customer_order_no_base: string;
   first_order_date: string;
   order_count: string;
   item_summary: string;
@@ -45,6 +46,8 @@ type CombineDraft = {
   memo: string;
   shipping_type: string;
   tracking_number: string;
+  trackingConflict: boolean;
+  trackingNumbers: string[];
 };
 
 type SortKey =
@@ -113,6 +116,16 @@ function shipping(row: DomesticOrder): ShippingInfo | null {
   return row.domestic_shipping || null;
 }
 
+function defaultShipping(): ShippingInfo {
+  return {
+    carrier: "우체국택배",
+    shipping_type: "일반택배",
+    tracking_number: null,
+    shipping_status: "start",
+    excel_exported_at: null,
+  };
+}
+
 function label(options: { value: string; label: string }[], value?: string | null) {
   return options.find((option) => option.value === value)?.label || value || "-";
 }
@@ -134,6 +147,19 @@ function displayOrderNo(row: DomesticOrder) {
 function contentName(row: DomesticOrder) {
   const prefix = row.platform === "bunjang" ? "스와숍" : "도파민베이커리";
   return `${prefix}-${row.nickname || ""}`;
+}
+
+function baseOrderNo(value: string) {
+  return String(value || "").trim().replace(/-C\d+$/i, "");
+}
+
+function combineCount(value: string) {
+  const match = String(value || "").trim().match(/-C(\d+)$/i);
+  return match ? Number(match[1] || 1) : 1;
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean)));
 }
 
 function toExcelRow(row: DomesticOrder) {
@@ -159,32 +185,19 @@ function sortValue(row: Row, key: SortKey): string | number {
   const s = shipping(row);
 
   switch (key) {
-    case "platform":
-      return row.platform || "";
-    case "order_id":
-      return displayOrderNo(row);
-    case "nickname":
-      return row.nickname || "";
-    case "order_count":
-      return Number(row.order_count || 0);
-    case "first_order_date":
-      return row.first_order_date || "";
-    case "memo":
-      return row.memo || "";
-    case "order_status":
-      return row.order_status || "";
-    case "shipping_status":
-      return s?.shipping_status || "start";
-    case "shipping_type":
-      return s?.shipping_type || "일반택배";
-    case "tracking_number":
-      return s?.tracking_number || "";
-    case "item_summary":
-      return row.item_summary || "";
-    case "item_total_price":
-      return Number(row.item_total_price || 0);
-    default:
-      return "";
+    case "platform": return row.platform || "";
+    case "order_id": return displayOrderNo(row);
+    case "nickname": return row.nickname || "";
+    case "order_count": return Number(row.order_count || 0);
+    case "first_order_date": return row.first_order_date || "";
+    case "memo": return row.memo || "";
+    case "order_status": return row.order_status || "";
+    case "shipping_status": return s?.shipping_status || "start";
+    case "shipping_type": return s?.shipping_type || "일반택배";
+    case "tracking_number": return s?.tracking_number || "";
+    case "item_summary": return row.item_summary || "";
+    case "item_total_price": return Number(row.item_total_price || 0);
+    default: return "";
   }
 }
 
@@ -200,30 +213,11 @@ function compareRows(a: Row, b: Row, key: SortKey, direction: SortDirection) {
   return String(aValue).localeCompare(String(bValue), "ko") * factor;
 }
 
-function shortOrderNo(value?: string | null) {
-  const clean = String(value || "").trim();
-  if (!clean) return "";
-  return clean.length > 5 ? clean.slice(-5) : clean;
-}
-
-function uniqueStrings(values: Array<string | null | undefined>) {
-  return Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean)));
-}
-
-function defaultShipping(): ShippingInfo {
-  return {
-    carrier: "우체국택배",
-    shipping_type: "일반택배",
-    tracking_number: null,
-    shipping_status: "start",
-    excel_exported_at: null,
-  };
-}
-
 export default function DomesticOrdersPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [savingRowId, setSavingRowId] = useState<string | null>(null);
 
   const [platforms, setPlatforms] = useState<string[]>([]);
   const [orderStatuses, setOrderStatuses] = useState<string[]>(["accepted", "checked", "packaged"]);
@@ -296,9 +290,7 @@ export default function DomesticOrdersPage() {
             row.memo,
             s?.tracking_number,
             shippingType,
-          ]
-            .join(" ")
-            .toLowerCase();
+          ].join(" ").toLowerCase();
 
           if (!text.includes(q.trim().toLowerCase())) return false;
         }
@@ -308,8 +300,8 @@ export default function DomesticOrdersPage() {
       .sort((a, b) => compareRows(a, b, sortKey, sortDirection));
   }, [rows, platforms, orderStatuses, shippingStatuses, shippingTypes, q, sortKey, sortDirection]);
 
-  const selectedIds = rows.filter((row) => row.selected).map((row) => row.order_id);
   const selectedRows = rows.filter((row) => row.selected);
+  const selectedIds = selectedRows.map((row) => row.order_id);
   const allFilteredSelected = filteredRows.length > 0 && filteredRows.every((row) => row.selected);
 
   const combineCandidates = useMemo(() => {
@@ -335,8 +327,16 @@ export default function DomesticOrdersPage() {
             String(b.first_order_date || b.created_at || "")
           )
         );
+
         const dateSet = new Set(sorted.map((row) => row.first_order_date || "날짜없음"));
-        return { nickname, rows: sorted, dateCount: dateSet.size };
+
+        return {
+          nickname,
+          rows: sorted,
+          dateCount: dateSet.size,
+          totalCount: sorted.reduce((sum, row) => sum + Number(row.order_count || 1), 0),
+          totalPrice: sorted.reduce((sum, row) => sum + Number(row.item_total_price || 0), 0),
+        };
       })
       .filter((group) => group.rows.length >= 2 && group.dateCount >= 2);
   }, [rows]);
@@ -361,7 +361,9 @@ export default function DomesticOrdersPage() {
     setRows((prev) =>
       prev.map((row) => {
         if (row.order_id !== orderId) return row;
+
         const current = shipping(row) || defaultShipping();
+
         return {
           ...row,
           domestic_shipping: {
@@ -373,8 +375,26 @@ export default function DomesticOrdersPage() {
     );
   }
 
+  function makeRowWithPatch(
+    row: Row,
+    patchRow: Partial<Row>,
+    patchShipping?: Partial<ShippingInfo>
+  ): Row {
+    const currentShipping = shipping(row) || defaultShipping();
+
+    return {
+      ...row,
+      ...patchRow,
+      domestic_shipping: {
+        ...currentShipping,
+        ...(patchShipping || {}),
+      },
+    };
+  }
+
   function toggleAllFiltered(checked: boolean) {
     const ids = new Set(filteredRows.map((row) => row.order_id));
+
     setRows((prev) =>
       prev.map((row) => (ids.has(row.order_id) ? { ...row, selected: checked } : row))
     );
@@ -388,6 +408,115 @@ export default function DomesticOrdersPage() {
 
     setSortKey(key);
     setSortDirection("asc");
+  }
+
+  function buildCombineDraft(targetRows: Row[]) {
+    if (targetRows.length < 2) {
+      alert("합배송할 주문을 2건 이상 체크하거나 제안에서 선택해줘.");
+      return;
+    }
+
+    const sorted = [...targetRows].sort((a, b) =>
+      String(a.first_order_date || a.created_at || "").localeCompare(
+        String(b.first_order_date || b.created_at || "")
+      )
+    );
+
+    const orderNos = sorted.map((row) => displayOrderNo(row));
+    const baseNo = baseOrderNo(orderNos[0] || sorted[0].order_id);
+    const count = orderNos.reduce((sum, no) => sum + combineCount(no), 0);
+    const finalOrderNo = `${baseNo}-C${count}`;
+
+    const combinedDates = uniqueStrings(
+      sorted.flatMap((row) =>
+        Array.isArray(row.source_order_dates) && row.source_order_dates.length
+          ? row.source_order_dates
+          : [row.first_order_date]
+      )
+    ).sort();
+
+    const trackingNumbers = sorted
+      .map((row) => shipping(row)?.tracking_number)
+      .map((v) => String(v || "").trim())
+      .filter(Boolean);
+
+    const uniqueTrackingNumbers = Array.from(new Set(trackingNumbers));
+    const lastTracking = trackingNumbers[trackingNumbers.length - 1] || "";
+    const shippingTypes = uniqueStrings(sorted.map((row) => shipping(row)?.shipping_type));
+    const trackingConflict = uniqueTrackingNumbers.length > 1;
+
+    setCombineDraft({
+      orderIds: sorted.map((row) => row.order_id),
+      rows: sorted,
+      customer_order_no: finalOrderNo,
+      customer_order_no_base: baseNo,
+      first_order_date: combinedDates[0] || sorted[0]?.first_order_date || "",
+      order_count: String(sorted.reduce((sum, row) => sum + Number(row.order_count || 1), 0)),
+      item_summary: sorted
+        .map((row) => String(row.item_summary || "").trim())
+        .filter(Boolean)
+        .join(" / "),
+      item_total_price: String(sorted.reduce((sum, row) => sum + Number(row.item_total_price || 0), 0)),
+      memo: [
+        String(sorted[0]?.memo || "").trim(),
+        `합배송: ${orderNos.join(" + ")}`,
+        trackingConflict
+          ? `운송장 충돌: ${uniqueTrackingNumbers.join(" / ")} → 마지막 운송장 사용`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      shipping_type: shippingTypes[0] || "일반택배",
+      tracking_number: lastTracking,
+      trackingConflict,
+      trackingNumbers: uniqueTrackingNumbers,
+    });
+  }
+
+  function updateCombineDraft(patch: Partial<CombineDraft>) {
+    setCombineDraft((prev) => (prev ? { ...prev, ...patch } : prev));
+  }
+
+  async function submitCombineDraft() {
+    if (!combineDraft) return;
+
+    if (combineDraft.orderIds.length < 2) {
+      alert("합배송할 주문이 2건 이상이어야 해.");
+      return;
+    }
+
+    if (!confirm(`${combineDraft.orderIds.length}건을 합배송 처리할까?`)) return;
+
+    const res = await fetch("/api/domestic/orders", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        order_ids: combineDraft.orderIds,
+        action: "combine_shipping",
+        combined: {
+          customer_order_no: combineDraft.customer_order_no,
+          customer_order_no_base: combineDraft.customer_order_no_base,
+          first_order_date: combineDraft.first_order_date,
+          order_count: Number(combineDraft.order_count || 0),
+          item_summary: combineDraft.item_summary,
+          item_total_price: Number(combineDraft.item_total_price || 0),
+          memo: combineDraft.memo,
+          shipping_type: combineDraft.shipping_type,
+          tracking_number: combineDraft.tracking_number,
+        },
+      }),
+    });
+
+    const json = await res.json();
+
+    if (!res.ok) {
+      alert(json.detail || json.error || "합배송 처리 실패");
+      return;
+    }
+
+    alert(json.message || "합배송 처리 완료");
+    setCombineDraft(null);
+    await load();
   }
 
   async function patch(action: string) {
@@ -412,99 +541,10 @@ export default function DomesticOrdersPage() {
     await load();
   }
 
-  function openCombineDraft(groupRows: Row[]) {
-    if (groupRows.length < 2) {
-      alert("합배송할 주문이 2건 이상이어야 해.");
-      return;
-    }
-
-    const sorted = [...groupRows].sort((a, b) =>
-      String(a.first_order_date || a.created_at || "").localeCompare(
-        String(b.first_order_date || b.created_at || "")
-      )
-    );
-
-    const trackingNumbers = uniqueStrings(sorted.map((row) => shipping(row)?.tracking_number));
-    const shippingTypes = uniqueStrings(sorted.map((row) => shipping(row)?.shipping_type));
-    const combinedDates = uniqueStrings(
-      sorted.flatMap((row) =>
-        Array.isArray(row.source_order_dates) && row.source_order_dates.length
-          ? row.source_order_dates
-          : [row.first_order_date]
-      )
-    ).sort();
-
-    setCombineDraft({
-      orderIds: sorted.map((row) => row.order_id),
-      rows: sorted,
-      customer_order_no: sorted
-        .map((row) => shortOrderNo(row.customer_order_no || row.order_id))
-        .filter(Boolean)
-        .join("-"),
-      first_order_date: combinedDates[0] || sorted[0]?.first_order_date || "",
-      order_count: String(sorted.reduce((sum, row) => sum + Number(row.order_count || 1), 0)),
-      item_summary: sorted
-        .map((row) => String(row.item_summary || "").trim())
-        .filter(Boolean)
-        .join(" / "),
-      item_total_price: String(sorted.reduce((sum, row) => sum + Number(row.item_total_price || 0), 0)),
-      memo: [
-        String(sorted[0]?.memo || "").trim(),
-        `합배송: ${sorted.map((row) => row.customer_order_no || row.order_id).join(" + ")}`,
-      ]
-        .filter(Boolean)
-        .join("\n"),
-      shipping_type: shippingTypes[0] || "일반택배",
-      tracking_number: trackingNumbers[0] || "",
-    });
-  }
-
-  async function submitCombineDraft() {
-    if (!combineDraft) return;
-    if (combineDraft.orderIds.length < 2) {
-      alert("합배송할 주문이 2건 이상이어야 해.");
-      return;
-    }
-
-    if (!confirm(`확인한 ${combineDraft.orderIds.length}건을 합배송으로 저장할까?`)) return;
-
-    const res = await fetch("/api/domestic/orders", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        order_ids: combineDraft.orderIds,
-        action: "combine_shipping",
-        combined: {
-          customer_order_no: combineDraft.customer_order_no,
-          first_order_date: combineDraft.first_order_date,
-          order_count: Number(combineDraft.order_count || 0),
-          item_summary: combineDraft.item_summary,
-          item_total_price: Number(combineDraft.item_total_price || 0),
-          memo: combineDraft.memo,
-          shipping_type: combineDraft.shipping_type,
-          tracking_number: combineDraft.tracking_number,
-        },
-      }),
-    });
-
-    const json = await res.json();
-
-    if (!res.ok) {
-      alert(json.detail || json.error || "합배송 처리 실패");
-      return;
-    }
-
-    alert(json.message || "합배송 처리 완료");
-    setCombineDraft(null);
-    await load();
-  }
-
-  function updateCombineDraft(patch: Partial<CombineDraft>) {
-    setCombineDraft((prev) => (prev ? { ...prev, ...patch } : prev));
-  }
-
   async function saveRow(row: Row) {
     const s = shipping(row) || defaultShipping();
+
+    setSavingRowId(row.order_id);
 
     const res = await fetch("/api/domestic/orders", {
       method: "PATCH",
@@ -516,17 +556,39 @@ export default function DomesticOrdersPage() {
         order_status: row.order_status || "accepted",
         shipping_status: s.shipping_status || "start",
         shipping_type: s.shipping_type || "일반택배",
+        tracking_number: s.tracking_number || "",
       }),
     });
 
     const json = await res.json();
+
+    setSavingRowId(null);
 
     if (!res.ok) {
       alert(json.detail || json.error || "저장 실패");
       return;
     }
 
+    setMessage("저장 완료");
     await load();
+  }
+
+  async function saveRowPatch(
+    row: Row,
+    patchRow: Partial<Row>,
+    patchShipping?: Partial<ShippingInfo>
+  ) {
+    const nextRow = makeRowWithPatch(row, patchRow, patchShipping);
+
+    if (patchRow.order_status) {
+      updateRowValue(row.order_id, { order_status: patchRow.order_status });
+    }
+
+    if (patchShipping) {
+      updateShippingValue(row.order_id, patchShipping);
+    }
+
+    await saveRow(nextRow);
   }
 
   async function deleteSelected() {
@@ -597,10 +659,7 @@ export default function DomesticOrdersPage() {
 
   function exportTrackingExcel() {
     const data = filteredRows
-      .filter((row) => {
-        const s = shipping(row);
-        return s?.tracking_number;
-      })
+      .filter((row) => shipping(row)?.tracking_number)
       .map((row) => {
         const s = shipping(row);
 
@@ -635,7 +694,6 @@ export default function DomesticOrdersPage() {
 
     XLSX.writeFile(workbook, `domestic_tracking_${stamp}.xlsx`);
   }
-
 
   return (
     <main style={{ maxWidth: 1600, margin: "0 auto", padding: 24 }}>
@@ -680,18 +738,21 @@ export default function DomesticOrdersPage() {
           selected={platforms}
           onToggle={(value) => setPlatforms((prev) => toggleList(prev, value))}
         />
+
         <FilterGroup
           title="주문상태"
           options={ORDER_STATUS_OPTIONS}
           selected={orderStatuses}
           onToggle={(value) => setOrderStatuses((prev) => toggleList(prev, value))}
         />
+
         <FilterGroup
           title="배송상태"
           options={SHIPPING_STATUS_OPTIONS}
           selected={shippingStatuses}
           onToggle={(value) => setShippingStatuses((prev) => toggleList(prev, value))}
         />
+
         <FilterGroup
           title="배송수단"
           options={SHIPPING_TYPE_OPTIONS}
@@ -706,19 +767,56 @@ export default function DomesticOrdersPage() {
             placeholder="고객주문번호, 닉네임, 아이템, 메모, 운송장 검색"
             style={searchInputStyle}
           />
+
           <button type="button" onClick={() => void load()} style={blackButtonStyle}>
             새로고침
           </button>
         </div>
       </section>
 
+      <section style={{ ...cardStyle, marginTop: 16 }}>
+        <div style={actionBarStyle}>
+          <div style={{ fontWeight: 800 }}>선택 {selectedIds.length}건</div>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" onClick={() => buildCombineDraft(selectedRows)} style={purpleButtonStyle}>
+              선택 합배송
+            </button>
+
+            <button type="button" onClick={exportExcel} style={blackButtonStyle}>
+              선택 {selectedIds.length}건 엑셀 추출
+            </button>
+
+            <button type="button" onClick={exportTrackingExcel} style={blueButtonStyle}>
+              운송장다운로드
+            </button>
+
+            <button type="button" onClick={deleteSelected} style={redButtonStyle}>
+              선택 {selectedIds.length}건 삭제
+            </button>
+
+            <button type="button" onClick={() => patch("packaged")} style={orangeButtonStyle}>
+              포장완료 처리
+            </button>
+
+            <button type="button" onClick={() => patch("registered")} style={purpleButtonStyle}>
+              운송장등록 처리
+            </button>
+
+            <button type="button" onClick={() => patch("done")} style={greenButtonStyle}>
+              배송완료 처리
+            </button>
+          </div>
+        </div>
+      </section>
+
       {combineCandidates.length ? (
         <section style={{ ...cardStyle, marginTop: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
             <div>
               <h2 style={{ margin: 0 }}>합배송 제안</h2>
               <p style={{ margin: "6px 0 0", color: "#6b7280", fontSize: 13 }}>
-                배송완료가 아니고, 닉네임이 같고, 주문일이 다른 주문만 표시됩니다.
+                배송완료가 아니고 닉네임이 같으며 주문일이 다른 주문만 제안됩니다.
               </p>
             </div>
             <strong>{combineCandidates.length}건</strong>
@@ -726,21 +824,18 @@ export default function DomesticOrdersPage() {
 
           <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
             {combineCandidates.map((group) => {
-              const orderIds = group.rows.map((row) => row.order_id);
               const dates = Array.from(
                 new Set(group.rows.map((row) => row.first_order_date || "날짜없음"))
               ).join(" / ");
-              const totalCount = group.rows.reduce((sum, row) => sum + Number(row.order_count || 1), 0);
-              const totalPrice = group.rows.reduce((sum, row) => sum + Number(row.item_total_price || 0), 0);
 
               return (
                 <div key={group.nickname} style={combineCardStyle}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 900, marginBottom: 6 }}>
-                      {group.nickname} · {group.rows.length}건 · 총 {totalCount}개
+                      {group.nickname} · {group.rows.length}건 · 총 {group.totalCount}개
                     </div>
                     <div style={{ color: "#6b7280", fontSize: 13, marginBottom: 6 }}>
-                      주문일: {dates} / 상품합계: {formatWon(totalPrice)}
+                      주문일: {dates} / 상품합계: {formatWon(group.totalPrice)}
                     </div>
                     <div style={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                       {group.rows.map((row) => displayOrderNo(row)).join(" + ")}
@@ -749,7 +844,7 @@ export default function DomesticOrdersPage() {
 
                   <button
                     type="button"
-                    onClick={() => openCombineDraft(group.rows)}
+                    onClick={() => buildCombineDraft(group.rows)}
                     style={purpleButtonStyle}
                   >
                     합배송 확인
@@ -763,70 +858,24 @@ export default function DomesticOrdersPage() {
 
       {combineDraft ? (
         <section style={{ ...cardStyle, marginTop: 16, borderColor: "#7c3aed" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
             <div>
               <h2 style={{ margin: 0 }}>합배송 확인 / 수정</h2>
               <p style={{ margin: "6px 0 0", color: "#6b7280", fontSize: 13 }}>
-                저장 전 모든 값을 확인하고 수정할 수 있습니다. 운송장은 기존 값이 있으면 자동 반영되고, 여러 개면 아래에서 선택하세요.
+                저장 전 주문번호, 주문일자, 아이템, 운송장번호를 수정할 수 있습니다.
               </p>
             </div>
+
             <button type="button" onClick={() => setCombineDraft(null)} style={redButtonStyle}>
               닫기
             </button>
           </div>
 
-          <div style={{ overflowX: "auto", marginTop: 14 }}>
-            <table style={{ width: "100%", minWidth: 1100, borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ background: "#f9fafb" }}>
-                  <th style={thStyle}>주문번호</th>
-                  <th style={thStyle}>주문일</th>
-                  <th style={thStyle}>닉네임</th>
-                  <th style={thStyle}>주문건수</th>
-                  <th style={thStyle}>배송상태</th>
-                  <th style={thStyle}>배송수단</th>
-                  <th style={thStyle}>운송장</th>
-                  <th style={thStyle}>아이템</th>
-                  <th style={thStyle}>상품합계</th>
-                </tr>
-              </thead>
-              <tbody>
-                {combineDraft.rows.map((row) => {
-                  const s = shipping(row) || defaultShipping();
-                  return (
-                    <tr key={row.order_id}>
-                      <td style={tdStyle}>{displayOrderNo(row)}</td>
-                      <td style={tdStyle}>{row.first_order_date || ""}</td>
-                      <td style={tdStyle}>{row.nickname || ""}</td>
-                      <td style={tdStyle}>{row.order_count || 1}</td>
-                      <td style={tdStyle}>{label(SHIPPING_STATUS_OPTIONS, s.shipping_status || "start")}</td>
-                      <td style={tdStyle}>{s.shipping_type || "일반택배"}</td>
-                      <td style={tdStyle}>{s.tracking_number || ""}</td>
-                      <td style={{ ...tdStyle, minWidth: 300 }}>{row.item_summary || ""}</td>
-                      <td style={tdStyle}>{formatWon(row.item_total_price)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          {uniqueStrings(combineDraft.rows.map((row) => shipping(row)?.tracking_number)).length > 1 ? (
-            <div style={{ marginTop: 14, padding: 12, border: "1px solid #ddd6fe", borderRadius: 12, background: "#faf5ff" }}>
-              <div style={{ fontWeight: 900, marginBottom: 8 }}>기존 운송장이 여러 개 있습니다. 사용할 운송장을 선택하세요.</div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {uniqueStrings(combineDraft.rows.map((row) => shipping(row)?.tracking_number)).map((tracking) => (
-                  <label key={tracking} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 800 }}>
-                    <input
-                      type="radio"
-                      name="combineTracking"
-                      checked={combineDraft.tracking_number === tracking}
-                      onChange={() => updateCombineDraft({ tracking_number: tracking })}
-                    />
-                    {tracking}
-                  </label>
-                ))}
-              </div>
+          {combineDraft.trackingConflict ? (
+            <div style={warningBoxStyle}>
+              운송장번호가 여러 개 있습니다. 기본값은 맨 마지막 운송장번호입니다.
+              <br />
+              {combineDraft.trackingNumbers.join(" / ")}
             </div>
           ) : null}
 
@@ -836,6 +885,15 @@ export default function DomesticOrdersPage() {
               <input
                 value={combineDraft.customer_order_no}
                 onChange={(event) => updateCombineDraft({ customer_order_no: event.target.value })}
+                style={wideInputStyle}
+              />
+            </label>
+
+            <label style={formLabelStyle}>
+              주문번호 기준값
+              <input
+                value={combineDraft.customer_order_no_base}
+                onChange={(event) => updateCombineDraft({ customer_order_no_base: event.target.value })}
                 style={wideInputStyle}
               />
             </label>
@@ -888,7 +946,6 @@ export default function DomesticOrdersPage() {
                 value={combineDraft.tracking_number}
                 onChange={(event) => updateCombineDraft({ tracking_number: event.target.value })}
                 style={wideInputStyle}
-                placeholder="기존 운송장이 없으면 비워둬도 됨"
               />
             </label>
           </div>
@@ -911,10 +968,11 @@ export default function DomesticOrdersPage() {
             />
           </label>
 
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
             <button type="button" onClick={() => setCombineDraft(null)} style={redButtonStyle}>
               취소
             </button>
+
             <button type="button" onClick={submitCombineDraft} style={purpleButtonStyle}>
               확인 후 합배송 저장
             </button>
@@ -923,31 +981,6 @@ export default function DomesticOrdersPage() {
       ) : null}
 
       <section style={{ ...cardStyle, marginTop: 16 }}>
-        <div style={actionBarStyle}>
-          <div style={{ fontWeight: 800 }}>선택 {selectedIds.length}건</div>
-
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button type="button" onClick={exportExcel} style={blackButtonStyle}>
-              선택 {selectedIds.length}건 엑셀 추출
-            </button>
-            <button type="button" onClick={exportTrackingExcel} style={blueButtonStyle}>
-              운송장다운로드
-            </button>
-            <button type="button" onClick={deleteSelected} style={redButtonStyle}>
-              선택 {selectedIds.length}건 삭제
-            </button>
-            <button type="button" onClick={() => patch("packaged")} style={orangeButtonStyle}>
-              포장완료 처리
-            </button>
-            <button type="button" onClick={() => patch("registered")} style={purpleButtonStyle}>
-              운송장등록 처리
-            </button>
-            <button type="button" onClick={() => patch("done")} style={greenButtonStyle}>
-              배송완료 처리
-            </button>
-          </div>
-        </div>
-
         {loading ? (
           <p>불러오는 중...</p>
         ) : (
@@ -969,6 +1002,7 @@ export default function DomesticOrdersPage() {
                       onChange={(event) => toggleAllFiltered(event.target.checked)}
                     />
                   </th>
+
                   <SortableTh label="플랫폼" sortKeyValue="platform" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   <SortableTh label="고객주문번호" sortKeyValue="order_id" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   <SortableTh label="닉네임" sortKeyValue="nickname" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
@@ -984,6 +1018,7 @@ export default function DomesticOrdersPage() {
                   <SortableTh label="상품합계" sortKeyValue="item_total_price" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                 </tr>
               </thead>
+
               <tbody>
                 {filteredRows.map((row) => {
                   const s = shipping(row) || defaultShipping();
@@ -997,6 +1032,7 @@ export default function DomesticOrdersPage() {
                           onChange={(event) => updateSelected(row.order_id, event.target.checked)}
                         />
                       </td>
+
                       <td style={tdStyle}>{label(PLATFORM_OPTIONS, row.platform)}</td>
                       <td style={tdStyle}>{displayOrderNo(row)}</td>
                       <td style={tdStyle}>{row.nickname || ""}</td>
@@ -1012,8 +1048,13 @@ export default function DomesticOrdersPage() {
                       </td>
 
                       <td style={tdStyle}>
-                        <button type="button" onClick={() => saveRow(row)} style={smallSaveButtonStyle}>
-                          저장
+                        <button
+                          type="button"
+                          onClick={() => saveRow(row)}
+                          style={smallSaveButtonStyle}
+                          disabled={savingRowId === row.order_id}
+                        >
+                          {savingRowId === row.order_id ? "저장중" : "저장"}
                         </button>
                       </td>
 
@@ -1021,7 +1062,7 @@ export default function DomesticOrdersPage() {
                         <select
                           value={row.order_status || "accepted"}
                           onChange={(event) =>
-                            updateRowValue(row.order_id, { order_status: event.target.value })
+                            saveRowPatch(row, { order_status: event.target.value })
                           }
                           style={selectStyle}
                         >
@@ -1037,7 +1078,7 @@ export default function DomesticOrdersPage() {
                         <select
                           value={s.shipping_status || "start"}
                           onChange={(event) =>
-                            updateShippingValue(row.order_id, { shipping_status: event.target.value })
+                            saveRowPatch(row, {}, { shipping_status: event.target.value })
                           }
                           style={selectStyle}
                         >
@@ -1053,7 +1094,7 @@ export default function DomesticOrdersPage() {
                         <select
                           value={s.shipping_type || "일반택배"}
                           onChange={(event) =>
-                            updateShippingValue(row.order_id, { shipping_type: event.target.value })
+                            saveRowPatch(row, {}, { shipping_type: event.target.value })
                           }
                           style={selectStyle}
                         >
@@ -1065,7 +1106,18 @@ export default function DomesticOrdersPage() {
                         </select>
                       </td>
 
-                      <td style={tdStyle}>{s.tracking_number || ""}</td>
+                      <td style={tdStyle}>
+                        <input
+                          value={s.tracking_number || ""}
+                          onChange={(event) =>
+                            updateShippingValue(row.order_id, {
+                              tracking_number: event.target.value,
+                            })
+                          }
+                          style={trackingInputStyle}
+                          placeholder="운송장번호"
+                        />
+                      </td>
 
                       <td
                         style={{
@@ -1179,6 +1231,16 @@ const combineCardStyle: CSSProperties = {
   background: "#fafafa",
 };
 
+const warningBoxStyle: CSSProperties = {
+  marginTop: 14,
+  padding: 12,
+  borderRadius: 12,
+  border: "1px solid #f59e0b",
+  background: "#fffbeb",
+  color: "#92400e",
+  fontWeight: 800,
+};
+
 const topHeaderStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -1254,6 +1316,13 @@ const smallSaveButtonStyle: CSSProperties = {
 
 const memoInputStyle: CSSProperties = {
   width: 220,
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  padding: "6px 8px",
+};
+
+const trackingInputStyle: CSSProperties = {
+  width: 150,
   border: "1px solid #d1d5db",
   borderRadius: 8,
   padding: "6px 8px",
