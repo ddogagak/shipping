@@ -15,6 +15,30 @@ function cleanText(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function toAsciiText(value: unknown) {
+  return cleanText(value)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ß/g, "ss")
+    .replace(/ẞ/g, "SS")
+    .replace(/æ/g, "ae")
+    .replace(/Æ/g, "AE")
+    .replace(/œ/g, "oe")
+    .replace(/Œ/g, "OE")
+    .replace(/ø/g, "o")
+    .replace(/Ø/g, "O")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .replace(/ł/g, "l")
+    .replace(/Ł/g, "L");
+}
+
+function normalizePhone(value: unknown) {
+  return cleanText(value)
+    .replace(/^\+/, "")
+    .replace(/\s+/g, "-");
+}
+
 function normalizeUsername(value: unknown) {
   return cleanText(value).toLowerCase();
 }
@@ -34,6 +58,87 @@ function duplicateKey(username: unknown, orderNumber: unknown) {
 function numberValue(value: unknown) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+type ProductInfo = {
+  content: string;
+  hsCode: string;
+  grossWeight: string;
+  netWeight: string;
+  width: string;
+  length: string;
+  height: string;
+};
+
+function inferProductInfo(order: any): ProductInfo {
+  const rawText = [
+    order.item_summary,
+    order.item_list,
+    order.item_title,
+    order.title,
+    ...(Array.isArray(order.items)
+      ? order.items.flatMap((item: any) => [
+          item.item_title,
+          item.option_text,
+          item.title,
+          item.name,
+        ])
+      : []),
+  ]
+    .map((value) => String(value ?? "").toLowerCase())
+    .join(" ");
+
+  const hasPlush =
+    rawText.includes("plush") ||
+    rawText.includes("doll") ||
+    rawText.includes("ぬい") ||
+    rawText.includes("인형");
+
+  const hasAccessory =
+    rawText.includes("keyring") ||
+    rawText.includes("key ring") ||
+    rawText.includes("keychain") ||
+    rawText.includes("acrylic key") ||
+    rawText.includes("acrylic stand") ||
+    rawText.includes("acrylic") ||
+    rawText.includes("키링") ||
+    rawText.includes("악세사리") ||
+    rawText.includes("アクリル") ||
+    rawText.includes("キーホルダー");
+
+  if (hasPlush) {
+    return {
+      content: "plush doll toy",
+      hsCode: "9503003411",
+      grossWeight: "100",
+      netWeight: "100",
+      width: "30",
+      length: "20",
+      height: "8",
+    };
+  }
+
+  if (hasAccessory) {
+    return {
+      content: "keyring",
+      hsCode: "8517709000",
+      grossWeight: "100",
+      netWeight: "100",
+      width: "30",
+      length: "20",
+      height: "8",
+    };
+  }
+
+  return {
+    content: "photocard",
+    hsCode: "4909000000",
+    grossWeight: "100",
+    netWeight: "15",
+    width: "25",
+    length: "20",
+    height: "1",
+  };
 }
 
 const EGS_COUNTRIES = new Set(["US", "HU"]);
@@ -115,35 +220,40 @@ function makeExportData(order: any) {
   const quantity = numberValue(order.quantity_total) || 1;
   const price = numberValue(order.export_price) || numberValue(order.subtotal) || 15;
   const countryName = countryNameFromCode(countryCode);
+  const productInfo = inferProductInfo(order);
 
   return {
-    "★상품구분": "K-Packet",
-    "★수취인명": cleanText(order.recipient_name),
+    "★상품구분": "Merchandise",
+    "★수취인명": toAsciiText(order.recipient_name),
     "수취인EMAIL": cleanText(order.buyer_email),
-    "★14전화번호": cleanText(order.phone),
+    "★14전화번호": normalizePhone(order.phone),
     "★16국가코드": countryCode,
     "★16국가명": countryName,
     "★15우편번호": cleanText(order.postal_code),
-    "★13상세주소": address,
-    "★12시/군/구": cleanText(order.city),
-    "★11주/도/시": cleanText(order.state) || cleanText(order.city),
-    "★총중량": "100",
-    "★내용품": "photocard",
+    "★13상세주소": toAsciiText(address),
+    "★12시/군/구": toAsciiText(order.city),
+    "★11주/도/시": toAsciiText(order.state) || toAsciiText(order.city),
+    "★총중량": productInfo.grossWeight,
+    "★내용품": productInfo.content,
     "★개수": quantity,
-    "★순중량(g)[ = 품목 1종의 개당중량 * 개수 ](수출우편물 정보관세청 제공 동의시 필수)": "15",
+    "★순중량(g)[ = 품목 1종의 개당중량 * 개수 ](수출우편물 정보관세청 제공 동의시 필수)": productInfo.netWeight,
     "★가격": price,
     "단위": "USD",
-    "HSCODE(숫자만 10자리)": "4909000000",
-    "EMS : EEMS 프리미엄 : PK-Packet : K등기소형 :R": "R",
+    "HSCODE(숫자만 10자리)": productInfo.hsCode,
+    "생산지": "KR",
+    "사업자번호(숫자10자리)": "7764800598",
+    "수출화주이름 또는 상호(수출우편물 정보관세청 제공 동의시 필수)": "KTEMS",
+    "수출화주 주소(수출우편물 정보관세청 제공 동의시 필수)": "Daejeon, Korea",
+    "EMS : EEMS 프리미엄 : PK-Packet : K등기소형 :R": "K",
     "EMS 비서류 : em,     EMS 서류 : ee, K-Packet : rl, 소형포장물 : re": "rl",
     "고객주문번호( 숫자,영문 30자이내)": cleanText(order.order_no),
     "수출우편물 정보 관세청 제공 여부(Y/N)": "Y",
     "상태": "done",
     "물품": itemText(order),
     "생성 일시": new Date().toISOString(),
-    "가로(cm)": "25",
-    "세로(cm)": "20",
-    "높이(cm)": "1",
+    "가로(cm)": productInfo.width,
+    "세로(cm)": productInfo.length,
+    "높이(cm)": productInfo.height,
     "★IOSS/EORI/TAX NUMBER식별 번호":
       taxCode && taxCode !== "-" ? `${taxCode} PAID` : "",
     "★브라질세금식별번호(* 브라질행 EMS, K-Packet의 경우 필수 입력)":
