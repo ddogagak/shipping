@@ -423,7 +423,7 @@ export default function DomesticOrdersPage() {
     setSelectedCombineKeys([]);
   }
 
-  function buildSelectedCombineDrafts() {
+  async function processSelectedCombineGroups() {
     const selectedGroups = combineCandidates.filter((group) =>
       selectedCombineKeys.includes(group.nickname)
     );
@@ -433,14 +433,90 @@ export default function DomesticOrdersPage() {
       return;
     }
 
-    // 여러 묶음을 한 번에 저장하는 대신, 먼저 첫 번째 묶음부터 확인창을 열어.
-    // 각 묶음은 주문번호/운송장/아이템을 수정해야 하므로 확인창 단계를 유지함.
-    buildCombineDraft(selectedGroups[0].rows);
+    if (!confirm(`선택한 합배송 묶음 ${selectedGroups.length}개를 한 번에 처리할까?`)) {
+      return;
+    }
 
-    if (selectedGroups.length > 1) {
-      setMessage(
-        `합배송 묶음 ${selectedGroups.length}개 선택됨. 현재 첫 번째 묶음부터 확인 후 저장해줘.`
-      );
+    setMessage("합배송 처리 중...");
+
+    try {
+      for (const group of selectedGroups) {
+        const sorted = [...group.rows].sort((a, b) =>
+          String(a.first_order_date || a.created_at || "").localeCompare(
+            String(b.first_order_date || b.created_at || "")
+          )
+        );
+
+        const orderNos = sorted.map((row) => displayOrderNo(row));
+        const baseNo = baseOrderNo(orderNos[0] || sorted[0].order_id);
+        const count = orderNos.reduce((sum, no) => sum + combineCount(no), 0);
+        const finalOrderNo = `${baseNo}-C${count}`;
+
+        const combinedDates = uniqueStrings(
+          sorted.flatMap((row) =>
+            Array.isArray(row.source_order_dates) && row.source_order_dates.length
+              ? row.source_order_dates
+              : [row.first_order_date]
+          )
+        ).sort();
+
+        const trackingNumbers = sorted
+          .map((row) => shipping(row)?.tracking_number)
+          .map((value) => String(value || "").trim())
+          .filter(Boolean);
+
+        const uniqueTrackingNumbers = Array.from(new Set(trackingNumbers));
+        const lastTracking = trackingNumbers[trackingNumbers.length - 1] || "";
+        const shippingTypes = uniqueStrings(sorted.map((row) => shipping(row)?.shipping_type));
+
+        const memo = [
+          String(sorted[0]?.memo || "").trim(),
+          `합배송: ${orderNos.join(" + ")}`,
+          uniqueTrackingNumbers.length > 1
+            ? `운송장 충돌: ${uniqueTrackingNumbers.join(" / ")} → 마지막 운송장 사용`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        const res = await fetch("/api/domestic/orders", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            order_ids: sorted.map((row) => row.order_id),
+            action: "combine_shipping",
+            combined: {
+              customer_order_no: finalOrderNo,
+              customer_order_no_base: baseNo,
+              first_order_date: combinedDates[0] || sorted[0]?.first_order_date || "",
+              order_count: sorted.reduce((sum, row) => sum + Number(row.order_count || 1), 0),
+              item_summary: sorted
+                .map((row) => String(row.item_summary || "").trim())
+                .filter(Boolean)
+                .join(" / "),
+              item_total_price: sorted.reduce((sum, row) => sum + Number(row.item_total_price || 0), 0),
+              memo,
+              shipping_type: shippingTypes[0] || "일반택배",
+              tracking_number: lastTracking,
+            },
+          }),
+        });
+
+        const json = await res.json();
+
+        if (!res.ok) {
+          throw new Error(json.detail || json.error || `${group.nickname} 합배송 실패`);
+        }
+      }
+
+      alert(`합배송 묶음 ${selectedGroups.length}개 처리 완료`);
+      setSelectedCombineKeys([]);
+      setCombineDraft(null);
+      await load();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "합배송 처리 실패";
+      alert(errorMessage);
+      setMessage(errorMessage);
     }
   }
 
@@ -877,10 +953,10 @@ export default function DomesticOrdersPage() {
 
             <button
               type="button"
-              onClick={buildSelectedCombineDrafts}
+              onClick={() => void processSelectedCombineGroups()}
               style={purpleButtonStyle}
             >
-              선택한 합배송 묶음 처리
+              선택한 합배송 묶음 일괄처리
             </button>
           </div>
 
