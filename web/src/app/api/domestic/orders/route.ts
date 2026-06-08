@@ -3,6 +3,15 @@ import { createServiceRoleClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
+function baseOrderNo(value: string) {
+  return String(value || "").trim().replace(/-C\d+$/i, "");
+}
+
+function combineCount(value: string) {
+  const match = String(value || "").trim().match(/-C(\d+)$/i);
+  return match ? Number(match[1] || 1) : 1;
+}
+
 export async function GET() {
   const supabase = createServiceRoleClient();
 
@@ -48,27 +57,31 @@ export async function GET() {
 export async function PATCH(req: Request) {
   const supabase = createServiceRoleClient();
   const body = await req.json();
+  const now = new Date().toISOString();
+
+  const action = String(body.action || "").trim();
 
   const orderIds = Array.isArray(body.order_ids)
     ? body.order_ids.map((v: unknown) => String(v ?? "").trim()).filter(Boolean)
     : [];
 
-  const action = String(body.action || "").trim();
-  const now = new Date().toISOString();
-
-  // ✅ 행별 저장은 체크박스 선택 여부와 상관없이 먼저 처리
   if (action === "update_row") {
     const orderId = String(body.order_id || "").trim();
 
     if (!orderId) {
-      return NextResponse.json(
-        { error: "order_id가 없습니다." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "order_id가 없습니다." }, { status: 400 });
     }
 
     const nextShippingStatus = body.shipping_status || "start";
-    const nextOrderStatus = nextShippingStatus === "done" ? "done" : body.order_status || "accepted";
+    const nextOrderStatus =
+      nextShippingStatus === "done"
+        ? "done"
+        : body.order_status || "accepted";
+
+    const trackingNumber =
+      body.tracking_number === undefined || body.tracking_number === null
+        ? null
+        : String(body.tracking_number).trim() || null;
 
     const { error: orderError } = await supabase
       .from("domestic_order")
@@ -85,20 +98,17 @@ export async function PATCH(req: Request) {
         { status: 500 }
       );
     }
-  
-      const { error: shippingError } = await supabase
-    .from("domestic_shipping")
-    .update({
-      shipping_status: nextShippingStatus,
-      shipping_type: body.shipping_type || "일반택배",
-      tracking_number: body.tracking_number
-        ? String(body.tracking_number).trim()
-        : null,
-      updated_at: now,
-    })
-    .eq("order_id", orderId);
 
-    
+    const { error: shippingError } = await supabase
+      .from("domestic_shipping")
+      .update({
+        shipping_status: nextShippingStatus,
+        shipping_type: body.shipping_type || "일반택배",
+        tracking_number: trackingNumber,
+        updated_at: now,
+      })
+      .eq("order_id", orderId);
+
     if (shippingError) {
       return NextResponse.json(
         { error: "국내 배송 행 저장 실패", detail: shippingError.message },
@@ -109,16 +119,14 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  // ✅ 여기부터는 체크박스로 선택한 주문들에 대한 일괄 처리
-  if (!orderIds.length) {
-    return NextResponse.json(
-      { error: "선택된 주문이 없습니다." },
-      { status: 400 }
-    );
-  }
-
-
   if (action === "combine_shipping") {
+    if (orderIds.length < 2) {
+      return NextResponse.json(
+        { error: "합배송할 주문이 2건 이상 필요합니다." },
+        { status: 400 }
+      );
+    }
+
     const combined = body.combined && typeof body.combined === "object" ? body.combined : {};
 
     const { data: orders, error: fetchError } = await supabase
@@ -157,32 +165,17 @@ export async function PATCH(req: Request) {
         : order.domestic_shipping
           ? [order.domestic_shipping]
           : [];
-      const shippingDone = shippingRows.some((s: any) => s?.shipping_status === "done");
+
+      const shippingDone = shippingRows.some(
+        (s: any) => s?.shipping_status === "done"
+      );
+
       return order.order_status !== "done" && !shippingDone;
     });
 
     if (activeOrders.length < 2) {
       return NextResponse.json(
-        { error: "합배송 가능한 주문이 2건 이상 필요합니다. 배송완료 주문은 제외됩니다." },
-        { status: 400 }
-      );
-    }
-
-    const nicknames = Array.from(
-      new Set(activeOrders.map((order: any) => String(order.nickname || "").trim()).filter(Boolean))
-    );
-
-    if (nicknames.length !== 1) {
-      return NextResponse.json(
-        { error: "닉네임이 같은 주문만 합배송할 수 있습니다." },
-        { status: 400 }
-      );
-    }
-
-    const dateSet = new Set(activeOrders.map((order: any) => order.first_order_date || "날짜없음"));
-    if (dateSet.size < 2) {
-      return NextResponse.json(
-        { error: "주문일이 다른 주문만 합배송 제안 대상입니다." },
+        { error: "합배송 가능한 주문이 2건 이상 필요합니다." },
         { status: 400 }
       );
     }
@@ -197,28 +190,22 @@ export async function PATCH(req: Request) {
     const mergeTargets = sorted.slice(1);
     const mergeTargetIds = mergeTargets.map((order: any) => order.order_id);
 
-    const shortOrderNo = (value: unknown) => {
-      const clean = String(value || "").trim();
-      if (!clean) return "";
-      return clean.length > 5 ? clean.slice(-5) : clean;
-    };
+    const orderNos = sorted.map((order: any) =>
+      String(order.customer_order_no || order.order_id || "").trim()
+    );
 
-    const uniqueValues = (values: unknown[]) =>
-      Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean)));
+    const baseNo =
+      String(combined.customer_order_no_base || "").trim() ||
+      baseOrderNo(orderNos[0] || base.order_id);
 
-    const shippingRows = sorted.flatMap((order: any) => {
-      if (Array.isArray(order.domestic_shipping)) return order.domestic_shipping;
-      if (order.domestic_shipping) return [order.domestic_shipping];
-      return [];
-    });
+    const totalCombineCount = orderNos.reduce(
+      (sum: number, no: string) => sum + combineCount(no),
+      0
+    );
 
-    const existingTrackingNumbers = uniqueValues(shippingRows.map((shipping: any) => shipping?.tracking_number));
-    const existingShippingTypes = uniqueValues(shippingRows.map((shipping: any) => shipping?.shipping_type));
-
-    const combinedOrderNoDefault = sorted
-      .map((order: any) => shortOrderNo(order.customer_order_no || order.order_id))
-      .filter(Boolean)
-      .join("-");
+    const finalCustomerOrderNo =
+      String(combined.customer_order_no || "").trim() ||
+      `${baseNo}-C${totalCombineCount}`;
 
     const combinedDates = Array.from(
       new Set(
@@ -231,45 +218,67 @@ export async function PATCH(req: Request) {
       )
     ).sort();
 
-    const combinedItemSummaryDefault = sorted
-      .map((order: any) => String(order.item_summary || "").trim())
-      .filter(Boolean)
-      .join(" / ");
+    const shippingRows = sorted.flatMap((order: any) => {
+      if (Array.isArray(order.domestic_shipping)) return order.domestic_shipping;
+      if (order.domestic_shipping) return [order.domestic_shipping];
+      return [];
+    });
 
-    const combinedMemoDefault = [
-      String(base.memo || "").trim(),
-      `합배송: ${sorted.map((order: any) => order.customer_order_no || order.order_id).join(" + ")}`,
-    ]
-      .filter(Boolean)
-      .join("\n");
+    const trackingNumbers = shippingRows
+      .map((s: any) => String(s?.tracking_number || "").trim())
+      .filter(Boolean);
 
-    const selectedTrackingNumber = String(
-      combined.tracking_number ?? existingTrackingNumbers[0] ?? ""
-    ).trim();
-    const selectedShippingType = String(
-      combined.shipping_type ?? existingShippingTypes[0] ?? "일반택배"
-    ).trim() || "일반택배";
+    const uniqueTrackingNumbers = Array.from(new Set(trackingNumbers));
+
+    const selectedTrackingNumber =
+      String(combined.tracking_number ?? "").trim() ||
+      trackingNumbers[trackingNumbers.length - 1] ||
+      "";
+
+    const selectedShippingType =
+      String(combined.shipping_type ?? "").trim() ||
+      String(shippingRows.find((s: any) => s?.shipping_type)?.shipping_type || "").trim() ||
+      "일반택배";
+
+    const itemSummary =
+      String(combined.item_summary ?? "").trim() ||
+      sorted
+        .map((order: any) => String(order.item_summary || "").trim())
+        .filter(Boolean)
+        .join(" / ");
+
+    const memo =
+      String(combined.memo ?? "").trim() ||
+      [
+        String(base.memo || "").trim(),
+        `합배송: ${orderNos.join(" + ")}`,
+        uniqueTrackingNumbers.length > 1
+          ? `운송장 충돌: ${uniqueTrackingNumbers.join(" / ")} → 마지막 운송장 사용`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
 
     const { error: updateError } = await supabase
       .from("domestic_order")
       .update({
-        customer_order_no:
-          String(combined.customer_order_no ?? "").trim() ||
-          combinedOrderNoDefault ||
-          base.customer_order_no ||
-          base.order_id,
+        customer_order_no: finalCustomerOrderNo,
         source_order_dates: combinedDates,
         first_order_date:
-          String(combined.first_order_date ?? "").trim() || combinedDates[0] || base.first_order_date,
+          String(combined.first_order_date ?? "").trim() ||
+          combinedDates[0] ||
+          base.first_order_date,
         order_count:
           Number(combined.order_count || 0) ||
           sorted.reduce((sum: number, order: any) => sum + Number(order.order_count || 1), 0),
-        item_summary:
-          String(combined.item_summary ?? "").trim() || combinedItemSummaryDefault,
+        item_summary: itemSummary,
         item_total_price:
           Number(combined.item_total_price || 0) ||
-          sorted.reduce((sum: number, order: any) => sum + Number(order.item_total_price || 0), 0),
-        memo: String(combined.memo ?? "").trim() || combinedMemoDefault,
+          sorted.reduce(
+            (sum: number, order: any) => sum + Number(order.item_total_price || 0),
+            0
+          ),
+        memo,
         updated_at: now,
       })
       .eq("order_id", base.order_id);
@@ -326,20 +335,35 @@ export async function PATCH(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      message: `합배송 완료: ${
-        String(combined.customer_order_no ?? "").trim() || combinedOrderNoDefault || base.order_id
-      }`,
+      message:
+        uniqueTrackingNumbers.length > 1
+          ? `합배송 완료: ${finalCustomerOrderNo} / 운송장 충돌로 마지막 운송장 사용`
+          : `합배송 완료: ${finalCustomerOrderNo}`,
+      customer_order_no: finalCustomerOrderNo,
       base_order_id: base.order_id,
       removed_order_ids: mergeTargetIds,
       tracking_number: selectedTrackingNumber || null,
+      tracking_conflict: uniqueTrackingNumbers.length > 1,
+      tracking_numbers: uniqueTrackingNumbers,
     });
+  }
+
+  if (!orderIds.length) {
+    return NextResponse.json(
+      { error: "선택된 주문이 없습니다." },
+      { status: 400 }
+    );
   }
 
   if (action === "checked" || action === "packaged") {
     const nextOrderStatus = action === "packaged" ? "packaged" : "checked";
+
     const { error } = await supabase
       .from("domestic_order")
-      .update({ order_status: nextOrderStatus, updated_at: now })
+      .update({
+        order_status: nextOrderStatus,
+        updated_at: now,
+      })
       .in("order_id", orderIds);
 
     if (error) {
@@ -353,7 +377,9 @@ export async function PATCH(req: Request) {
   }
 
   if (action === "tracking_uploaded" || action === "registered") {
-    const nextShippingStatus = action === "registered" ? "registered" : "uploaded";
+    const nextShippingStatus =
+      action === "registered" ? "registered" : "uploaded";
+
     const { error } = await supabase
       .from("domestic_shipping")
       .update({
@@ -372,26 +398,13 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  if (action === "order_done") {
-    const { error } = await supabase
-      .from("domestic_order")
-      .update({ order_status: "done", updated_at: now })
-      .in("order_id", orderIds);
-
-    if (error) {
-      return NextResponse.json(
-        { error: "주문완료 처리 실패", detail: error.message },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ ok: true });
-  }
-
   if (action === "shipping_done" || action === "done") {
     const { error: shippingError } = await supabase
       .from("domestic_shipping")
-      .update({ shipping_status: "done", updated_at: now })
+      .update({
+        shipping_status: "done",
+        updated_at: now,
+      })
       .in("order_id", orderIds);
 
     if (shippingError) {
@@ -403,7 +416,10 @@ export async function PATCH(req: Request) {
 
     const { error: orderError } = await supabase
       .from("domestic_order")
-      .update({ order_status: "done", updated_at: now })
+      .update({
+        order_status: "done",
+        updated_at: now,
+      })
       .in("order_id", orderIds);
 
     if (orderError) {
@@ -441,7 +457,6 @@ export async function PATCH(req: Request) {
     { status: 400 }
   );
 }
-
 
 export async function DELETE(req: Request) {
   const supabase = createServiceRoleClient();
