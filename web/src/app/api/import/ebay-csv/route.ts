@@ -210,13 +210,6 @@ function itemText(order: any) {
     .join(" | ");
 }
 
-console.log(
-  "ITEM DEBUG",
-  order.item_summary,
-  order.item_title,
-  order.title,
-  order.items
-);
 function makeExportData(order: any) {
   const countryCode = cleanText(order.country_code).toUpperCase();
   const address = [order.address1, order.address2]
