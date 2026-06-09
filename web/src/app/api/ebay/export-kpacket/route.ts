@@ -15,6 +15,16 @@ type EbayShippingExportRow = {
   export_data: Record<string, unknown> | null;
 };
 
+type ProductInfo = {
+  content: string;
+  hsCode: string;
+  grossWeight: string;
+  netWeight: string;
+  width: string;
+  length: string;
+  height: string;
+};
+
 const OUTPUT_HEADERS = [
   "★상품구분",
   "★수취인명",
@@ -125,21 +135,96 @@ function normalizePhone(value: unknown) {
     .replace(/\s+/g, "-");
 }
 
+function productInfoFromText(value: unknown): ProductInfo {
+  const text = String(value ?? "").toLowerCase();
+
+  const hasPlush =
+    text.includes("plush") ||
+    text.includes("doll") ||
+    text.includes("toy") ||
+    text.includes("ぬい") ||
+    text.includes("누이") ||
+    text.includes("인형");
+
+  const hasAccessory =
+    text.includes("keyring") ||
+    text.includes("key ring") ||
+    text.includes("keychain") ||
+    text.includes("acrylic key") ||
+    text.includes("acrylic stand") ||
+    text.includes("acrylic") ||
+    text.includes("키링") ||
+    text.includes("악세사리") ||
+    text.includes("액세서리") ||
+    text.includes("アクリル") ||
+    text.includes("キーホルダー");
+
+  if (hasPlush) {
+    return {
+      content: "plush doll toy",
+      hsCode: "9503003411",
+      grossWeight: "100",
+      netWeight: "100",
+      width: "30",
+      length: "20",
+      height: "8",
+    };
+  }
+
+  if (hasAccessory) {
+    return {
+      content: "keyring",
+      hsCode: "8517709000",
+      grossWeight: "100",
+      netWeight: "100",
+      width: "30",
+      length: "20",
+      height: "8",
+    };
+  }
+
+  return {
+    content: "photocard",
+    hsCode: "4909000000",
+    grossWeight: "100",
+    netWeight: "15",
+    width: "25",
+    length: "20",
+    height: "1",
+  };
+}
+
 function makeExportData(
   exportData: Record<string, unknown>
 ): Record<string, unknown> {
+  const productInfo = productInfoFromText(
+    [
+      exportData["물품"],
+      exportData["★내용품"],
+      exportData["규격(모델명)"],
+    ]
+      .map((value) => String(value ?? ""))
+      .join(" ")
+  );
+
   return {
     ...exportData,
 
     "★상품구분": "Merchandise",
     "★14전화번호": normalizePhone(exportData["★14전화번호"]),
 
-    생산지: "KR",
+    "★총중량": productInfo.grossWeight,
+    "★내용품": productInfo.content,
+    "★순중량(g)[ = 품목 1종의 개당중량 * 개수 ](수출우편물 정보관세청 제공 동의시 필수)": productInfo.netWeight,
+    "HSCODE(숫자만 10자리)": productInfo.hsCode,
+    "가로(cm)": productInfo.width,
+    "세로(cm)": productInfo.length,
+    "높이(cm)": productInfo.height,
 
+    "생산지": "KR",
     "사업자번호(숫자10자리)": "7764800598",
     "수출화주이름 또는 상호(수출우편물 정보관세청 제공 동의시 필수)": "KTEMS",
     "수출화주 주소(수출우편물 정보관세청 제공 동의시 필수)": "Daejeon, Korea",
-
     "EMS : EEMS 프리미엄 : PK-Packet : K등기소형 :R": "K",
     "EMS 비서류 : em,     EMS 서류 : ee, K-Packet : rl, 소형포장물 : re": "rl",
   };
