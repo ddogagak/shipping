@@ -220,7 +220,7 @@ function makeExportData(
     "가로(cm)": productInfo.width,
     "세로(cm)": productInfo.length,
     "높이(cm)": productInfo.height,
-
+    "부피중량 적용 제외 여부(Y/N)": "Y",
     "생산지": "KR",
     "사업자번호(숫자10자리)": "7764800598",
     "수출화주이름 또는 상호(수출우편물 정보관세청 제공 동의시 필수)": "KTEMS",
