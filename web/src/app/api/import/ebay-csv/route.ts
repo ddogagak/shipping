@@ -72,16 +72,20 @@ type ProductInfo = {
 
 function inferProductInfo(order: any): ProductInfo {
   const rawText = [
+    itemText(order),
     order.item_summary,
     order.item_list,
     order.item_title,
     order.title,
+    order.name,
+    order.product_name,
     ...(Array.isArray(order.items)
       ? order.items.flatMap((item: any) => [
           item.item_title,
           item.option_text,
           item.title,
           item.name,
+          item.product_name,
         ])
       : []),
   ]
@@ -91,7 +95,9 @@ function inferProductInfo(order: any): ProductInfo {
   const hasPlush =
     rawText.includes("plush") ||
     rawText.includes("doll") ||
+    rawText.includes("toy") ||
     rawText.includes("ぬい") ||
+    rawText.includes("누이") ||
     rawText.includes("인형");
 
   const hasAccessory =
@@ -103,6 +109,7 @@ function inferProductInfo(order: any): ProductInfo {
     rawText.includes("acrylic") ||
     rawText.includes("키링") ||
     rawText.includes("악세사리") ||
+    rawText.includes("액세서리") ||
     rawText.includes("アクリル") ||
     rawText.includes("キーホルダー");
 
