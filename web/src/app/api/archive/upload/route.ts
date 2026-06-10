@@ -24,8 +24,8 @@ const ALLOWED_TYPES = [
   "application/x-hwp",
   "application/hwp",
   "application/haansofthwp",
+  "application/haansofthwpx",
 
-  // hwp / hwpx / zip 파일은 브라우저나 OS에 따라 이렇게 들어올 수 있음
   "application/octet-stream",
 ];
 
