@@ -1,17 +1,42 @@
-
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
+const ALLOWED_EXTENSIONS = [
+  ".pdf",
+  ".xls",
+  ".xlsx",
+  ".zip",
+  ".hwp",
+  ".hwpx",
+];
+
 const ALLOWED_TYPES = [
   "application/pdf",
+
   "application/vnd.ms-excel",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+
+  "application/zip",
+  "application/x-zip-compressed",
+
+  "application/x-hwp",
+  "application/hwp",
+  "application/haansofthwp",
+
+  // hwp / hwpx / zip 파일은 브라우저나 OS에 따라 이렇게 들어올 수 있음
+  "application/octet-stream",
 ];
 
 function safeFileName(name: string) {
   return name.replace(/[^\w.\-가-힣\s]/g, "_");
+}
+
+function getExtension(name: string) {
+  const index = name.lastIndexOf(".");
+  if (index < 0) return "";
+  return name.slice(index).toLowerCase();
 }
 
 export async function POST(req: Request) {
@@ -23,9 +48,23 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "파일이 없어." }, { status: 400 });
     }
 
-    if (!ALLOWED_TYPES.includes(file.type)) {
+    const extension = getExtension(file.name);
+
+    if (!ALLOWED_EXTENSIONS.includes(extension)) {
       return NextResponse.json(
-        { error: "PDF, XLS, XLSX 파일만 업로드 가능해." },
+        {
+          error: "PDF, XLS, XLSX, ZIP, HWP, HWPX 파일만 업로드 가능해.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (file.type && !ALLOWED_TYPES.includes(file.type)) {
+      return NextResponse.json(
+        {
+          error: "PDF, XLS, XLSX, ZIP, HWP, HWPX 파일만 업로드 가능해.",
+          detail: `허용되지 않은 파일 형식: ${file.type}`,
+        },
         { status: 400 }
       );
     }
@@ -36,10 +75,16 @@ export async function POST(req: Request) {
     const fileName = safeFileName(file.name);
     const path = `${Date.now()}_${fileName}`;
 
+    const contentType =
+      file.type ||
+      (extension === ".zip" || extension === ".hwpx"
+        ? "application/zip"
+        : "application/octet-stream");
+
     const { error } = await supabase.storage
       .from("archive-files")
       .upload(path, buffer, {
-        contentType: file.type,
+        contentType,
         upsert: false,
       });
 
