@@ -17,7 +17,11 @@ function cleanTrackingNumber(value: unknown) {
 
 function isCompleteStatus(value: unknown) {
   const status = normalizeStatus(value);
-  return status === "배송출발" || status === "배송완료";
+    return (
+    status === "배송출발" ||
+    status === "배송완료" ||
+    status === "집화처리"
+  );
 }
 
 export async function PATCH(req: Request) {
