@@ -25,6 +25,16 @@ function isCompleteStatus(value: unknown) {
   );
 }
 
+function getRowOrderId(row: any) {
+  return safeText(
+    row?.matched_order_id ||
+      row?.db_order_id ||
+      row?.database_order_id ||
+      row?.order_id ||
+      row?.order_number
+  );
+}
+
 export async function PATCH(req: Request) {
   try {
     const { rows } = await req.json();
@@ -36,7 +46,7 @@ export async function PATCH(req: Request) {
     const selectedRows = rows
       .filter((row: any) => row?.selected !== false)
       .map((row: any) => ({
-        order_id: safeText(row.matched_order_id || row.order_id),
+        order_id: getRowOrderId(row),
         tracking_number: cleanTrackingNumber(row.tracking_number),
         final_product_status: safeText(row.final_product_status),
       }))
@@ -58,18 +68,23 @@ export async function PATCH(req: Request) {
 
     for (const row of selectedRows) {
       const complete = isCompleteStatus(row.final_product_status);
+
+      // 엑셀 입력 기본값은 uploaded = 운송장 입력
+      // 집화처리/배송출발/배송완료는 done = 배송완료
       const shippingStatus = complete ? "done" : "uploaded";
 
-      const { error: shippingError } = await supabase
+      // 기존 domestic_shipping 행만 업데이트함.
+      // 없는 행을 새로 만들지 않음.
+      // 이미 운송장이 있어도 엑셀 운송장으로 덮어씀.
+      const { data: updatedShippingRows, error: shippingError } = await supabase
         .from("domestic_shipping")
         .update({
-          // 이미 운송장이 있어도 엑셀 운송장으로 덮어씀
           tracking_number: row.tracking_number,
-          // 엑셀 입력 직후 기본값은 운송장 입력(uploaded), 완료계열이면 배송완료(done)
           shipping_status: shippingStatus,
           updated_at: now,
         })
-        .eq("order_id", row.order_id);
+        .eq("order_id", row.order_id)
+        .select("order_id");
 
       if (shippingError) {
         return NextResponse.json(
@@ -82,14 +97,27 @@ export async function PATCH(req: Request) {
         );
       }
 
+      if (!updatedShippingRows?.length) {
+        return NextResponse.json(
+          {
+            error: "운송장 저장 실패",
+            order_id: row.order_id,
+            detail:
+              "매칭된 주문은 있지만 domestic_shipping 업데이트 대상이 0건입니다. 전달된 DB 주문ID 또는 domestic_shipping 행을 확인해야 합니다.",
+          },
+          { status: 500 }
+        );
+      }
+
       if (complete) {
-        const { error: orderError } = await supabase
+        const { data: updatedOrderRows, error: orderError } = await supabase
           .from("domestic_order")
           .update({
             order_status: "done",
             updated_at: now,
           })
-          .eq("order_id", row.order_id);
+          .eq("order_id", row.order_id)
+          .select("order_id");
 
         if (orderError) {
           return NextResponse.json(
@@ -97,6 +125,18 @@ export async function PATCH(req: Request) {
               error: "주문상태 완료 처리 실패",
               order_id: row.order_id,
               detail: orderError.message,
+            },
+            { status: 500 }
+          );
+        }
+
+        if (!updatedOrderRows?.length) {
+          return NextResponse.json(
+            {
+              error: "주문상태 완료 처리 실패",
+              order_id: row.order_id,
+              detail:
+                "domestic_order 업데이트 대상이 0건입니다. 전달된 DB 주문ID를 확인해야 합니다.",
             },
             { status: 500 }
           );
@@ -125,3 +165,4 @@ export async function PATCH(req: Request) {
     );
   }
 }
+
