@@ -32,7 +32,7 @@ type SaveResponse = {
   requested: number;
   updated: number;
   completed: number;
-  registered: number;
+  uploaded: number;
   skipped: number;
 };
 
@@ -50,7 +50,7 @@ function cleanTrackingNumber(value: unknown) {
 
 function isCompleteStatus(value: unknown) {
   const normalized = text(value).replace(/\s/g, "");
-  return normalized === "배송출발" || normalized === "배송완료";
+  return normalized.includes("배송출발") || normalized.includes("배송완료") || normalized.includes("집화처리");
 }
 
 function findHeaderIndex(headers: unknown[], names: string[]) {
@@ -80,7 +80,7 @@ function matchStatusLabel(status: string) {
 function statusText(row: TrackingPreviewRow) {
   if (!row.matched_order_id) return "저장불가";
   if (isCompleteStatus(row.final_product_status)) return "배송완료 + 주문완료";
-  return "운송장등록";
+  return "운송장 입력";
 }
 
 export default function DomesticTrackingPage() {
@@ -310,7 +310,7 @@ export default function DomesticTrackingPage() {
 
           {saveResult ? (
             <div style={resultBoxStyle}>
-              저장 {saveResult.updated}건 / 배송완료 {saveResult.completed}건 / 운송장등록 {saveResult.registered}건 / 스킵 {saveResult.skipped}건
+              저장 {saveResult.updated}건 / 배송완료 {saveResult.completed}건 / 운송장 입력 {saveResult.uploaded}건 / 스킵 {saveResult.skipped}건
             </div>
           ) : null}
 
