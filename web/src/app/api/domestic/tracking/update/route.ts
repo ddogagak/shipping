@@ -17,10 +17,11 @@ function cleanTrackingNumber(value: unknown) {
 
 function isCompleteStatus(value: unknown) {
   const status = normalizeStatus(value);
-    return (
-    status === "배송출발" ||
-    status === "배송완료" ||
-    status === "집화처리"
+
+  return (
+    status.includes("배송출발") ||
+    status.includes("배송완료") ||
+    status.includes("집화처리")
   );
 }
 
@@ -53,16 +54,18 @@ export async function PATCH(req: Request) {
 
     let updated = 0;
     let completed = 0;
-    let registered = 0;
+    let uploaded = 0;
 
     for (const row of selectedRows) {
       const complete = isCompleteStatus(row.final_product_status);
-      const shippingStatus = complete ? "done" : "registered";
+      const shippingStatus = complete ? "done" : "uploaded";
 
       const { error: shippingError } = await supabase
         .from("domestic_shipping")
         .update({
+          // 이미 운송장이 있어도 엑셀 운송장으로 덮어씀
           tracking_number: row.tracking_number,
+          // 엑셀 입력 직후 기본값은 운송장 입력(uploaded), 완료계열이면 배송완료(done)
           shipping_status: shippingStatus,
           updated_at: now,
         })
@@ -101,7 +104,7 @@ export async function PATCH(req: Request) {
 
         completed += 1;
       } else {
-        registered += 1;
+        uploaded += 1;
       }
 
       updated += 1;
@@ -112,7 +115,7 @@ export async function PATCH(req: Request) {
       requested: selectedRows.length,
       updated,
       completed,
-      registered,
+      uploaded,
       skipped: rows.length - selectedRows.length,
     });
   } catch (error: any) {
