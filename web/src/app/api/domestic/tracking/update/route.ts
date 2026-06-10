@@ -1,19 +1,17 @@
 import { NextResponse } from "next/server";
+import * as XLSX from "xlsx";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-type ResolvedOrder = {
+type DomesticOrderMatchRow = {
   order_id: string;
   customer_order_no: string | null;
+  recipient_name: string | null;
 };
 
 function safeText(value: unknown) {
   return String(value ?? "").trim();
-}
-
-function normalizeStatus(value: unknown) {
-  return safeText(value).replace(/\s/g, "");
 }
 
 function cleanTrackingNumber(value: unknown) {
@@ -27,269 +25,181 @@ function normalizeOrderKey(value: unknown) {
     .replace(/-C\d+$/i, "");
 }
 
-function isCompleteStatus(value: unknown) {
-  const status = normalizeStatus(value);
-
-  return (
-    status.includes("배송출발") ||
-    status.includes("배송완료") ||
-    status.includes("집화처리")
-  );
-}
-
-function unique(values: string[]) {
-  return Array.from(new Set(values.map((value) => safeText(value)).filter(Boolean)));
-}
-
-function getCandidateKeys(row: any) {
-  const rawValues = [
-    row?.matched_order_id,
-    row?.db_order_id,
-    row?.database_order_id,
-    row?.order_id,
-    row?.order_number,
-    row?.order_key,
-    row?.customer_order_no,
-  ];
-
-  return unique(
-    rawValues.flatMap((value) => {
-      const raw = safeText(value);
-      const normalized = normalizeOrderKey(value);
-      return [raw, normalized];
-    })
-  );
-}
-
-async function resolveExistingShippingOrderId(
-  supabase: ReturnType<typeof createServiceRoleClient>,
-  row: any
+function addOrderToMap(
+  map: Map<string, DomesticOrderMatchRow>,
+  order: DomesticOrderMatchRow
 ) {
-  const candidateKeys = getCandidateKeys(row);
+  const keys = [
+    order.order_id,
+    order.customer_order_no,
+    normalizeOrderKey(order.order_id),
+    normalizeOrderKey(order.customer_order_no),
+  ]
+    .map((value) => safeText(value))
+    .filter(Boolean);
 
-  if (!candidateKeys.length) {
-    return {
-      orderId: "",
-      triedKeys: [],
-      triedOrderIds: [],
-    };
-  }
-
-  const orderMap = new Map<string, ResolvedOrder>();
-
-  const { data: byOrderId, error: orderIdError } = await supabase
-    .from("domestic_order")
-    .select("order_id, customer_order_no")
-    .in("order_id", candidateKeys);
-
-  if (orderIdError) throw orderIdError;
-
-  const { data: byCustomerOrderNo, error: customerOrderNoError } = await supabase
-    .from("domestic_order")
-    .select("order_id, customer_order_no")
-    .in("customer_order_no", candidateKeys);
-
-  if (customerOrderNoError) throw customerOrderNoError;
-
-  for (const order of [...(byOrderId || []), ...(byCustomerOrderNo || [])] as ResolvedOrder[]) {
-    orderMap.set(order.order_id, order);
-  }
-
-  // 괄호 제거/공백 제거로 매칭되는 경우를 위해 전체 주문도 한 번 확인
-  const needNormalizedFallback = candidateKeys.some((key) => normalizeOrderKey(key) !== key);
-
-  if (needNormalizedFallback) {
-    const { data: allOrders, error: allOrdersError } = await supabase
-      .from("domestic_order")
-      .select("order_id, customer_order_no");
-
-    if (allOrdersError) throw allOrdersError;
-
-    const candidateSet = new Set(candidateKeys);
-
-    for (const order of (allOrders || []) as ResolvedOrder[]) {
-      const possibleKeys = [
-        order.order_id,
-        order.customer_order_no || "",
-        normalizeOrderKey(order.order_id),
-        normalizeOrderKey(order.customer_order_no),
-      ];
-
-      if (possibleKeys.some((key) => candidateSet.has(key))) {
-        orderMap.set(order.order_id, order);
-      }
-    }
-  }
-
-  const candidateOrderIds = unique([
-    ...candidateKeys,
-    ...Array.from(orderMap.keys()),
-  ]);
-
-  const { data: shippingRows, error: shippingError } = await supabase
-    .from("domestic_shipping")
-    .select("order_id")
-    .in("order_id", candidateOrderIds);
-
-  if (shippingError) throw shippingError;
-
-  const existingShippingOrderIds = new Set(
-    (shippingRows || []).map((shipping) => safeText(shipping.order_id))
-  );
-
-  const priority = unique([
-    safeText(row?.matched_order_id),
-    ...Array.from(orderMap.keys()),
-    ...candidateKeys,
-  ]);
-
-  const orderId = priority.find((value) => existingShippingOrderIds.has(value)) || "";
-
-  return {
-    orderId,
-    triedKeys: candidateKeys,
-    triedOrderIds: candidateOrderIds,
-  };
+  keys.forEach((key) => {
+    if (!map.has(key)) map.set(key, order);
+  });
 }
 
-export async function PATCH(req: Request) {
+export async function POST(req: Request) {
   try {
-    const { rows } = await req.json();
+    const form = await req.formData();
+    const file = form.get("file");
 
-    if (!Array.isArray(rows)) {
-      return NextResponse.json({ error: "rows required" }, { status: 400 });
+    if (!(file instanceof File)) {
+      return NextResponse.json({ error: "엑셀 파일이 없어." }, { status: 400 });
     }
 
-    const selectedRows = rows
-      .filter((row: any) => row?.selected !== false)
-      .map((row: any) => ({
-        raw: row,
-        tracking_number: cleanTrackingNumber(row.tracking_number),
-        final_product_status: safeText(row.final_product_status),
-      }))
-      .filter((row) => row.tracking_number);
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const workbook = XLSX.read(buffer, { type: "buffer" });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
 
-    if (!selectedRows.length) {
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+      defval: "",
+    });
+
+    const parsed = rows
+      .map((row) => ({
+        order_key: safeText(row["고객주문번호"] || row["주문번호"] || row["order_id"]),
+        normalized_order_key: normalizeOrderKey(row["고객주문번호"] || row["주문번호"] || row["order_id"]),
+        tracking_number: cleanTrackingNumber(row["운송장번호"]),
+      }))
+      .filter((row) => row.order_key && row.tracking_number);
+
+    if (!parsed.length) {
       return NextResponse.json(
-        { error: "저장할 선택 행이 없습니다." },
+        { error: "매칭 가능한 운송장 데이터가 없어." },
         { status: 400 }
       );
     }
 
     const supabase = createServiceRoleClient();
-    const now = new Date().toISOString();
+
+    const orderKeys = Array.from(
+      new Set(parsed.flatMap((row) => [row.order_key, row.normalized_order_key]).filter(Boolean))
+    );
+
+    const orderMap = new Map<string, DomesticOrderMatchRow>();
+
+    const { data: byOrderId, error: orderIdError } = await supabase
+      .from("domestic_order")
+      .select("order_id, customer_order_no, recipient_name")
+      .in("order_id", orderKeys);
+
+    if (orderIdError) {
+      return NextResponse.json(
+        { error: "기존 주문 조회 실패", detail: orderIdError.message },
+        { status: 500 }
+      );
+    }
+
+    const { data: byCustomerOrderNo, error: customerOrderNoError } = await supabase
+      .from("domestic_order")
+      .select("order_id, customer_order_no, recipient_name")
+      .in("customer_order_no", orderKeys);
+
+    if (customerOrderNoError) {
+      return NextResponse.json(
+        { error: "고객주문번호 조회 실패", detail: customerOrderNoError.message },
+        { status: 500 }
+      );
+    }
+
+    for (const row of [...(byOrderId || []), ...(byCustomerOrderNo || [])]) {
+      addOrderToMap(orderMap, row as DomesticOrderMatchRow);
+    }
+
+    const needFallback = parsed.some(
+      (row) => row.order_key && !orderMap.get(row.order_key) && !orderMap.get(row.normalized_order_key)
+    );
+
+    if (needFallback) {
+      const { data: allOrders, error: allOrdersError } = await supabase
+        .from("domestic_order")
+        .select("order_id, customer_order_no, recipient_name");
+
+      if (allOrdersError) {
+        return NextResponse.json(
+          { error: "전체 주문 조회 실패", detail: allOrdersError.message },
+          { status: 500 }
+        );
+      }
+
+      for (const row of allOrders || []) {
+        addOrderToMap(orderMap, row as DomesticOrderMatchRow);
+      }
+    }
+
+    const matched = parsed
+      .map((row) => {
+        const matchedOrder = orderMap.get(row.order_key) || orderMap.get(row.normalized_order_key);
+        return {
+          ...row,
+          order_id: matchedOrder?.order_id || "",
+        };
+      })
+      .filter((row) => row.order_id);
+
+    const unmatched = parsed.filter((row) => {
+      const matchedOrder = orderMap.get(row.order_key) || orderMap.get(row.normalized_order_key);
+      return !matchedOrder;
+    });
 
     let updated = 0;
-    let completed = 0;
-    let uploaded = 0;
+    const failed: Array<{ order_key: string; order_id: string; error: string }> = [];
 
-    for (const row of selectedRows) {
-      const resolved = await resolveExistingShippingOrderId(supabase, row.raw);
-
-      if (!resolved.orderId) {
-        return NextResponse.json(
-          {
-            error: "운송장 저장 실패",
-            detail:
-              "미리보기에서는 매칭됐지만 저장 시 domestic_shipping 기존 행을 찾지 못했습니다.",
-            tried_keys: resolved.triedKeys,
-            tried_order_ids: resolved.triedOrderIds,
-          },
-          { status: 500 }
-        );
-      }
-
-      const complete = isCompleteStatus(row.final_product_status);
-
-      // 운송장 새 입력/재접수는 uploaded = 운송장 입력
-      // 집화처리/배송출발/배송완료는 done = 배송완료
-      const shippingStatus = complete ? "done" : "uploaded";
-
-      // 기존 행만 업데이트. 새로 생성하지 않음.
-      // 이미 운송장이 있어도 엑셀 운송장으로 덮어씀.
-      const { data: updatedShippingRows, error: shippingError } = await supabase
+    for (const row of matched) {
+      const { data: updatedRows, error } = await supabase
         .from("domestic_shipping")
         .update({
+          // 재접수/재등록 시 기존 운송장이 있어도 새 운송장으로 덮어씀
           tracking_number: row.tracking_number,
-          shipping_status: shippingStatus,
-          updated_at: now,
+          // 운송장 입력 엑셀은 배송상태 완료가 아니라 운송장 입력 상태
+          shipping_status: "uploaded",
+          updated_at: new Date().toISOString(),
         })
-        .eq("order_id", resolved.orderId)
+        .eq("order_id", row.order_id)
         .select("order_id");
 
-      if (shippingError) {
-        return NextResponse.json(
-          {
-            error: "운송장 저장 실패",
-            order_id: resolved.orderId,
-            detail: shippingError.message,
-          },
-          { status: 500 }
-        );
+      if (error) {
+        failed.push({
+          order_key: row.order_key,
+          order_id: row.order_id,
+          error: error.message,
+        });
+        continue;
       }
 
-      if (!updatedShippingRows?.length) {
-        return NextResponse.json(
-          {
-            error: "운송장 저장 실패",
-            order_id: resolved.orderId,
-            detail: "domestic_shipping 업데이트 대상이 0건입니다.",
-          },
-          { status: 500 }
-        );
-      }
-
-      if (complete) {
-        const { data: updatedOrderRows, error: orderError } = await supabase
-          .from("domestic_order")
-          .update({
-            order_status: "done",
-            updated_at: now,
-          })
-          .eq("order_id", resolved.orderId)
-          .select("order_id");
-
-        if (orderError) {
-          return NextResponse.json(
-            {
-              error: "주문상태 완료 처리 실패",
-              order_id: resolved.orderId,
-              detail: orderError.message,
-            },
-            { status: 500 }
-          );
-        }
-
-        if (!updatedOrderRows?.length) {
-          return NextResponse.json(
-            {
-              error: "주문상태 완료 처리 실패",
-              order_id: resolved.orderId,
-              detail: "domestic_order 업데이트 대상이 0건입니다.",
-            },
-            { status: 500 }
-          );
-        }
-
-        completed += 1;
-      } else {
-        uploaded += 1;
+      if (!updatedRows?.length) {
+        failed.push({
+          order_key: row.order_key,
+          order_id: row.order_id,
+          error: "domestic_shipping 업데이트 대상이 0건입니다.",
+        });
+        continue;
       }
 
       updated += 1;
     }
 
     return NextResponse.json({
-      ok: true,
-      requested: selectedRows.length,
+      ok: failed.length === 0,
+      total: parsed.length,
+      matched_count: matched.length,
+      unmatched_count: unmatched.length,
       updated,
-      completed,
-      uploaded,
-      skipped: rows.length - selectedRows.length,
+      failed_count: failed.length,
+      unmatched,
+      failed,
     });
   } catch (error: any) {
     return NextResponse.json(
-      { error: "운송장 저장 중 오류", detail: error?.message || "Unknown error" },
+      {
+        error: "운송장 엑셀 처리 중 오류",
+        detail: error?.message || "Unknown error",
+      },
       { status: 500 }
     );
   }
