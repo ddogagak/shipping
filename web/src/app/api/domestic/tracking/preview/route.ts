@@ -11,6 +11,12 @@ type IncomingRow = {
   final_product_status?: string;
 };
 
+type DomesticOrderMatchRow = {
+  order_id: string;
+  customer_order_no: string | null;
+  recipient_name: string | null;
+};
+
 function safeText(value: unknown) {
   return String(value ?? "").trim();
 }
@@ -23,9 +29,41 @@ function cleanTrackingNumber(value: unknown) {
   return safeText(value).replace(/^'+/, "");
 }
 
+function normalizeOrderKey(value: unknown) {
+  return safeText(value)
+    .replace(/\s+/g, "")
+    .replace(/[（(][^）)]*[）)]/g, "")
+    .replace(/-C\d+$/i, "");
+}
+
 function isCompleteStatus(value: unknown) {
   const status = normalizeStatus(value);
-  return status === "배송출발" || status === "배송완료";
+
+  return (
+    status.includes("배송출발") ||
+    status.includes("배송완료") ||
+    status.includes("집화처리")
+  );
+}
+
+function addOrderToMap(
+  map: Map<string, DomesticOrderMatchRow>,
+  order: DomesticOrderMatchRow
+) {
+  const keys = [
+    order.order_id,
+    order.customer_order_no,
+    normalizeOrderKey(order.order_id),
+    normalizeOrderKey(order.customer_order_no),
+  ]
+    .map((value) => safeText(value))
+    .filter(Boolean);
+
+  keys.forEach((key) => {
+    if (!map.has(key)) {
+      map.set(key, order);
+    }
+  });
 }
 
 export async function POST(req: Request) {
@@ -40,23 +78,22 @@ export async function POST(req: Request) {
       id: safeText(row.id) || String(index),
       selected: Boolean(row.selected),
       order_key: safeText(row.order_key),
+      normalized_order_key: normalizeOrderKey(row.order_key),
       tracking_number: cleanTrackingNumber(row.tracking_number),
       final_product_status: safeText(row.final_product_status),
     }));
 
     const orderKeys = Array.from(
-      new Set(normalizedRows.map((row) => row.order_key).filter(Boolean))
+      new Set(
+        normalizedRows
+          .flatMap((row) => [row.order_key, row.normalized_order_key])
+          .filter(Boolean)
+      )
     );
 
     const supabase = createServiceRoleClient();
-    const orderMap = new Map<
-      string,
-      {
-        order_id: string;
-        customer_order_no: string | null;
-        recipient_name: string | null;
-      }
-    >();
+
+    const orderMap = new Map<string, DomesticOrderMatchRow>();
 
     if (orderKeys.length) {
       const { data: byOrderId, error: orderIdError } = await supabase
@@ -84,19 +121,43 @@ export async function POST(req: Request) {
       }
 
       for (const row of [...(byOrderId || []), ...(byCustomerOrderNo || [])]) {
-        const item = {
-          order_id: row.order_id,
-          customer_order_no: row.customer_order_no,
-          recipient_name: row.recipient_name,
-        };
+        addOrderToMap(orderMap, row as DomesticOrderMatchRow);
+      }
 
-        if (row.order_id) orderMap.set(row.order_id, item);
-        if (row.customer_order_no) orderMap.set(row.customer_order_no, item);
+      const stillUnmatchedKeys = normalizedRows
+        .filter((row) => {
+          return (
+            row.order_key &&
+            !orderMap.get(row.order_key) &&
+            !orderMap.get(row.normalized_order_key)
+          );
+        })
+        .map((row) => row.normalized_order_key)
+        .filter(Boolean);
+
+      if (stillUnmatchedKeys.length) {
+        const { data: allOrders, error: allOrdersError } = await supabase
+          .from("domestic_order")
+          .select("order_id, customer_order_no, recipient_name");
+
+        if (allOrdersError) {
+          return NextResponse.json(
+            { error: "전체 주문번호 조회 실패", detail: allOrdersError.message },
+            { status: 500 }
+          );
+        }
+
+        for (const row of allOrders || []) {
+          addOrderToMap(orderMap, row as DomesticOrderMatchRow);
+        }
       }
     }
 
     const previewRows = normalizedRows.map((row) => {
-      const matched = orderMap.get(row.order_key);
+      const matched =
+        orderMap.get(row.order_key) ||
+        orderMap.get(row.normalized_order_key);
+
       const complete = isCompleteStatus(row.final_product_status);
       let matchStatus = "not_found";
 
@@ -104,8 +165,10 @@ export async function POST(req: Request) {
         matchStatus = "missing_tracking";
       } else if (matched?.order_id === row.order_key) {
         matchStatus = "matched_by_order_id";
-      } else if (matched) {
+      } else if (matched?.customer_order_no === row.order_key) {
         matchStatus = "matched_by_customer_order_no";
+      } else if (matched) {
+        matchStatus = "matched_by_normalized_order_no";
       }
 
       return {
@@ -115,7 +178,7 @@ export async function POST(req: Request) {
         customer_order_no: matched?.customer_order_no || "",
         recipient_name: matched?.recipient_name || "",
         match_status: matchStatus,
-        next_shipping_status: complete ? "done" : "registered",
+        next_shipping_status: complete ? "done" : "uploaded",
         next_order_status: complete ? "done" : "",
       };
     });
