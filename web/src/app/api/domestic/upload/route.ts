@@ -127,6 +127,26 @@ function splitWiseBlocks(text: string) {
     .filter(Boolean);
 }
 
+function isWiseSkipLine(line: string) {
+  const text = safeText(line);
+
+  if (!text) return true;
+  if (text === "icon") return true;
+  if (text === "결제 완료") return true;
+  if (text === "발송 완료 처리") return true;
+  if (text === "택배사") return true;
+  if (text === "송장번호") return true;
+  if (text === "배송 정보") return true;
+  if (text === "연락처") return true;
+  if (text === "배송비") return true;
+  if (/^\d{4}\.\s*\d{2}\.\s*\d{2}\s*\/\s*\d{2}:\d{2}$/.test(text)) return true;
+  if (/^\[\d{5}\]/.test(text)) return true;
+  if (/\(안심번호\)/.test(text)) return true;
+  if (/^[\d,]+원$/.test(text)) return true;
+
+  return false;
+}
+
 function parseWiseItems(block: string) {
   const lines = block
     .split("\n")
@@ -136,6 +156,7 @@ function parseWiseItems(block: string) {
   const items: { item_text: string; price: number }[] = [];
   let total = 0;
 
+  // 기존 규칙 유지: #으로 시작하는 줄은 아이템으로 인식
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     if (!line.startsWith("#")) continue;
@@ -144,6 +165,49 @@ function parseWiseItems(block: string) {
     const price = parsePrice(priceLine);
 
     items.push({ item_text: line, price });
+    total += price;
+  }
+
+  if (items.length) {
+    return {
+      items,
+      itemSummary: items.map((item) => item.item_text).join(" / "),
+      itemTotalPrice: total ? formatWon(total) : "",
+      total,
+    };
+  }
+
+  // 신규 보강 규칙:
+  // Wise 복붙에서 아이템명이 # 없이 단독 줄로 나오고 바로 다음 줄에 17,300원 같은 상품금액이 오는 경우
+  const stopIndex = lines.findIndex((line) => line.includes("배송 정보"));
+  const searchEnd = stopIndex >= 0 ? stopIndex : lines.length;
+
+  for (let i = 0; i < searchEnd; i += 1) {
+    const line = lines[i];
+
+    if (!/^[\d,]+원$/.test(line)) continue;
+
+    const price = parsePrice(line);
+    if (!price) continue;
+
+    // 배송비는 아이템 금액에서 제외
+    const prevLabel = lines[i - 1] || "";
+    if (prevLabel.includes("배송비")) continue;
+
+    let itemTextValue = "";
+
+    for (let j = i - 1; j >= 0; j -= 1) {
+      const candidate = lines[j];
+
+      if (isWiseSkipLine(candidate)) continue;
+
+      itemTextValue = candidate;
+      break;
+    }
+
+    if (!itemTextValue) continue;
+
+    items.push({ item_text: itemTextValue, price });
     total += price;
   }
 
