@@ -657,7 +657,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       saved: freshRows.length,
-      skipped_count: skipped.length,
+      skipped_count: skipped.length, 
       skipped,
     });
   } catch (error: any) {
