@@ -353,8 +353,9 @@ export async function PATCH(req: Request) {
     );
   }
 
-  if (action === "checked" || action === "packaged") {
-    const nextOrderStatus = action === "packaged" ? "packaged" : "checked";
+  if (action === "checked" || action === "kept" || action === "packaged") {
+    const nextOrderStatus =
+      action === "packaged" ? "packaged" : action === "kept" ? "kept" : "checked";
 
     const { error } = await supabase
       .from("domestic_order")
