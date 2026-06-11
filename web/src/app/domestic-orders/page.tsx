@@ -159,6 +159,34 @@ function combineCount(value: string) {
   return match ? Number(match[1] || 1) : 1;
 }
 
+function stripCombineSuffix(value: string) {
+  return String(value || "").trim().replace(/-C\d+$/i, "");
+}
+
+function hasDateKey(value: string) {
+  const text = String(value || "");
+  return /(?:_|__)\d{8,12}(?:-C\d+)?$/i.test(text);
+}
+
+function orderNoWithDate(row: DomesticOrder | Row) {
+  const customerNo = String(row.customer_order_no || "").trim();
+  const orderId = String(row.order_id || "").trim();
+
+  if (customerNo && hasDateKey(customerNo)) {
+    return stripCombineSuffix(customerNo).replace(/__/g, "_");
+  }
+
+  if (orderId && hasDateKey(orderId)) {
+    return stripCombineSuffix(orderId).replace(/__/g, "_");
+  }
+
+  return stripCombineSuffix(customerNo || orderId);
+}
+
+function combineBaseOrderNo(row: DomesticOrder | Row) {
+  return orderNoWithDate(row);
+}
+
 function uniqueStrings(values: Array<string | null | undefined>) {
   return Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean)));
 }
@@ -449,7 +477,7 @@ export default function DomesticOrdersPage() {
         );
 
         const orderNos = sorted.map((row) => displayOrderNo(row));
-        const baseNo = baseOrderNo(orderNos[0] || sorted[0].order_id);
+        const baseNo = combineBaseOrderNo(sorted[0]);
         const count = orderNos.reduce((sum, no) => sum + combineCount(no), 0);
         const finalOrderNo = `${baseNo}-C${count}`;
 
@@ -534,7 +562,7 @@ export default function DomesticOrdersPage() {
     );
 
     const orderNos = sorted.map((row) => displayOrderNo(row));
-    const baseNo = baseOrderNo(orderNos[0] || sorted[0].order_id);
+    const baseNo = combineBaseOrderNo(sorted[0]);
     const count = orderNos.reduce((sum, no) => sum + combineCount(no), 0);
     const finalOrderNo = `${baseNo}-C${count}`;
 
@@ -974,7 +1002,7 @@ export default function DomesticOrdersPage() {
               ).join(" / ");
 
               const orderNos = group.rows.map((row) => displayOrderNo(row));
-              const baseNo = baseOrderNo(orderNos[0] || "");
+              const baseNo = combineBaseOrderNo(group.rows[0]);
               const count = orderNos.reduce((sum, no) => sum + combineCount(no), 0);
               const finalOrderNo = `${baseNo}-C${count}`;
 
