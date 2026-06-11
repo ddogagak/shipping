@@ -76,6 +76,7 @@ const PLATFORM_OPTIONS = [
 const ORDER_STATUS_OPTIONS = [
   { value: "accepted", label: "입력됨" },
   { value: "checked", label: "재고확인" },
+  { value: "kept", label: "킵" },
   { value: "packaged", label: "포장완료" },
   { value: "done", label: "완료" },
 ];
@@ -220,7 +221,7 @@ export default function DomesticOrdersPage() {
   const [savingRowId, setSavingRowId] = useState<string | null>(null);
 
   const [platforms, setPlatforms] = useState<string[]>([]);
-  const [orderStatuses, setOrderStatuses] = useState<string[]>(["accepted", "checked", "packaged"]);
+  const [orderStatuses, setOrderStatuses] = useState<string[]>(["accepted", "checked", "kept", "packaged"]);
   const [shippingStatuses, setShippingStatuses] = useState<string[]>([
     "start",
     "excel_exported",
@@ -905,6 +906,10 @@ export default function DomesticOrdersPage() {
               선택 {selectedIds.length}건 삭제
             </button>
 
+            <button type="button" onClick={() => patch("kept")} style={keepButtonStyle}>
+              킵 처리
+            </button>
+
             <button type="button" onClick={() => patch("packaged")} style={orangeButtonStyle}>
               포장완료 처리
             </button>
@@ -1500,6 +1505,7 @@ const blueButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#2563
 const purpleButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#7c3aed" };
 const greenButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#059669" };
 const redButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#dc2626" };
+const keepButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#0f766e" };
 const orangeButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#ea580c" };
 
 const smallSaveButtonStyle: CSSProperties = {
