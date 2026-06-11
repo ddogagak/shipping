@@ -12,6 +12,30 @@ function combineCount(value: string) {
   return match ? Number(match[1] || 1) : 1;
 }
 
+function stripCombineSuffix(value: string) {
+  return String(value || "").trim().replace(/-C\d+$/i, "");
+}
+
+function hasDateKey(value: string) {
+  const text = String(value || "");
+  return /(?:_|__)\d{8,12}(?:-C\d+)?$/i.test(text);
+}
+
+function combineBaseOrderNo(order: any) {
+  const customerNo = String(order?.customer_order_no || "").trim();
+  const orderId = String(order?.order_id || "").trim();
+
+  if (customerNo && hasDateKey(customerNo)) {
+    return stripCombineSuffix(customerNo).replace(/__/g, "_");
+  }
+
+  if (orderId && hasDateKey(orderId)) {
+    return stripCombineSuffix(orderId).replace(/__/g, "_");
+  }
+
+  return stripCombineSuffix(customerNo || orderId);
+}
+
 export async function GET() {
   const supabase = createServiceRoleClient();
 
@@ -194,7 +218,7 @@ export async function PATCH(req: Request) {
 
     const baseNo =
       String(combined.customer_order_no_base || "").trim() ||
-      baseOrderNo(orderNos[0] || base.order_id);
+      combineBaseOrderNo(base);
 
     const totalCombineCount = orderNos.reduce(
       (sum: number, no: string) => sum + combineCount(no),
@@ -486,3 +510,4 @@ export async function DELETE(req: Request) {
 
   return NextResponse.json({ ok: true, deleted: orderIds.length });
 }
+
