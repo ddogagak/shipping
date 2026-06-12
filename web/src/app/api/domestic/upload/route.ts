@@ -71,6 +71,18 @@ function dateKey(value: string) {
   return safeText(value).replace(/[^0-9]/g, "") || "nodate";
 }
 
+function orderDateSuffix(value: string) {
+  const digits = dateKey(value);
+  // 2026.06.03 23:22 → 0603
+  // 2026년은 당연값으로 보고 주문번호에는 MMDD만 붙임
+  if (digits.length >= 8) return digits.slice(4, 8);
+  return digits === "nodate" ? "nodate" : digits.slice(0, 4);
+}
+
+function makeCustomerOrderNo(prefix: string, nickname: string, firstOrderDate: string) {
+  return `${prefix}${nickname}_${orderDateSuffix(firstOrderDate)}`;
+}
+
 function makeDomesticOrderId(row: ParsedRow) {
   return `${row.customerOrderNo}__${dateKey(row.firstOrderDate)}`;
 }
@@ -81,6 +93,16 @@ function duplicateKey(customerOrderNo: string, firstOrderDate: string) {
 
 function parseNameAndNickname(line: string) {
   const text = safeText(line);
+
+  // 예: (귤귤n) 처럼 괄호 안 닉네임만 있는 경우
+  // 수령인과 닉네임 모두 괄호를 제거한 값으로 저장
+  const nicknameOnlyMatch = text.match(/^\((.+?)\)$/);
+  if (nicknameOnlyMatch) {
+    const nickname = safeText(nicknameOnlyMatch[1]);
+    return { recipientName: nickname, nickname };
+  }
+
+  // 예: 조용주(폭탄) → 수령인 조용주 / 닉네임 폭탄
   const match = text.match(/^(.+?)\((.+?)\)$/);
 
   if (!match) {
@@ -143,6 +165,7 @@ function isWiseSkipLine(line: string) {
   if (/^\[\d{5}\]/.test(text)) return true;
   if (/\(안심번호\)/.test(text)) return true;
   if (/^[\d,]+원$/.test(text)) return true;
+  if (text === "무료 나눔") return true;
 
   return false;
 }
@@ -177,20 +200,18 @@ function parseWiseItems(block: string) {
     };
   }
 
-  // 신규 보강 규칙:
-  // Wise 복붙에서 아이템명이 # 없이 단독 줄로 나오고 바로 다음 줄에 17,300원 같은 상품금액이 오는 경우
+  // 보강 규칙: 아이템명이 # 없이 단독 줄이고 바로 다음 줄에 17,300원 / 무료 나눔 같은 금액 줄이 오는 경우
   const stopIndex = lines.findIndex((line) => line.includes("배송 정보"));
   const searchEnd = stopIndex >= 0 ? stopIndex : lines.length;
 
   for (let i = 0; i < searchEnd; i += 1) {
     const line = lines[i];
 
-    if (!/^[\d,]+원$/.test(line)) continue;
+    const isPriceLine = /^[\d,]+원$/.test(line) || line === "무료 나눔";
+    if (!isPriceLine) continue;
 
-    const price = parsePrice(line);
-    if (!price) continue;
+    const price = line === "무료 나눔" ? 0 : parsePrice(line);
 
-    // 배송비는 아이템 금액에서 제외
     const prevLabel = lines[i - 1] || "";
     if (prevLabel.includes("배송비")) continue;
 
@@ -265,6 +286,7 @@ function parseWiseText(text: string, platform: Platform): ParsedRow[] {
 
       existing.orderCount = String(Number(existing.orderCount || 0) + 1);
       existing.firstOrderDate = firstDate(existing.firstOrderDate, orderDate);
+      existing.customerOrderNo = makeCustomerOrderNo(prefix, existing.nickname, existing.firstOrderDate);
       existing.sourceOrderDates = [...existing.sourceOrderDates, orderDate].filter(Boolean);
       existing.itemSummary = [existing.itemSummary, parsedItems.itemSummary].filter(Boolean).join(" / ");
       existing.itemTotalPrice = nextTotal ? formatWon(nextTotal) : "";
@@ -280,7 +302,7 @@ function parseWiseText(text: string, platform: Platform): ParsedRow[] {
       postalCode: withApostrophe(postalCode),
       phone: withApostrophe(phone),
       address,
-      customerOrderNo: `${prefix}${nickname}`,
+      customerOrderNo: makeCustomerOrderNo(prefix, nickname, orderDate),
       itemName: "피규어",
       contentName: `도파민베이커리-${nickname}`,
       boxCount: "1",
@@ -444,7 +466,7 @@ function parseBunjangText(text: string): ParsedRow[] {
       postalCode: withApostrophe(addressInfo.postalCode),
       phone: withApostrophe(addressInfo.phone),
       address: addressInfo.address,
-      customerOrderNo: `B${nickname}`,
+      customerOrderNo: makeCustomerOrderNo("B", nickname, orderDate),
       itemName: "피규어",
       contentName: `스와숍-${nickname}`,
       boxCount: "1",
@@ -657,7 +679,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       saved: freshRows.length,
-      skipped_count: skipped.length, 
+      skipped_count: skipped.length,
       skipped,
     });
   } catch (error: any) {
