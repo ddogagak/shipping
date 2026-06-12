@@ -119,6 +119,16 @@ export default async function HomePage() {
             <div style={titleStyle}>Inventory DB</div>
             <p style={descStyle}>DB 테이블 형태 전체 재고 관리</p>
           </Link>
+
+          <Link
+            href="/sourcing-research"
+            style={cardStyle("#ecfeff", "#67e8f9")}
+          >
+            <div style={titleStyle}>Sourcing Research</div>
+            <p style={descStyle}>
+              사입 전 상품 링크, 원가, 예상 판매가를 저장하고 이윤을 계산합니다.
+            </p>
+          </Link>
         </div>
       </section>
     </main>
