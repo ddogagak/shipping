@@ -273,9 +273,9 @@ export default function SourcingResearchPage() {
       <section style={cardStyle}>
         <div style={topRowStyle}>
           <div>
-            <h1 style={{ marginTop: 0, marginBottom: 8 }}>사입 검토 / 단가 계산</h1>
+            <h1 style={{ marginTop: 0, marginBottom: 8 }}>calculator</h1>
             <p style={{ color: "#6b7280", margin: 0 }}>
-              살까 말까 고민하는 상품 링크와 단가를 저장하고, 박스/개당 이윤을 바로 계산합니다.
+              ----
             </p>
           </div>
 
