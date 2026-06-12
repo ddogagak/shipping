@@ -249,7 +249,7 @@ export default function DomesticOrdersPage() {
   const [savingRowId, setSavingRowId] = useState<string | null>(null);
 
   const [platforms, setPlatforms] = useState<string[]>([]);
-  const [orderStatuses, setOrderStatuses] = useState<string[]>(["accepted", "checked", "kept", "packaged"]);
+  const [orderStatuses, setOrderStatuses] = useState<string[]>(["accepted", "checked","packaged"]);
   const [shippingStatuses, setShippingStatuses] = useState<string[]>([
     "start",
     "excel_exported",
