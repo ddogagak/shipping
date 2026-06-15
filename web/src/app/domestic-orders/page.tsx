@@ -931,9 +931,10 @@ export default function DomesticOrdersPage() {
         <section style={alarmBoardStyle}>
           <div style={alarmHeaderStyle}>
             <div>
-              <h2 style={alarmTitleStyle}>알람현황</h2>
+              <h2 style={alarmTitleStyle}>킵&배송현황</h2>
               <p style={alarmDescriptionStyle}>
-                최초주문일 기준 7일 이상 경과한 Wise 미배송 주문입니다.
+                -- 킵&7일 경과 주문 현황 -- 매주 화수목 출고, 7일 경과 운송장 등록, 11일 경과 발송 대상 
+                바배, 킵, 합배 등의 요청은 별도로 요청해주셔야 합니다! 
               </p>
             </div>
             <strong style={alarmCountStyle}>{alarmGroups.length}일자</strong>
