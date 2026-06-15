@@ -911,12 +911,12 @@ export default function DomesticOrdersPage() {
         <section style={alarmBoardStyle}>
           <div style={alarmHeaderStyle}>
             <div>
-              <h2 style={alarmTitleStyle}>알람현황</h2>
+              <h2 style={alarmTitleStyle}>배송&킵 현황</h2>
               <p style={alarmDescriptionStyle}>
-                최초주문일 기준 7일 이상 경과한 Wise 미배송 주문입니다.
+                ----7일 초과시 운송장 등록, 11일초과 시 바배 대상/ 매주 화수목 출고----- 
               </p>
             </div>
-            <strong style={alarmCountStyle}>{alarmGroups.length}일자</strong>
+            <strong style={alarmCountStyle}>{alarmGroups.length}건</strong>
           </div>
 
           <div style={alarmListStyle}>
