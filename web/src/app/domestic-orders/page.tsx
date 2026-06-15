@@ -913,7 +913,7 @@ export default function DomesticOrdersPage() {
             <div>
               <h2 style={alarmTitleStyle}>알람현황</h2>
               <p style={alarmDescriptionStyle}>
-                최초주문일 기준 7일 이상 경과한 Wise 미배송 주문입니다.
+                **7일 이상 킵 현황**
               </p>
             </div>
             <strong style={alarmCountStyle}>{alarmGroups.length}일자</strong>
