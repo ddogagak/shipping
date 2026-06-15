@@ -913,7 +913,7 @@ export default function DomesticOrdersPage() {
             <div>
               <h2 style={alarmTitleStyle}>알람현황</h2>
               <p style={alarmDescriptionStyle}>
-                **7일 이상 킵 현황**
+                최초주문일 기준 7일 이상 경과한 Wise 미배송 주문입니다.
               </p>
             </div>
             <strong style={alarmCountStyle}>{alarmGroups.length}일자</strong>
@@ -1600,8 +1600,8 @@ const actionBarStyle: CSSProperties = {
 const alarmBoardStyle: CSSProperties = {
   ...cardStyle,
   marginTop: 16,
-  background: "#fff7cc",
-  borderColor: "#f1d36b",
+  background: "#FFF54F",
+  borderColor: "#111827",
 };
 
 const alarmHeaderStyle: CSSProperties = {
@@ -1620,7 +1620,7 @@ const alarmTitleStyle: CSSProperties = {
 
 const alarmDescriptionStyle: CSSProperties = {
   margin: "6px 0 0",
-  color: "#7c5f00",
+  color: "#111827",
   fontSize: 13,
   fontWeight: 700,
 };
@@ -1639,10 +1639,10 @@ const alarmListStyle: CSSProperties = {
 };
 
 const alarmGroupStyle: CSSProperties = {
-  border: "1px solid #eadb9c",
+  border: "1px solid #111827",
   borderRadius: 12,
   padding: 12,
-  background: "#fffdf2",
+  background: "#fff",
 };
 
 const alarmDateStyle: CSSProperties = {
@@ -1660,7 +1660,7 @@ const alarmNicknameStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   gap: 5,
-  border: "1px solid #eadb9c",
+  border: "1px solid #111827",
   borderRadius: 8,
   padding: "5px 8px",
   background: "#fff",
