@@ -330,6 +330,26 @@ export default function DomesticOrdersPage() {
       .sort((a, b) => compareRows(a, b, sortKey, sortDirection));
   }, [rows, platforms, orderStatuses, shippingStatuses, shippingTypes, q, sortKey, sortDirection]);
 
+  const keptAlarmRows = useMemo(() => {
+    return rows
+      .filter((row) => {
+        const s = shipping(row);
+        const orderStatus = row.order_status || "accepted";
+        const shippingStatus = s?.shipping_status || "start";
+        const platform = String(row.platform || "").toLowerCase();
+
+        const isWise = platform.includes("wise");
+        const isDone = orderStatus === "done" || shippingStatus === "done";
+
+        return isWise && !isDone && orderStatus === "kept";
+      })
+      .sort((a, b) =>
+        String(a.first_order_date || a.created_at || "").localeCompare(
+          String(b.first_order_date || b.created_at || "")
+        )
+      );
+  }, [rows]);
+
   const alarmGroups = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -346,7 +366,7 @@ export default function DomesticOrdersPage() {
       const isDone = orderStatus === "done" || shippingStatus === "done";
       const firstOrderDate = row.first_order_date || row.source_order_dates?.[0] || row.created_at;
 
-      if (!isWise || isDone || !firstOrderDate) return;
+      if (!isWise || isDone || orderStatus === "kept" || !firstOrderDate) return;
 
       const dateKey = String(firstOrderDate).slice(0, 10);
       const orderDate = new Date(dateKey);
@@ -907,19 +927,44 @@ export default function DomesticOrdersPage() {
         </div>
       </section>
 
-      {alarmGroups.length ? (
+      {keptAlarmRows.length || alarmGroups.length ? (
         <section style={alarmBoardStyle}>
           <div style={alarmHeaderStyle}>
             <div>
-              <h2 style={alarmTitleStyle}>배송&킵 현황</h2>
+              <h2 style={alarmTitleStyle}>알람현황</h2>
               <p style={alarmDescriptionStyle}>
-                ----7일 초과시 운송장 등록, 11일초과 시 바배 대상/ 매주 화수목 출고----- 
+                최초주문일 기준 7일 이상 경과한 Wise 미배송 주문입니다.
               </p>
             </div>
-            <strong style={alarmCountStyle}>{alarmGroups.length}건</strong>
+            <strong style={alarmCountStyle}>{alarmGroups.length}일자</strong>
           </div>
 
           <div style={alarmListStyle}>
+            {keptAlarmRows.length ? (
+              <div style={keptAlarmGroupStyle}>
+                <div style={alarmDateStyle}>킵 현황</div>
+
+                <div style={alarmNicknameListStyle}>
+                  {keptAlarmRows.map((row) => {
+                    const s = shipping(row);
+                    const shippingStatus = s?.shipping_status || "start";
+
+                    return (
+                      <span key={row.order_id} style={alarmNicknameStyle}>
+                        {row.nickname || row.recipient_name || displayOrderNo(row)}
+
+                        <span style={keepAlarmBadgeStyle}>킵</span>
+
+                        {shippingStatus === "registered" ? (
+                          <span style={trackingAlarmBadgeStyle}>운송장등록</span>
+                        ) : null}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+
             {alarmGroups.map((group) => (
               <div key={group.date} style={alarmGroupStyle}>
                 <div style={alarmDateStyle}>
@@ -1636,6 +1681,13 @@ const alarmCountStyle: CSSProperties = {
 const alarmListStyle: CSSProperties = {
   display: "grid",
   gap: 10,
+};
+
+const keptAlarmGroupStyle: CSSProperties = {
+  border: "2px solid #111827",
+  borderRadius: 12,
+  padding: 12,
+  background: "#fffbe6",
 };
 
 const alarmGroupStyle: CSSProperties = {
