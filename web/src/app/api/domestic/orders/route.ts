@@ -319,7 +319,7 @@ export async function PATCH(req: Request) {
       .update({
         shipping_type: selectedShippingType,
         tracking_number: selectedTrackingNumber || null,
-        shipping_status: selectedTrackingNumber ? "registered" : "start",
+        shipping_status: selectedTrackingNumber ? "uploaded" : "start",
         updated_at: now,
       })
       .eq("order_id", base.order_id);
