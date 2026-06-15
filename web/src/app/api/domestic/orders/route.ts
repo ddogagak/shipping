@@ -209,6 +209,7 @@ export async function PATCH(req: Request) {
     );
 
     const base = sorted[0];
+    const nextBaseOrderStatus = base.order_status === "kept" ? "accepted" : base.order_status;
     const mergeTargets = sorted.slice(1);
     const mergeTargetIds = mergeTargets.map((order: any) => order.order_id);
 
@@ -301,6 +302,7 @@ export async function PATCH(req: Request) {
             0
           ),
         memo,
+        order_status: nextBaseOrderStatus,
         updated_at: now,
       })
       .eq("order_id", base.order_id);
@@ -510,4 +512,3 @@ export async function DELETE(req: Request) {
 
   return NextResponse.json({ ok: true, deleted: orderIds.length });
 }
-
