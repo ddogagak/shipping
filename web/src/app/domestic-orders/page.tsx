@@ -330,6 +330,45 @@ export default function DomesticOrdersPage() {
       .sort((a, b) => compareRows(a, b, sortKey, sortDirection));
   }, [rows, platforms, orderStatuses, shippingStatuses, shippingTypes, q, sortKey, sortDirection]);
 
+  const alarmGroups = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const groups = new Map<string, { date: string; days: number; rows: Row[] }>();
+
+    rows.forEach((row) => {
+      const s = shipping(row);
+      const orderStatus = row.order_status || "accepted";
+      const shippingStatus = s?.shipping_status || "start";
+      const platform = String(row.platform || "").toLowerCase();
+
+      const isWise = platform.includes("wise");
+      const isDone = orderStatus === "done" || shippingStatus === "done";
+      const firstOrderDate = row.first_order_date || row.source_order_dates?.[0] || row.created_at;
+
+      if (!isWise || isDone || !firstOrderDate) return;
+
+      const dateKey = String(firstOrderDate).slice(0, 10);
+      const orderDate = new Date(dateKey);
+
+      if (Number.isNaN(orderDate.getTime())) return;
+
+      orderDate.setHours(0, 0, 0, 0);
+
+      const days = Math.floor(
+        (today.getTime() - orderDate.getTime()) / (1000 * 60 * 60 * 24)
+      );
+
+      if (days < 7) return;
+
+      const current = groups.get(dateKey) || { date: dateKey, days, rows: [] };
+      current.rows.push(row);
+      groups.set(dateKey, current);
+    });
+
+    return Array.from(groups.values()).sort((a, b) => a.date.localeCompare(b.date));
+  }, [rows]);
+
   const selectedRows = rows.filter((row) => row.selected);
   const selectedIds = selectedRows.map((row) => row.order_id);
   const allFilteredSelected = filteredRows.length > 0 && filteredRows.every((row) => row.selected);
@@ -867,6 +906,52 @@ export default function DomesticOrdersPage() {
           />
         </div>
       </section>
+
+      {alarmGroups.length ? (
+        <section style={alarmBoardStyle}>
+          <div style={alarmHeaderStyle}>
+            <div>
+              <h2 style={alarmTitleStyle}>알람현황</h2>
+              <p style={alarmDescriptionStyle}>
+                최초주문일 기준 7일 이상 경과한 Wise 미배송 주문입니다.
+              </p>
+            </div>
+            <strong style={alarmCountStyle}>{alarmGroups.length}일자</strong>
+          </div>
+
+          <div style={alarmListStyle}>
+            {alarmGroups.map((group) => (
+              <div key={group.date} style={alarmGroupStyle}>
+                <div style={alarmDateStyle}>
+                  {group.date.replaceAll("-", ".")} ({group.days}일 경과)
+                </div>
+
+                <div style={alarmNicknameListStyle}>
+                  {group.rows.map((row) => {
+                    const s = shipping(row);
+                    const orderStatus = row.order_status || "accepted";
+                    const shippingStatus = s?.shipping_status || "start";
+
+                    return (
+                      <span key={row.order_id} style={alarmNicknameStyle}>
+                        {row.nickname || row.recipient_name || displayOrderNo(row)}
+
+                        {orderStatus === "kept" ? (
+                          <span style={keepAlarmBadgeStyle}>킵</span>
+                        ) : null}
+
+                        {shippingStatus === "registered" ? (
+                          <span style={trackingAlarmBadgeStyle}>운송장등록</span>
+                        ) : null}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section style={{ ...cardStyle, marginTop: 16 }}>
         <h2 style={{ marginTop: 0 }}>필터</h2>
@@ -1510,6 +1595,95 @@ const actionBarStyle: CSSProperties = {
   alignItems: "center",
   flexWrap: "wrap",
   marginBottom: 12,
+};
+
+const alarmBoardStyle: CSSProperties = {
+  ...cardStyle,
+  marginTop: 16,
+  background: "#fff7cc",
+  borderColor: "#f1d36b",
+};
+
+const alarmHeaderStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  alignItems: "flex-start",
+  flexWrap: "wrap",
+  marginBottom: 12,
+};
+
+const alarmTitleStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 20,
+};
+
+const alarmDescriptionStyle: CSSProperties = {
+  margin: "6px 0 0",
+  color: "#7c5f00",
+  fontSize: 13,
+  fontWeight: 700,
+};
+
+const alarmCountStyle: CSSProperties = {
+  background: "#111827",
+  color: "#fff",
+  borderRadius: 999,
+  padding: "6px 10px",
+  fontSize: 13,
+};
+
+const alarmListStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+};
+
+const alarmGroupStyle: CSSProperties = {
+  border: "1px solid #eadb9c",
+  borderRadius: 12,
+  padding: 12,
+  background: "#fffdf2",
+};
+
+const alarmDateStyle: CSSProperties = {
+  fontWeight: 900,
+  marginBottom: 8,
+};
+
+const alarmNicknameListStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
+};
+
+const alarmNicknameStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 5,
+  border: "1px solid #eadb9c",
+  borderRadius: 8,
+  padding: "5px 8px",
+  background: "#fff",
+  fontWeight: 800,
+  fontSize: 13,
+};
+
+const keepAlarmBadgeStyle: CSSProperties = {
+  borderRadius: 5,
+  padding: "1px 5px",
+  background: "#0f766e",
+  color: "#fff",
+  fontSize: 11,
+  fontWeight: 900,
+};
+
+const trackingAlarmBadgeStyle: CSSProperties = {
+  borderRadius: 5,
+  padding: "1px 5px",
+  background: "#7c3aed",
+  color: "#fff",
+  fontSize: 11,
+  fontWeight: 900,
 };
 
 const searchInputStyle: CSSProperties = {
