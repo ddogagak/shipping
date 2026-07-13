@@ -210,6 +210,74 @@ function toExcelRow(row: DomesticOrder) {
   };
 }
 
+const HANJIN_HEADERS = [
+  "순번",
+  "이름",
+  "핸드폰번호",
+  "연락처",
+  "우편번호",
+  "주소",
+  "상세주소",
+  "박스타입",
+  "물품명",
+  "제품단가",
+  "요청사항",
+];
+
+function formatHanjinPhone(value?: string | null) {
+  const digits = String(value || "").replace(/\D/g, "");
+
+  if (digits.length === 12) {
+    return `${digits.slice(0, 4)}-${digits.slice(4, 8)}-${digits.slice(8, 12)}`;
+  }
+
+  if (digits.length === 11) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7, 11)}`;
+  }
+
+  return digits;
+}
+
+function formatHanjinPostalCode(value?: string | null) {
+  const digits = String(value || "").replace(/\D/g, "");
+  return digits.slice(0, 5);
+}
+
+function splitHanjinAddress(value?: string | null) {
+  const address = String(value || "").trim();
+  const commaIndex = address.indexOf(",");
+
+  if (commaIndex < 0) {
+    return {
+      mainAddress: address,
+      detailAddress: "",
+    };
+  }
+
+  return {
+    mainAddress: address.slice(0, commaIndex).trim(),
+    detailAddress: address.slice(commaIndex + 1).trim(),
+  };
+}
+
+function toHanjinExcelRow(row: DomesticOrder, index: number) {
+  const { mainAddress, detailAddress } = splitHanjinAddress(row.address);
+
+  return {
+    순번: index + 1,
+    이름: row.recipient_name || "",
+    핸드폰번호: formatHanjinPhone(row.phone),
+    연락처: "",
+    우편번호: formatHanjinPostalCode(row.postal_code),
+    주소: mainAddress,
+    상세주소: detailAddress,
+    박스타입: "A",
+    물품명: row.nickname || "",
+    제품단가: 10,
+    요청사항: "from도파민베이커리",
+  };
+}
+
 function sortValue(row: Row, key: SortKey): string | number {
   const s = shipping(row);
 
@@ -855,6 +923,55 @@ export default function DomesticOrdersPage() {
     await patch("excel_exported");
   }
 
+  async function exportHanjinExcel() {
+    if (!selectedRows.length) {
+      alert("한진 엑셀 추출할 주문을 선택해줘.");
+      return;
+    }
+
+    const data = selectedRows.map((row, index) => toHanjinExcelRow(row, index));
+    const worksheet = XLSX.utils.json_to_sheet(data, {
+      header: HANJIN_HEADERS,
+    });
+
+    worksheet["!cols"] = [
+      { wch: 8 },
+      { wch: 14 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 10 },
+      { wch: 42 },
+      { wch: 34 },
+      { wch: 10 },
+      { wch: 20 },
+      { wch: 12 },
+      { wch: 24 },
+    ];
+
+    for (let rowIndex = 2; rowIndex <= data.length + 1; rowIndex += 1) {
+      const phoneCell = worksheet[`C${rowIndex}`];
+      const postalCell = worksheet[`E${rowIndex}`];
+
+      if (phoneCell) phoneCell.t = "s";
+      if (postalCell) postalCell.t = "s";
+    }
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "한진택배");
+
+    const now = new Date();
+    const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(
+      2,
+      "0"
+    )}${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(
+      2,
+      "0"
+    )}${String(now.getMinutes()).padStart(2, "0")}`;
+
+    XLSX.writeFile(workbook, `hanjin_shipping_${stamp}.xlsx`);
+    await patch("excel_exported");
+  }
+
   function exportTrackingExcel() {
     const data = filteredRows
       .filter((row) => shipping(row)?.tracking_number)
@@ -1055,6 +1172,10 @@ export default function DomesticOrdersPage() {
 
             <button type="button" onClick={exportExcel} style={blackButtonStyle}>
               선택 {selectedIds.length}건 엑셀 추출
+            </button>
+
+            <button type="button" onClick={exportHanjinExcel} style={blueButtonStyle}>
+              선택 {selectedIds.length}건 한진 엑셀
             </button>
 
             <button type="button" onClick={exportTrackingExcel} style={blueButtonStyle}>
