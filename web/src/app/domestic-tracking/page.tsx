@@ -7,9 +7,8 @@ import * as XLSX from "xlsx";
 type TrackingPreviewRow = {
   id: string;
   selected: boolean;
-  order_key: string;
   phone: string;
-  product_name: string;
+  file_recipient_name: string;
   tracking_number: string;
   final_product_status: string;
   matched_order_id?: string;
@@ -27,6 +26,8 @@ type TrackingPreviewRow = {
   match_status: string;
   tracking_comparison?: "new" | "same" | "changed" | "unmatched";
   already_done?: boolean;
+  recipient_name_mismatch?: boolean;
+  phone_candidate_count?: number;
   can_save?: boolean;
   next_shipping_status: string;
   next_order_status: string;
@@ -83,15 +84,13 @@ function makeId(index: number) {
 
 function matchStatusLabel(status: string) {
   const labels: Record<string, string> = {
-    matched_by_order_id: "주문번호 매칭",
-    matched_by_customer_order_no: "고객주문번호 매칭",
-    matched_by_normalized_order_no: "정규화 주문번호 매칭",
     matched_by_phone: "전화번호 매칭",
-    matched_by_nickname: "물품명(닉네임) 매칭",
+    matched_by_masked_phone: "마스킹 번호 매칭",
     duplicate_phone: "전화번호 중복",
-    duplicate_nickname: "닉네임 중복",
+    duplicate_masked_phone: "마스킹 번호 중복",
+    missing_phone: "전화번호 없음",
     missing_tracking: "운송장 없음",
-    not_found: "미매칭",
+    not_found: "전화번호 미매칭",
   };
   return labels[status] || status || "-";
 }
@@ -175,7 +174,6 @@ export default function DomesticTrackingPage() {
 
       const headers = rawRows[headerRowIndex];
       const trackingIndex = findHeaderIndex(headers, ["운송장번호"]);
-      const orderKeyIndex = findHeaderIndex(headers, ["고객주문번호", "주문번호", "order_id"]);
       const phoneIndex = findHeaderIndex(headers, [
         "핸드폰번호",
         "휴대폰번호",
@@ -187,12 +185,21 @@ export default function DomesticTrackingPage() {
         "받는사람연락처",
         "수취인연락처",
       ]);
-      const productNameIndex = findHeaderIndex(headers, ["물품명", "상품명", "닉네임"]);
+      const recipientNameIndex = findHeaderIndex(headers, [
+        "받는분성함",
+        "받는분성명",
+        "받는사람성함",
+        "받는사람성명",
+        "수취인",
+        "수취인명",
+        "수하인",
+        "수하인명",
+      ]);
       const finalStatusIndex = findHeaderIndex(headers, ["최종상품상태"]);
       const fallbackFinalStatusIndex = 17; // 엑셀 기준 R열
 
-      if (trackingIndex < 0 || (orderKeyIndex < 0 && phoneIndex < 0 && productNameIndex < 0)) {
-        setMessage("운송장번호와 주문번호, 전화번호 또는 물품명 컬럼을 찾을 수 없어.");
+      if (trackingIndex < 0 || phoneIndex < 0) {
+        setMessage("운송장번호 또는 받는분연락처(전화번호) 컬럼을 찾을 수 없어.");
         return;
       }
 
@@ -207,14 +214,13 @@ export default function DomesticTrackingPage() {
           return {
             id: makeId(index),
             selected: true,
-            order_key: valueAt(row, orderKeyIndex),
             phone: valueAt(row, phoneIndex),
-            product_name: valueAt(row, productNameIndex),
+            file_recipient_name: valueAt(row, recipientNameIndex),
             tracking_number: cleanTrackingNumber(valueAt(row, trackingIndex)),
             final_product_status: finalStatus,
           };
         })
-        .filter((row) => row.order_key || row.phone || row.product_name || row.tracking_number);
+        .filter((row) => row.phone || row.tracking_number);
 
       if (!parsedRows.length) {
         setMessage("미리보기할 운송장 데이터가 없어.");
@@ -300,7 +306,7 @@ export default function DomesticTrackingPage() {
         <div>
           <h1 style={{ margin: 0 }}>Domestic Tracking Upload</h1>
           <p style={{ color: "#6b7280", margin: "6px 0 0" }}>
-            운송장 파일을 미리보기하고 전화번호를 우선으로 주문과 매칭한 뒤, 선택한 행만 DB에 저장합니다.
+            운송장 파일의 전화번호만으로 주문을 매칭합니다. 수취인 이름이 다르면 경고만 표시하고, 매칭에는 사용하지 않습니다.
           </p>
         </div>
 
@@ -386,7 +392,7 @@ export default function DomesticTrackingPage() {
                   <th style={thStyle}>매칭상태</th>
                   <th style={thStyle}>DB 주문번호</th>
                   <th style={thStyle}>닉네임</th>
-                  <th style={thStyle}>수취인</th>
+                  <th style={thStyle}>수취인 비교</th>
                   <th style={thStyle}>현재 주문상태</th>
                   <th style={thStyle}>현재 배송상태</th>
                   <th style={thStyle}>배송수단</th>
@@ -395,8 +401,7 @@ export default function DomesticTrackingPage() {
                   <th style={thStyle}>비교 결과</th>
                   <th style={thStyle}>업로드 후</th>
                   <th style={thStyle}>파일 전화번호</th>
-                  <th style={thStyle}>물품명</th>
-                  <th style={thStyle}>최종상품상태</th>
+                                    <th style={thStyle}>최종상품상태</th>
                 </tr>
               </thead>
               <tbody>
@@ -420,15 +425,24 @@ export default function DomesticTrackingPage() {
                           onChange={(event) => updateRow(row.id, { selected: event.target.checked })}
                         />
                       </td>
-                      <td style={tdStyle}>{matchStatusLabel(row.match_status)}</td>
+                      <td style={tdStyle}>
+                        <div>{matchStatusLabel(row.match_status)}</div>
+                        {row.phone_candidate_count && row.phone_candidate_count > 1 ? (
+                          <div style={nameWarningStyle}>후보 {row.phone_candidate_count}건</div>
+                        ) : null}
+                      </td>
                       <td style={tdStyle}>
                         <div style={{ fontWeight: 800 }}>{row.customer_order_no || row.matched_order_id || "-"}</div>
                         {row.matched_order_id ? <div style={subTextStyle}>{row.matched_order_id}</div> : null}
                       </td>
                       <td style={tdStyle}>{row.nickname || "-"}</td>
                       <td style={tdStyle}>
-                        <div>{row.recipient_name || "-"}</div>
-                        {row.db_phone ? <div style={subTextStyle}>{row.db_phone}</div> : null}
+                        <div style={{ fontWeight: 800 }}>DB: {row.recipient_name || "-"}</div>
+                        <div style={subTextStyle}>파일: {row.file_recipient_name || "-"}</div>
+                        {row.db_phone ? <div style={subTextStyle}>DB 번호: {row.db_phone}</div> : null}
+                        {row.recipient_name_mismatch ? (
+                          <div style={nameWarningStyle}>⚠ 수취인 이름 다름</div>
+                        ) : null}
                       </td>
                       <td style={tdStyle}>
                         <span style={statusBadgeStyle(row.current_order_status === "done")}>
@@ -456,7 +470,6 @@ export default function DomesticTrackingPage() {
                       </td>
                       <td style={tdStyle}>{statusText(row)}</td>
                       <td style={tdStyle}>{row.phone || "-"}</td>
-                      <td style={tdStyle}>{row.product_name || "-"}</td>
                       <td style={tdStyle}>{row.final_product_status || "-"}</td>
                     </tr>
                   );
@@ -670,4 +683,11 @@ const completedRowStyle: CSSProperties = {
 
 const changedRowStyle: CSSProperties = {
   background: "#fffbeb",
+};
+
+const nameWarningStyle: CSSProperties = {
+  marginTop: 4,
+  color: "#b45309",
+  fontSize: 11,
+  fontWeight: 900,
 };
