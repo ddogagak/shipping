@@ -510,8 +510,8 @@ export default function StockImportPage() {
                             <input
                               value={variant.name}
                               onChange={(event) => updateVariant(draft.id, variant.id, { name: event.target.value })}
-                              style={{ ...inputStyle, minWidth: 0 }}
-                              placeholder="옵션 이름"
+                              style={{ ...inputStyle, minWidth: 0, padding: "9px 7px", fontSize: 13 }}
+                              placeholder="이름"
                             />
                             <input
                               value={variant.code}
@@ -629,11 +629,51 @@ const modeButtonsStyle: CSSProperties = { display: "grid", gridTemplateColumns: 
 const modeStyle: CSSProperties = { border: "1px solid #d1d5db", borderRadius: 11, padding: "10px", background: "#fff", fontWeight: 800 };
 const activeModeStyle: CSSProperties = { ...modeStyle, borderColor: "#7c3aed", background: "#f5f3ff", color: "#6d28d9" };
 const variantBoxStyle: CSSProperties = { border: "1px solid #e5e7eb", borderRadius: 14, padding: 10, background: "#fafafa" };
-const variantRowStyle: CSSProperties = { display: "grid", gridTemplateColumns: "minmax(92px, 1fr) 74px auto 30px", gap: 6, alignItems: "center" };
-const codeInputStyle: CSSProperties = { ...inputStyle, width: 74, paddingInline: 7, textAlign: "center", fontWeight: 900, fontSize: 12 };
-const stepperStyle: CSSProperties = { display: "grid", gridTemplateColumns: "34px 42px 34px", alignItems: "center", border: "1px solid #d1d5db", borderRadius: 10, overflow: "hidden", background: "#fff" };
-const stepButtonStyle: CSSProperties = { height: 38, border: 0, background: "#f3f4f6", fontSize: 20, fontWeight: 900 };
-const qtyInputStyle: CSSProperties = { width: 42, height: 38, border: 0, textAlign: "center", fontWeight: 900, padding: 0 };
+const variantRowStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(72px, 96px) 56px minmax(124px, 1fr) 28px",
+  gap: 4,
+  alignItems: "center",
+};
+const codeInputStyle: CSSProperties = {
+  ...inputStyle,
+  width: 56,
+  minWidth: 0,
+  padding: "9px 4px",
+  textAlign: "center",
+  fontWeight: 900,
+  fontSize: 11,
+};
+const stepperStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "40px 38px 40px",
+  alignItems: "center",
+  justifyContent: "center",
+  border: "1px solid #d1d5db",
+  borderRadius: 10,
+  overflow: "hidden",
+  background: "#fff",
+  minWidth: 118,
+};
+const stepButtonStyle: CSSProperties = {
+  width: 40,
+  height: 42,
+  border: 0,
+  background: "#f3f4f6",
+  fontSize: 22,
+  fontWeight: 900,
+  cursor: "pointer",
+  touchAction: "manipulation",
+};
+const qtyInputStyle: CSSProperties = {
+  width: 38,
+  height: 42,
+  border: 0,
+  textAlign: "center",
+  fontWeight: 900,
+  padding: 0,
+  fontSize: 14,
+};
 const removeVariantStyle: CSSProperties = { width: 30, height: 30, borderRadius: 999, border: 0, background: "#fee2e2", color: "#b91c1c", fontWeight: 900 };
 const emptyOptionStyle: CSSProperties = { padding: 12, background: "#f9fafb", color: "#6b7280", borderRadius: 10, fontSize: 13 };
 const saveAllStyle: CSSProperties = { border: 0, borderRadius: 14, padding: "14px 16px", background: "#111827", color: "#fff", fontWeight: 900, fontSize: 15 };
