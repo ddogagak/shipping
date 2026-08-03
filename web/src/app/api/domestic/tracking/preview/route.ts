@@ -8,6 +8,7 @@ type IncomingRow = {
   selected?: boolean;
   order_key?: string;
   phone?: string;
+  file_recipient_name?: string;
   product_name?: string;
   tracking_number?: string;
   final_product_status?: string;
@@ -46,23 +47,24 @@ function cleanTrackingNumber(value: unknown) {
   return safeText(value).replace(/^'+/, "");
 }
 
-function normalizePhone(value: unknown) {
-  return safeText(value).replace(/\D/g, "");
-}
-
-function hasMaskedPhone(value: unknown) {
-  return /[*xX]/.test(safeText(value));
+function normalizePersonName(value: unknown) {
+  return safeText(value)
+    .normalize("NFKC")
+    .replace(/\s+/g, "")
+    .replace(/[()（）]/g, "")
+    .toLowerCase();
 }
 
 function normalizeNickname(value: unknown) {
-  return safeText(value).replace(/\s+/g, "").toLowerCase();
+  return safeText(value)
+    .normalize("NFKC")
+    .replace(/^(스와숍|도파민베이커리)[-_\s]*/i, "")
+    .replace(/\s+/g, "")
+    .toLowerCase();
 }
 
-function normalizeOrderKey(value: unknown) {
-  return safeText(value)
-    .replace(/\s+/g, "")
-    .replace(/[（(][^）)]*[）)]/g, "")
-    .replace(/-C\d+$/i, "");
+function nicknamePrefix(value: unknown) {
+  return Array.from(normalizeNickname(value)).slice(0, 4).join("");
 }
 
 function isCompleteStatus(value: unknown) {
@@ -98,7 +100,6 @@ function addCandidate(
 function pickSingle(candidates: DomesticOrderMatchRow[]) {
   if (candidates.length === 1) return candidates[0];
 
-  // 같은 키로 여러 주문이 있을 때 완료되지 않은 주문이 정확히 하나면 그 주문을 사용한다.
   const active = candidates.filter((order) => {
     const s = shipping(order);
     return order.order_status !== "done" && s?.shipping_status !== "done";
@@ -119,11 +120,11 @@ export async function POST(req: Request) {
       id: safeText(row.id) || String(index),
       selected: Boolean(row.selected),
       order_key: safeText(row.order_key),
-      normalized_order_key: normalizeOrderKey(row.order_key),
       phone: safeText(row.phone),
-      normalized_phone: hasMaskedPhone(row.phone) ? "" : normalizePhone(row.phone),
+      file_recipient_name: safeText(row.file_recipient_name),
+      normalized_recipient_name: normalizePersonName(row.file_recipient_name),
       product_name: safeText(row.product_name),
-      normalized_nickname: normalizeNickname(row.product_name),
+      nickname_prefix: nicknamePrefix(row.product_name),
       tracking_number: cleanTrackingNumber(row.tracking_number),
       final_product_status: safeText(row.final_product_status),
     }));
@@ -158,41 +159,36 @@ export async function POST(req: Request) {
     }
 
     const orders = (data || []) as DomesticOrderMatchRow[];
-    const orderKeyMap = new Map<string, DomesticOrderMatchRow[]>();
-    const phoneMap = new Map<string, DomesticOrderMatchRow[]>();
-    const nicknameMap = new Map<string, DomesticOrderMatchRow[]>();
+    const recipientNameMap = new Map<string, DomesticOrderMatchRow[]>();
+    const nicknamePrefixMap = new Map<string, DomesticOrderMatchRow[]>();
 
     for (const order of orders) {
-      const rawOrderId = safeText(order.order_id);
-      const rawCustomerNo = safeText(order.customer_order_no);
-
-      addCandidate(orderKeyMap, rawOrderId, order);
-      addCandidate(orderKeyMap, rawCustomerNo, order);
-      addCandidate(orderKeyMap, normalizeOrderKey(rawOrderId), order);
-      addCandidate(orderKeyMap, normalizeOrderKey(rawCustomerNo), order);
-      addCandidate(phoneMap, normalizePhone(order.phone), order);
-      addCandidate(nicknameMap, normalizeNickname(order.nickname), order);
+      addCandidate(
+        recipientNameMap,
+        normalizePersonName(order.recipient_name),
+        order
+      );
+      addCandidate(
+        nicknamePrefixMap,
+        nicknamePrefix(order.nickname),
+        order
+      );
     }
 
     const previewRows = normalizedRows.map((row) => {
-      const phoneCandidates = row.normalized_phone
-        ? phoneMap.get(row.normalized_phone) || []
+      const recipientCandidates = row.normalized_recipient_name
+        ? recipientNameMap.get(row.normalized_recipient_name) || []
         : [];
-      const orderCandidates = [
-        ...(orderKeyMap.get(row.order_key) || []),
-        ...(orderKeyMap.get(row.normalized_order_key) || []),
-      ].filter(
-        (order, index, list) =>
-          list.findIndex((item) => item.order_id === order.order_id) === index
-      );
-      const nicknameCandidates = row.normalized_nickname
-        ? nicknameMap.get(row.normalized_nickname) || []
+      const nicknameCandidates = row.nickname_prefix
+        ? nicknamePrefixMap.get(row.nickname_prefix) || []
         : [];
 
-      const matchedByPhone = pickSingle(phoneCandidates);
-      const matchedByOrder = pickSingle(orderCandidates);
-      const matchedByNickname = pickSingle(nicknameCandidates);
-      const matched = matchedByPhone || matchedByOrder || matchedByNickname;
+      const matchedByRecipient = pickSingle(recipientCandidates);
+      const matchedByNicknamePrefix = matchedByRecipient
+        ? undefined
+        : pickSingle(nicknameCandidates);
+      const matched = matchedByRecipient || matchedByNicknamePrefix;
+
       const currentShipping = shipping(matched);
       const completeFromFile = isCompleteStatus(row.final_product_status);
       const currentOrderStatus = matched?.order_status || "";
@@ -206,26 +202,22 @@ export async function POST(req: Request) {
       let matchStatus = "not_found";
       if (!row.tracking_number) {
         matchStatus = "missing_tracking";
-      } else if (row.normalized_phone && phoneCandidates.length > 1 && !matchedByPhone) {
-        matchStatus = "duplicate_phone";
-      } else if (matchedByPhone) {
-        matchStatus = "matched_by_phone";
-      } else if (matchedByOrder) {
-        if (matchedByOrder.order_id === row.order_key) {
-          matchStatus = "matched_by_order_id";
-        } else if (matchedByOrder.customer_order_no === row.order_key) {
-          matchStatus = "matched_by_customer_order_no";
-        } else {
-          matchStatus = "matched_by_normalized_order_no";
-        }
       } else if (
-        row.normalized_nickname &&
-        nicknameCandidates.length > 1 &&
-        !matchedByNickname
+        row.normalized_recipient_name &&
+        recipientCandidates.length > 1 &&
+        !matchedByRecipient
       ) {
-        matchStatus = "duplicate_nickname";
-      } else if (matchedByNickname) {
-        matchStatus = "matched_by_nickname";
+        matchStatus = "duplicate_recipient_name";
+      } else if (matchedByRecipient) {
+        matchStatus = "matched_by_recipient_name";
+      } else if (
+        row.nickname_prefix &&
+        nicknameCandidates.length > 1 &&
+        !matchedByNicknamePrefix
+      ) {
+        matchStatus = "duplicate_nickname_prefix";
+      } else if (matchedByNicknamePrefix) {
+        matchStatus = "matched_by_nickname_prefix";
       }
 
       const trackingComparison = !matched
@@ -245,9 +237,7 @@ export async function POST(req: Request) {
         ? "done"
         : currentOrderStatus;
 
-      const canSave = Boolean(
-        matched && row.tracking_number && !alreadyDone
-      );
+      const canSave = Boolean(matched && row.tracking_number && !alreadyDone);
 
       return {
         ...row,
@@ -270,8 +260,9 @@ export async function POST(req: Request) {
         can_save: canSave,
         next_shipping_status: nextShippingStatus,
         next_order_status: nextOrderStatus,
-        duplicate_phone_count: phoneCandidates.length > 1 ? phoneCandidates.length : 0,
-        duplicate_nickname_count:
+        duplicate_recipient_name_count:
+          recipientCandidates.length > 1 ? recipientCandidates.length : 0,
+        duplicate_nickname_prefix_count:
           nicknameCandidates.length > 1 ? nicknameCandidates.length : 0,
       };
     });
