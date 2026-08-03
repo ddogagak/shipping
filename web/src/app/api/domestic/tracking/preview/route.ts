@@ -13,12 +13,25 @@ type IncomingRow = {
   final_product_status?: string;
 };
 
+type ShippingRow = {
+  carrier: string | null;
+  shipping_type: string | null;
+  tracking_number: string | null;
+  shipping_status: string | null;
+  excel_exported_at: string | null;
+};
+
 type DomesticOrderMatchRow = {
   order_id: string;
   customer_order_no: string | null;
-  recipient_name: string | null;
   nickname: string | null;
+  recipient_name: string | null;
   phone: string | null;
+  postal_code: string | null;
+  address: string | null;
+  order_status: string | null;
+  first_order_date: string | null;
+  domestic_shipping: ShippingRow | ShippingRow[] | null;
 };
 
 function safeText(value: unknown) {
@@ -54,7 +67,6 @@ function normalizeOrderKey(value: unknown) {
 
 function isCompleteStatus(value: unknown) {
   const status = normalizeStatus(value);
-
   return (
     status.includes("배송출발") ||
     status.includes("배송완료") ||
@@ -62,24 +74,37 @@ function isCompleteStatus(value: unknown) {
   );
 }
 
-function addOrderToMap(
-  map: Map<string, DomesticOrderMatchRow>,
+function shipping(order?: DomesticOrderMatchRow) {
+  if (!order) return null;
+  if (Array.isArray(order.domestic_shipping)) {
+    return order.domestic_shipping[0] || null;
+  }
+  return order.domestic_shipping || null;
+}
+
+function addCandidate(
+  map: Map<string, DomesticOrderMatchRow[]>,
+  key: string,
   order: DomesticOrderMatchRow
 ) {
-  const keys = [
-    order.order_id,
-    order.customer_order_no,
-    normalizeOrderKey(order.order_id),
-    normalizeOrderKey(order.customer_order_no),
-  ]
-    .map((value) => safeText(value))
-    .filter(Boolean);
+  if (!key) return;
+  const list = map.get(key) || [];
+  if (!list.some((item) => item.order_id === order.order_id)) {
+    list.push(order);
+  }
+  map.set(key, list);
+}
 
-  keys.forEach((key) => {
-    if (!map.has(key)) {
-      map.set(key, order);
-    }
+function pickSingle(candidates: DomesticOrderMatchRow[]) {
+  if (candidates.length === 1) return candidates[0];
+
+  // 같은 키로 여러 주문이 있을 때 완료되지 않은 주문이 정확히 하나면 그 주문을 사용한다.
+  const active = candidates.filter((order) => {
+    const s = shipping(order);
+    return order.order_status !== "done" && s?.shipping_status !== "done";
   });
+
+  return active.length === 1 ? active[0] : undefined;
 }
 
 export async function POST(req: Request) {
@@ -103,222 +128,157 @@ export async function POST(req: Request) {
       final_product_status: safeText(row.final_product_status),
     }));
 
-    const orderKeys = Array.from(
-      new Set(
-        normalizedRows
-          .flatMap((row) => [row.order_key, row.normalized_order_key])
-          .filter(Boolean)
-      )
-    );
-
-    const phoneKeys = Array.from(
-      new Set(normalizedRows.map((row) => row.normalized_phone).filter(Boolean))
-    );
-
-    const nicknameKeys = Array.from(
-      new Set(normalizedRows.map((row) => row.normalized_nickname).filter(Boolean))
-    );
-
     const supabase = createServiceRoleClient();
+    const { data, error } = await supabase
+      .from("domestic_order")
+      .select(`
+        order_id,
+        customer_order_no,
+        nickname,
+        recipient_name,
+        phone,
+        postal_code,
+        address,
+        order_status,
+        first_order_date,
+        domestic_shipping (
+          carrier,
+          shipping_type,
+          tracking_number,
+          shipping_status,
+          excel_exported_at
+        )
+      `);
 
-    const orderMap = new Map<string, DomesticOrderMatchRow>();
+    if (error) {
+      return NextResponse.json(
+        { error: "국내 주문 조회 실패", detail: error.message },
+        { status: 500 }
+      );
+    }
+
+    const orders = (data || []) as DomesticOrderMatchRow[];
+    const orderKeyMap = new Map<string, DomesticOrderMatchRow[]>();
     const phoneMap = new Map<string, DomesticOrderMatchRow[]>();
     const nicknameMap = new Map<string, DomesticOrderMatchRow[]>();
 
-    const addNicknameMatch = (order: DomesticOrderMatchRow) => {
-      const nickname = normalizeNickname(order.nickname);
-      if (!nickname) return;
-      const list = nicknameMap.get(nickname) || [];
-      if (!list.some((item) => item.order_id === order.order_id)) list.push(order);
-      nicknameMap.set(nickname, list);
-    };
+    for (const order of orders) {
+      const rawOrderId = safeText(order.order_id);
+      const rawCustomerNo = safeText(order.customer_order_no);
 
-    const addPhoneMatch = (order: DomesticOrderMatchRow) => {
-      const phone = normalizePhone(order.phone);
-      if (!phone) return;
-
-      const list = phoneMap.get(phone) || [];
-      if (!list.some((item) => item.order_id === order.order_id)) {
-        list.push(order);
-      }
-      phoneMap.set(phone, list);
-    };
-
-    if (phoneKeys.length) {
-      const { data: phoneOrders, error: phoneOrdersError } = await supabase
-        .from("domestic_order")
-        .select("order_id, customer_order_no, recipient_name, nickname, phone")
-        .not("phone", "is", null);
-
-      if (phoneOrdersError) {
-        return NextResponse.json(
-          { error: "전화번호 조회 실패", detail: phoneOrdersError.message },
-          { status: 500 }
-        );
-      }
-
-      for (const order of phoneOrders || []) {
-        const typedOrder = order as DomesticOrderMatchRow;
-        if (phoneKeys.includes(normalizePhone(typedOrder.phone))) {
-          addPhoneMatch(typedOrder);
-          addNicknameMatch(typedOrder);
-        }
-      }
-    }
-
-    if (nicknameKeys.length) {
-      const { data: nicknameOrders, error: nicknameOrdersError } = await supabase
-        .from("domestic_order")
-        .select("order_id, customer_order_no, recipient_name, nickname, phone")
-        .not("nickname", "is", null);
-
-      if (nicknameOrdersError) {
-        return NextResponse.json(
-          { error: "닉네임 조회 실패", detail: nicknameOrdersError.message },
-          { status: 500 }
-        );
-      }
-
-      for (const order of nicknameOrders || []) {
-        const typedOrder = order as DomesticOrderMatchRow;
-        if (nicknameKeys.includes(normalizeNickname(typedOrder.nickname))) {
-          addNicknameMatch(typedOrder);
-        }
-      }
-    }
-
-    if (orderKeys.length) {
-      const { data: byOrderId, error: orderIdError } = await supabase
-        .from("domestic_order")
-        .select("order_id, customer_order_no, recipient_name, nickname, phone")
-        .in("order_id", orderKeys);
-
-      if (orderIdError) {
-        return NextResponse.json(
-          { error: "주문번호 조회 실패", detail: orderIdError.message },
-          { status: 500 }
-        );
-      }
-
-      const { data: byCustomerOrderNo, error: customerOrderNoError } = await supabase
-        .from("domestic_order")
-        .select("order_id, customer_order_no, recipient_name, nickname, phone")
-        .in("customer_order_no", orderKeys);
-
-      if (customerOrderNoError) {
-        return NextResponse.json(
-          { error: "고객주문번호 조회 실패", detail: customerOrderNoError.message },
-          { status: 500 }
-        );
-      }
-
-      for (const row of [...(byOrderId || []), ...(byCustomerOrderNo || [])]) {
-        const typedRow = row as DomesticOrderMatchRow;
-        addOrderToMap(orderMap, typedRow);
-        addPhoneMatch(typedRow);
-        addNicknameMatch(typedRow);
-      }
-
-      const stillUnmatchedKeys = normalizedRows
-        .filter((row) => {
-          const phoneMatches = row.normalized_phone
-            ? phoneMap.get(row.normalized_phone) || []
-            : [];
-
-          return (
-            phoneMatches.length === 0 &&
-            row.order_key &&
-            !orderMap.get(row.order_key) &&
-            !orderMap.get(row.normalized_order_key)
-          );
-        })
-        .map((row) => row.normalized_order_key)
-        .filter(Boolean);
-
-      if (stillUnmatchedKeys.length) {
-        const { data: allOrders, error: allOrdersError } = await supabase
-          .from("domestic_order")
-          .select("order_id, customer_order_no, recipient_name, nickname, phone");
-
-        if (allOrdersError) {
-          return NextResponse.json(
-            { error: "전체 주문번호 조회 실패", detail: allOrdersError.message },
-            { status: 500 }
-          );
-        }
-
-        for (const row of allOrders || []) {
-          const typedRow = row as DomesticOrderMatchRow;
-          addOrderToMap(orderMap, typedRow);
-          addPhoneMatch(typedRow);
-        addNicknameMatch(typedRow);
-        }
-      }
+      addCandidate(orderKeyMap, rawOrderId, order);
+      addCandidate(orderKeyMap, rawCustomerNo, order);
+      addCandidate(orderKeyMap, normalizeOrderKey(rawOrderId), order);
+      addCandidate(orderKeyMap, normalizeOrderKey(rawCustomerNo), order);
+      addCandidate(phoneMap, normalizePhone(order.phone), order);
+      addCandidate(nicknameMap, normalizeNickname(order.nickname), order);
     }
 
     const previewRows = normalizedRows.map((row) => {
-      const phoneMatches = row.normalized_phone
+      const phoneCandidates = row.normalized_phone
         ? phoneMap.get(row.normalized_phone) || []
         : [];
-
-      const nicknameMatches = row.normalized_nickname
+      const orderCandidates = [
+        ...(orderKeyMap.get(row.order_key) || []),
+        ...(orderKeyMap.get(row.normalized_order_key) || []),
+      ].filter(
+        (order, index, list) =>
+          list.findIndex((item) => item.order_id === order.order_id) === index
+      );
+      const nicknameCandidates = row.normalized_nickname
         ? nicknameMap.get(row.normalized_nickname) || []
         : [];
 
-      const matchedByPhone =
-        phoneMatches.length === 1 ? phoneMatches[0] : undefined;
-      const matchedByNickname =
-        nicknameMatches.length === 1 ? nicknameMatches[0] : undefined;
+      const matchedByPhone = pickSingle(phoneCandidates);
+      const matchedByOrder = pickSingle(orderCandidates);
+      const matchedByNickname = pickSingle(nicknameCandidates);
+      const matched = matchedByPhone || matchedByOrder || matchedByNickname;
+      const currentShipping = shipping(matched);
+      const completeFromFile = isCompleteStatus(row.final_product_status);
+      const currentOrderStatus = matched?.order_status || "";
+      const currentShippingStatus = currentShipping?.shipping_status || "start";
+      const existingTrackingNumber = cleanTrackingNumber(
+        currentShipping?.tracking_number
+      );
+      const alreadyDone =
+        currentOrderStatus === "done" || currentShippingStatus === "done";
 
-      const matchedByOrderNo =
-        orderMap.get(row.order_key) ||
-        orderMap.get(row.normalized_order_key);
-
-      const matched = matchedByPhone || matchedByOrderNo || matchedByNickname;
-      const complete = isCompleteStatus(row.final_product_status);
       let matchStatus = "not_found";
-
       if (!row.tracking_number) {
         matchStatus = "missing_tracking";
-      } else if (phoneMatches.length > 1) {
+      } else if (row.normalized_phone && phoneCandidates.length > 1 && !matchedByPhone) {
         matchStatus = "duplicate_phone";
       } else if (matchedByPhone) {
         matchStatus = "matched_by_phone";
-      } else if (nicknameMatches.length > 1) {
+      } else if (matchedByOrder) {
+        if (matchedByOrder.order_id === row.order_key) {
+          matchStatus = "matched_by_order_id";
+        } else if (matchedByOrder.customer_order_no === row.order_key) {
+          matchStatus = "matched_by_customer_order_no";
+        } else {
+          matchStatus = "matched_by_normalized_order_no";
+        }
+      } else if (
+        row.normalized_nickname &&
+        nicknameCandidates.length > 1 &&
+        !matchedByNickname
+      ) {
         matchStatus = "duplicate_nickname";
       } else if (matchedByNickname) {
         matchStatus = "matched_by_nickname";
-      } else if (matched?.order_id === row.order_key) {
-        matchStatus = "matched_by_order_id";
-      } else if (matched?.customer_order_no === row.order_key) {
-        matchStatus = "matched_by_customer_order_no";
-      } else if (matched) {
-        matchStatus = "matched_by_normalized_order_no";
       }
+
+      const trackingComparison = !matched
+        ? "unmatched"
+        : !existingTrackingNumber
+          ? "new"
+          : existingTrackingNumber === row.tracking_number
+            ? "same"
+            : "changed";
+
+      const nextShippingStatus = alreadyDone
+        ? "done"
+        : completeFromFile
+          ? "done"
+          : "uploaded";
+      const nextOrderStatus = alreadyDone || completeFromFile
+        ? "done"
+        : currentOrderStatus;
+
+      const canSave = Boolean(
+        matched && row.tracking_number && !alreadyDone
+      );
 
       return {
         ...row,
-        selected: Boolean(
-          matched &&
-          row.tracking_number &&
-          row.tracking_number.length >= 8 &&
-          phoneMatches.length <= 1 &&
-          nicknameMatches.length <= 1
-        ),
+        selected: canSave,
         matched_order_id: matched?.order_id || "",
         customer_order_no: matched?.customer_order_no || "",
+        nickname: matched?.nickname || "",
         recipient_name: matched?.recipient_name || "",
+        db_phone: matched?.phone || "",
+        postal_code: matched?.postal_code || "",
+        address: matched?.address || "",
+        first_order_date: matched?.first_order_date || "",
+        current_order_status: currentOrderStatus,
+        current_shipping_status: currentShippingStatus,
+        current_shipping_type: currentShipping?.shipping_type || "",
+        existing_tracking_number: existingTrackingNumber,
         match_status: matchStatus,
-        duplicate_phone_count: phoneMatches.length > 1 ? phoneMatches.length : 0,
-        duplicate_nickname_count: nicknameMatches.length > 1 ? nicknameMatches.length : 0,
-        next_shipping_status: complete ? "done" : "uploaded",
-        next_order_status: complete ? "done" : "",
+        tracking_comparison: trackingComparison,
+        already_done: alreadyDone,
+        can_save: canSave,
+        next_shipping_status: nextShippingStatus,
+        next_order_status: nextOrderStatus,
+        duplicate_phone_count: phoneCandidates.length > 1 ? phoneCandidates.length : 0,
+        duplicate_nickname_count:
+          nicknameCandidates.length > 1 ? nicknameCandidates.length : 0,
       };
     });
 
     const matchedCount = previewRows.filter((row) => row.matched_order_id).length;
     const completeCount = previewRows.filter(
-      (row) => row.matched_order_id && isCompleteStatus(row.final_product_status)
+      (row) => row.matched_order_id && row.next_shipping_status === "done"
     ).length;
 
     return NextResponse.json({
@@ -329,9 +289,12 @@ export async function POST(req: Request) {
       complete_count: completeCount,
       unmatched_count: previewRows.length - matchedCount,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json(
-      { error: "운송장 미리보기 중 오류", detail: error?.message || "Unknown error" },
+      {
+        error: "운송장 미리보기 중 오류",
+        detail: error instanceof Error ? error.message : "Unknown error",
+      },
       { status: 500 }
     );
   }
