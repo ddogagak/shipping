@@ -8,6 +8,7 @@ type TrackingPreviewRow = {
   id: string;
   selected: boolean;
   order_key: string;
+  phone: string;
   tracking_number: string;
   final_product_status: string;
   matched_order_id?: string;
@@ -71,6 +72,9 @@ function matchStatusLabel(status: string) {
   const labels: Record<string, string> = {
     matched_by_order_id: "주문번호 매칭",
     matched_by_customer_order_no: "고객주문번호 매칭",
+    matched_by_normalized_order_no: "정규화 주문번호 매칭",
+    matched_by_phone: "전화번호 매칭",
+    duplicate_phone: "전화번호 중복",
     missing_tracking: "운송장 없음",
     not_found: "미매칭",
   };
@@ -126,11 +130,19 @@ export default function DomesticTrackingPage() {
       const headers = rawRows[headerRowIndex];
       const trackingIndex = findHeaderIndex(headers, ["운송장번호"]);
       const orderKeyIndex = findHeaderIndex(headers, ["고객주문번호", "주문번호", "order_id"]);
+      const phoneIndex = findHeaderIndex(headers, [
+        "핸드폰번호",
+        "휴대폰번호",
+        "전화번호",
+        "수하인전화번호",
+        "받는분전화번호",
+        "받는사람전화번호",
+      ]);
       const finalStatusIndex = findHeaderIndex(headers, ["최종상품상태"]);
       const fallbackFinalStatusIndex = 17; // 엑셀 기준 R열
 
-      if (trackingIndex < 0 || orderKeyIndex < 0) {
-        setMessage("운송장번호 또는 고객주문번호 컬럼을 찾을 수 없어.");
+      if (trackingIndex < 0 || (orderKeyIndex < 0 && phoneIndex < 0)) {
+        setMessage("운송장번호와 주문번호 또는 전화번호 컬럼을 찾을 수 없어.");
         return;
       }
 
@@ -146,11 +158,12 @@ export default function DomesticTrackingPage() {
             id: makeId(index),
             selected: true,
             order_key: valueAt(row, orderKeyIndex),
+            phone: valueAt(row, phoneIndex),
             tracking_number: cleanTrackingNumber(valueAt(row, trackingIndex)),
             final_product_status: finalStatus,
           };
         })
-        .filter((row) => row.order_key || row.tracking_number);
+        .filter((row) => row.order_key || row.phone || row.tracking_number);
 
       if (!parsedRows.length) {
         setMessage("미리보기할 운송장 데이터가 없어.");
@@ -236,7 +249,7 @@ export default function DomesticTrackingPage() {
         <div>
           <h1 style={{ margin: 0 }}>Domestic Tracking Upload</h1>
           <p style={{ color: "#6b7280", margin: "6px 0 0" }}>
-            운송장 파일을 먼저 미리보기하고, 선택한 행만 DB에 저장합니다.
+            운송장 파일을 미리보기하고 전화번호를 우선으로 주문과 매칭한 뒤, 선택한 행만 DB에 저장합니다.
           </p>
         </div>
 
@@ -323,6 +336,7 @@ export default function DomesticTrackingPage() {
                   <th style={thStyle}>저장 후 상태</th>
                   <th style={thStyle}>DB 주문ID</th>
                   <th style={thStyle}>파일 주문번호</th>
+                  <th style={thStyle}>전화번호</th>
                   <th style={thStyle}>운송장번호</th>
                   <th style={thStyle}>최종상품상태</th>
                   <th style={thStyle}>수취인</th>
@@ -354,6 +368,13 @@ export default function DomesticTrackingPage() {
                         <input
                           value={row.order_key}
                           onChange={(event) => updateRow(row.id, { order_key: event.target.value })}
+                          style={inputStyle}
+                        />
+                      </td>
+                      <td style={tdStyle}>
+                        <input
+                          value={row.phone || ""}
+                          onChange={(event) => updateRow(row.id, { phone: event.target.value })}
                           style={inputStyle}
                         />
                       </td>
