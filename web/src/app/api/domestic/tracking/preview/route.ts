@@ -7,6 +7,7 @@ type IncomingRow = {
   id?: string;
   selected?: boolean;
   order_key?: string;
+  phone?: string;
   tracking_number?: string;
   final_product_status?: string;
 };
@@ -15,6 +16,7 @@ type DomesticOrderMatchRow = {
   order_id: string;
   customer_order_no: string | null;
   recipient_name: string | null;
+  phone: string | null;
 };
 
 function safeText(value: unknown) {
@@ -27,6 +29,10 @@ function normalizeStatus(value: unknown) {
 
 function cleanTrackingNumber(value: unknown) {
   return safeText(value).replace(/^'+/, "");
+}
+
+function normalizePhone(value: unknown) {
+  return safeText(value).replace(/\D/g, "");
 }
 
 function normalizeOrderKey(value: unknown) {
@@ -79,6 +85,8 @@ export async function POST(req: Request) {
       selected: Boolean(row.selected),
       order_key: safeText(row.order_key),
       normalized_order_key: normalizeOrderKey(row.order_key),
+      phone: safeText(row.phone),
+      normalized_phone: normalizePhone(row.phone),
       tracking_number: cleanTrackingNumber(row.tracking_number),
       final_product_status: safeText(row.final_product_status),
     }));
@@ -91,14 +99,51 @@ export async function POST(req: Request) {
       )
     );
 
+    const phoneKeys = Array.from(
+      new Set(normalizedRows.map((row) => row.normalized_phone).filter(Boolean))
+    );
+
     const supabase = createServiceRoleClient();
 
     const orderMap = new Map<string, DomesticOrderMatchRow>();
+    const phoneMap = new Map<string, DomesticOrderMatchRow[]>();
+
+    const addPhoneMatch = (order: DomesticOrderMatchRow) => {
+      const phone = normalizePhone(order.phone);
+      if (!phone) return;
+
+      const list = phoneMap.get(phone) || [];
+      if (!list.some((item) => item.order_id === order.order_id)) {
+        list.push(order);
+      }
+      phoneMap.set(phone, list);
+    };
+
+    if (phoneKeys.length) {
+      const { data: phoneOrders, error: phoneOrdersError } = await supabase
+        .from("domestic_order")
+        .select("order_id, customer_order_no, recipient_name, phone")
+        .not("phone", "is", null);
+
+      if (phoneOrdersError) {
+        return NextResponse.json(
+          { error: "전화번호 조회 실패", detail: phoneOrdersError.message },
+          { status: 500 }
+        );
+      }
+
+      for (const order of phoneOrders || []) {
+        const typedOrder = order as DomesticOrderMatchRow;
+        if (phoneKeys.includes(normalizePhone(typedOrder.phone))) {
+          addPhoneMatch(typedOrder);
+        }
+      }
+    }
 
     if (orderKeys.length) {
       const { data: byOrderId, error: orderIdError } = await supabase
         .from("domestic_order")
-        .select("order_id, customer_order_no, recipient_name")
+        .select("order_id, customer_order_no, recipient_name, phone")
         .in("order_id", orderKeys);
 
       if (orderIdError) {
@@ -110,7 +155,7 @@ export async function POST(req: Request) {
 
       const { data: byCustomerOrderNo, error: customerOrderNoError } = await supabase
         .from("domestic_order")
-        .select("order_id, customer_order_no, recipient_name")
+        .select("order_id, customer_order_no, recipient_name, phone")
         .in("customer_order_no", orderKeys);
 
       if (customerOrderNoError) {
@@ -121,12 +166,19 @@ export async function POST(req: Request) {
       }
 
       for (const row of [...(byOrderId || []), ...(byCustomerOrderNo || [])]) {
-        addOrderToMap(orderMap, row as DomesticOrderMatchRow);
+        const typedRow = row as DomesticOrderMatchRow;
+        addOrderToMap(orderMap, typedRow);
+        addPhoneMatch(typedRow);
       }
 
       const stillUnmatchedKeys = normalizedRows
         .filter((row) => {
+          const phoneMatches = row.normalized_phone
+            ? phoneMap.get(row.normalized_phone) || []
+            : [];
+
           return (
+            phoneMatches.length === 0 &&
             row.order_key &&
             !orderMap.get(row.order_key) &&
             !orderMap.get(row.normalized_order_key)
@@ -138,7 +190,7 @@ export async function POST(req: Request) {
       if (stillUnmatchedKeys.length) {
         const { data: allOrders, error: allOrdersError } = await supabase
           .from("domestic_order")
-          .select("order_id, customer_order_no, recipient_name");
+          .select("order_id, customer_order_no, recipient_name, phone");
 
         if (allOrdersError) {
           return NextResponse.json(
@@ -148,21 +200,35 @@ export async function POST(req: Request) {
         }
 
         for (const row of allOrders || []) {
-          addOrderToMap(orderMap, row as DomesticOrderMatchRow);
+          const typedRow = row as DomesticOrderMatchRow;
+          addOrderToMap(orderMap, typedRow);
+          addPhoneMatch(typedRow);
         }
       }
     }
 
     const previewRows = normalizedRows.map((row) => {
-      const matched =
+      const phoneMatches = row.normalized_phone
+        ? phoneMap.get(row.normalized_phone) || []
+        : [];
+
+      const matchedByPhone =
+        phoneMatches.length === 1 ? phoneMatches[0] : undefined;
+
+      const matchedByOrderNo =
         orderMap.get(row.order_key) ||
         orderMap.get(row.normalized_order_key);
 
+      const matched = matchedByPhone || matchedByOrderNo;
       const complete = isCompleteStatus(row.final_product_status);
       let matchStatus = "not_found";
 
       if (!row.tracking_number) {
         matchStatus = "missing_tracking";
+      } else if (phoneMatches.length > 1) {
+        matchStatus = "duplicate_phone";
+      } else if (matchedByPhone) {
+        matchStatus = "matched_by_phone";
       } else if (matched?.order_id === row.order_key) {
         matchStatus = "matched_by_order_id";
       } else if (matched?.customer_order_no === row.order_key) {
@@ -173,11 +239,12 @@ export async function POST(req: Request) {
 
       return {
         ...row,
-        selected: Boolean(matched && row.tracking_number),
+        selected: Boolean(matched && row.tracking_number && phoneMatches.length <= 1),
         matched_order_id: matched?.order_id || "",
         customer_order_no: matched?.customer_order_no || "",
         recipient_name: matched?.recipient_name || "",
         match_status: matchStatus,
+        duplicate_phone_count: phoneMatches.length > 1 ? phoneMatches.length : 0,
         next_shipping_status: complete ? "done" : "uploaded",
         next_order_status: complete ? "done" : "",
       };
