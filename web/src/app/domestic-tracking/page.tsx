@@ -14,8 +14,20 @@ type TrackingPreviewRow = {
   final_product_status: string;
   matched_order_id?: string;
   customer_order_no?: string;
+  nickname?: string;
   recipient_name?: string;
+  db_phone?: string;
+  postal_code?: string;
+  address?: string;
+  first_order_date?: string;
+  current_order_status?: string;
+  current_shipping_status?: string;
+  current_shipping_type?: string;
+  existing_tracking_number?: string;
   match_status: string;
+  tracking_comparison?: "new" | "same" | "changed" | "unmatched";
+  already_done?: boolean;
+  can_save?: boolean;
   next_shipping_status: string;
   next_order_status: string;
 };
@@ -86,8 +98,39 @@ function matchStatusLabel(status: string) {
 
 function statusText(row: TrackingPreviewRow) {
   if (!row.matched_order_id) return "저장불가";
+  if (row.already_done) return "이미 완료";
   if (isCompleteStatus(row.final_product_status)) return "배송완료 + 주문완료";
-  return "운송장 입력";
+  return `${row.current_shipping_status || "start"} → ${row.next_shipping_status || "uploaded"}`;
+}
+
+function orderStatusLabel(value?: string) {
+  const labels: Record<string, string> = {
+    accepted: "입력됨",
+    checked: "재고확인",
+    kept: "킵",
+    packaged: "포장완료",
+    done: "완료",
+  };
+  return labels[value || ""] || value || "-";
+}
+
+function shippingStatusLabel(value?: string) {
+  const labels: Record<string, string> = {
+    start: "시작",
+    excel_exported: "엑셀 추출",
+    uploaded: "운송장 입력",
+    registered: "운송장등록",
+    done: "배송완료",
+  };
+  return labels[value || ""] || value || "-";
+}
+
+function trackingResultLabel(row: TrackingPreviewRow) {
+  if (!row.matched_order_id) return "미매칭";
+  if (row.already_done) return "완료 건 - 저장 제외";
+  if (row.tracking_comparison === "same") return "기존과 동일";
+  if (row.tracking_comparison === "changed") return "운송장 변경";
+  return "신규 운송장";
 }
 
 export default function DomesticTrackingPage() {
@@ -192,7 +235,7 @@ export default function DomesticTrackingPage() {
 
       const previewRows: TrackingPreviewRow[] = (json.rows || []).map((row: TrackingPreviewRow) => ({
         ...row,
-        selected: Boolean(row.selected && row.matched_order_id && row.tracking_number.length >= 8),
+        selected: Boolean(row.can_save),
       }));
 
       setRows(previewRows);
@@ -213,7 +256,7 @@ export default function DomesticTrackingPage() {
     setRows((prev) =>
       prev.map((row) => ({
         ...row,
-        selected: checked && Boolean(row.matched_order_id && row.tracking_number),
+        selected: checked && Boolean(row.can_save),
       }))
     );
   }
@@ -341,21 +384,34 @@ export default function DomesticTrackingPage() {
                 <tr>
                   <th style={thStyle}>선택</th>
                   <th style={thStyle}>매칭상태</th>
-                  <th style={thStyle}>저장 후 상태</th>
-                  <th style={thStyle}>DB 주문ID</th>
-                  <th style={thStyle}>파일 주문번호</th>
-                  <th style={thStyle}>전화번호</th>
-                  <th style={thStyle}>물품명</th>
-                  <th style={thStyle}>운송장번호</th>
-                  <th style={thStyle}>최종상품상태</th>
+                  <th style={thStyle}>DB 주문번호</th>
+                  <th style={thStyle}>닉네임</th>
                   <th style={thStyle}>수취인</th>
+                  <th style={thStyle}>현재 주문상태</th>
+                  <th style={thStyle}>현재 배송상태</th>
+                  <th style={thStyle}>배송수단</th>
+                  <th style={thStyle}>기존 운송장</th>
+                  <th style={thStyle}>파일 운송장</th>
+                  <th style={thStyle}>비교 결과</th>
+                  <th style={thStyle}>업로드 후</th>
+                  <th style={thStyle}>파일 전화번호</th>
+                  <th style={thStyle}>물품명</th>
+                  <th style={thStyle}>최종상품상태</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row) => {
-                  const canSave = Boolean(row.matched_order_id && row.tracking_number.length >= 8);
+                  const canSave = Boolean(row.can_save);
+                  const rowStyle = row.already_done
+                    ? completedRowStyle
+                    : !canSave
+                      ? warningRowStyle
+                      : row.tracking_comparison === "changed"
+                        ? changedRowStyle
+                        : undefined;
+
                   return (
-                    <tr key={row.id} style={!canSave ? warningRowStyle : undefined}>
+                    <tr key={row.id} style={rowStyle}>
                       <td style={tdStyle}>
                         <input
                           type="checkbox"
@@ -365,50 +421,43 @@ export default function DomesticTrackingPage() {
                         />
                       </td>
                       <td style={tdStyle}>{matchStatusLabel(row.match_status)}</td>
-                      <td style={tdStyle}>{statusText(row)}</td>
                       <td style={tdStyle}>
-                        <input
-                          value={row.matched_order_id || ""}
-                          onChange={(event) => updateRow(row.id, { matched_order_id: event.target.value })}
-                          style={inputStyle}
-                        />
+                        <div style={{ fontWeight: 800 }}>{row.customer_order_no || row.matched_order_id || "-"}</div>
+                        {row.matched_order_id ? <div style={subTextStyle}>{row.matched_order_id}</div> : null}
+                      </td>
+                      <td style={tdStyle}>{row.nickname || "-"}</td>
+                      <td style={tdStyle}>
+                        <div>{row.recipient_name || "-"}</div>
+                        {row.db_phone ? <div style={subTextStyle}>{row.db_phone}</div> : null}
                       </td>
                       <td style={tdStyle}>
-                        <input
-                          value={row.order_key}
-                          onChange={(event) => updateRow(row.id, { order_key: event.target.value })}
-                          style={inputStyle}
-                        />
+                        <span style={statusBadgeStyle(row.current_order_status === "done")}>
+                          {orderStatusLabel(row.current_order_status)}
+                        </span>
                       </td>
                       <td style={tdStyle}>
-                        <input
-                          value={row.phone || ""}
-                          onChange={(event) => updateRow(row.id, { phone: event.target.value })}
-                          style={inputStyle}
-                        />
+                        <span style={statusBadgeStyle(row.current_shipping_status === "done")}>
+                          {shippingStatusLabel(row.current_shipping_status)}
+                        </span>
                       </td>
-                      <td style={tdStyle}>
-                        <input
-                          value={row.product_name || ""}
-                          onChange={(event) => updateRow(row.id, { product_name: event.target.value })}
-                          style={inputStyle}
-                        />
-                      </td>
+                      <td style={tdStyle}>{row.current_shipping_type || "-"}</td>
+                      <td style={tdStyle}><strong>{row.existing_tracking_number || "-"}</strong></td>
                       <td style={tdStyle}>
                         <input
                           value={row.tracking_number}
                           onChange={(event) => updateRow(row.id, { tracking_number: cleanTrackingNumber(event.target.value) })}
-                          style={inputStyle}
+                          style={trackingInputStyle}
                         />
                       </td>
                       <td style={tdStyle}>
-                        <input
-                          value={row.final_product_status}
-                          onChange={(event) => updateRow(row.id, { final_product_status: event.target.value })}
-                          style={inputStyle}
-                        />
+                        <span style={comparisonBadgeStyle(row.tracking_comparison, row.already_done)}>
+                          {trackingResultLabel(row)}
+                        </span>
                       </td>
-                      <td style={tdStyle}>{row.recipient_name || "-"}</td>
+                      <td style={tdStyle}>{statusText(row)}</td>
+                      <td style={tdStyle}>{row.phone || "-"}</td>
+                      <td style={tdStyle}>{row.product_name || "-"}</td>
+                      <td style={tdStyle}>{row.final_product_status || "-"}</td>
                     </tr>
                   );
                 })}
@@ -523,7 +572,7 @@ const tableStyle: CSSProperties = {
   width: "100%",
   borderCollapse: "collapse",
   fontSize: 13,
-  minWidth: 1100,
+  minWidth: 1900,
 };
 
 const thStyle: CSSProperties = {
@@ -551,4 +600,74 @@ const inputStyle: CSSProperties = {
 
 const warningRowStyle: CSSProperties = {
   background: "#fff7ed",
+};
+
+
+const subTextStyle: CSSProperties = {
+  marginTop: 3,
+  color: "#6b7280",
+  fontSize: 11,
+};
+
+const trackingInputStyle: CSSProperties = {
+  width: 140,
+  boxSizing: "border-box",
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  padding: "7px 8px",
+  fontSize: 13,
+  fontWeight: 800,
+};
+
+function statusBadgeStyle(done: boolean): CSSProperties {
+  return {
+    display: "inline-flex",
+    borderRadius: 999,
+    padding: "4px 8px",
+    background: done ? "#e5e7eb" : "#eff6ff",
+    color: done ? "#4b5563" : "#1d4ed8",
+    fontWeight: 800,
+    whiteSpace: "nowrap",
+  };
+}
+
+function comparisonBadgeStyle(
+  comparison?: TrackingPreviewRow["tracking_comparison"],
+  alreadyDone?: boolean
+): CSSProperties {
+  let background = "#ecfdf5";
+  let color = "#047857";
+
+  if (alreadyDone) {
+    background = "#e5e7eb";
+    color = "#4b5563";
+  } else if (comparison === "changed") {
+    background = "#fef3c7";
+    color = "#92400e";
+  } else if (comparison === "same") {
+    background = "#dbeafe";
+    color = "#1d4ed8";
+  } else if (comparison === "unmatched") {
+    background = "#fee2e2";
+    color = "#b91c1c";
+  }
+
+  return {
+    display: "inline-flex",
+    borderRadius: 999,
+    padding: "4px 8px",
+    background,
+    color,
+    fontWeight: 900,
+    whiteSpace: "nowrap",
+  };
+}
+
+const completedRowStyle: CSSProperties = {
+  background: "#f3f4f6",
+  color: "#6b7280",
+};
+
+const changedRowStyle: CSSProperties = {
+  background: "#fffbeb",
 };
