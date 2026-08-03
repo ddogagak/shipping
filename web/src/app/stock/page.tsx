@@ -98,7 +98,7 @@ export default function StockPage() {
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <Link href="/" style={outlineButton}>홈으로</Link>
-          <Link href="/stock/new" style={primaryButton}>신규 등록</Link>
+          <Link href="/stock/import" style={primaryButton}>사진 Import</Link>
         </div>
       </div>
 
