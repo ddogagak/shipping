@@ -819,6 +819,7 @@ export default function DomesticOrdersPage() {
         action: "update_row",
         order_id: row.order_id,
         memo: row.memo || "",
+        item_summary: row.item_summary || "",
         order_status: row.order_status || "accepted",
         shipping_status: s.shipping_status || "start",
         shipping_type: s.shipping_type || "일반택배",
@@ -1465,18 +1466,18 @@ export default function DomesticOrdersPage() {
                     />
                   </th>
 
-                  <SortableTh label="플랫폼" sortKeyValue="platform" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
-                  <SortableTh label="고객주문번호" sortKeyValue="order_id" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   <SortableTh label="닉네임" sortKeyValue="nickname" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
-                  <SortableTh label="주문건수" sortKeyValue="order_count" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   <SortableTh label="최초주문일" sortKeyValue="first_order_date" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   <SortableTh label="메모" sortKeyValue="memo" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   <th style={thStyle}>저장</th>
                   <SortableTh label="주문상태" sortKeyValue="order_status" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
-                  <SortableTh label="배송상태" sortKeyValue="shipping_status" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
-                  <SortableTh label="배송수단" sortKeyValue="shipping_type" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   <SortableTh label="운송장" sortKeyValue="tracking_number" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                  <SortableTh label="배송상태" sortKeyValue="shipping_status" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   <SortableTh label="아이템" sortKeyValue="item_summary" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                  <SortableTh label="플랫폼" sortKeyValue="platform" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                  <SortableTh label="고객주문번호" sortKeyValue="order_id" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                  <SortableTh label="주문건수" sortKeyValue="order_count" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                  <SortableTh label="배송수단" sortKeyValue="shipping_type" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   <SortableTh label="상품합계" sortKeyValue="item_total_price" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                 </tr>
               </thead>
@@ -1495,10 +1496,7 @@ export default function DomesticOrdersPage() {
                         />
                       </td>
 
-                      <td style={tdStyle}>{label(PLATFORM_OPTIONS, row.platform)}</td>
-                      <td style={tdStyle}>{displayOrderNo(row)}</td>
                       <td style={tdStyle}>{row.nickname || ""}</td>
-                      <td style={tdStyle}>{row.order_count || 1}</td>
                       <td style={tdStyle}>{row.first_order_date || ""}</td>
 
                       <td style={tdStyle}>
@@ -1537,6 +1535,19 @@ export default function DomesticOrdersPage() {
                       </td>
 
                       <td style={tdStyle}>
+                        <input
+                          value={s.tracking_number || ""}
+                          onChange={(event) =>
+                            updateShippingValue(row.order_id, {
+                              tracking_number: event.target.value,
+                            })
+                          }
+                          style={trackingInputStyle}
+                          placeholder="운송장번호"
+                        />
+                      </td>
+
+                      <td style={tdStyle}>
                         <select
                           value={s.shipping_status || "start"}
                           onChange={(event) =>
@@ -1553,6 +1564,21 @@ export default function DomesticOrdersPage() {
                       </td>
 
                       <td style={tdStyle}>
+                        <input
+                          value={row.item_summary || ""}
+                          onChange={(event) =>
+                            updateRowValue(row.order_id, { item_summary: event.target.value })
+                          }
+                          style={itemInputStyle}
+                          title={row.item_summary || ""}
+                        />
+                      </td>
+
+                      <td style={tdStyle}>{label(PLATFORM_OPTIONS, row.platform)}</td>
+                      <td style={tdStyle}>{displayOrderNo(row)}</td>
+                      <td style={tdStyle}>{row.order_count || 1}</td>
+
+                      <td style={tdStyle}>
                         <select
                           value={s.shipping_type || "일반택배"}
                           onChange={(event) =>
@@ -1566,33 +1592,6 @@ export default function DomesticOrdersPage() {
                             </option>
                           ))}
                         </select>
-                      </td>
-
-                      <td style={tdStyle}>
-                        <input
-                          value={s.tracking_number || ""}
-                          onChange={(event) =>
-                            updateShippingValue(row.order_id, {
-                              tracking_number: event.target.value,
-                            })
-                          }
-                          style={trackingInputStyle}
-                          placeholder="운송장번호"
-                        />
-                      </td>
-
-                      <td
-                        style={{
-                          ...tdStyle,
-                          minWidth: 360,
-                          maxWidth: 520,
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
-                        title={row.item_summary || ""}
-                      >
-                        {row.item_summary || ""}
                       </td>
 
                       <td style={tdStyle}>{formatWon(row.item_total_price)}</td>
@@ -1896,6 +1895,13 @@ const smallSaveButtonStyle: CSSProperties = {
 
 const memoInputStyle: CSSProperties = {
   width: 220,
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  padding: "6px 8px",
+};
+
+const itemInputStyle: CSSProperties = {
+  width: 420,
   border: "1px solid #d1d5db",
   borderRadius: 8,
   padding: "6px 8px",
