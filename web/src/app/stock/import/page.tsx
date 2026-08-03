@@ -18,6 +18,45 @@ type PreviewImage = {
   selected: boolean;
 };
 
+type ProductMode = "single" | "variants";
+
+type VariantDraft = {
+  id: string;
+  name: string;
+  code: string;
+  imageId: string;
+  quantity: number;
+  location: string;
+  desiredPrice: string;
+};
+
+type ProductDraft = {
+  title: string;
+  category: string;
+  collection: string;
+  groupName: string;
+  itemType: string;
+  releasePrice: string;
+  desiredPrice: string;
+  memo: string;
+  mode: ProductMode;
+  coverImageId: string;
+  quantity: number;
+  location: string;
+  variants: VariantDraft[];
+};
+
+const SKZ_VARIANTS = [
+  ["방찬", "CHAN"],
+  ["리노", "KNOW"],
+  ["창빈", "CBIN"],
+  ["현진", "HJIN"],
+  ["한", "HAN"],
+  ["필릭스", "FLIX"],
+  ["승민", "SMIN"],
+  ["아이엔", "IN"],
+] as const;
+
 function makeImageId(file: File, index: number) {
   return `${file.name}-${file.size}-${file.lastModified}-${Date.now()}-${index}`;
 }
@@ -33,6 +72,23 @@ export default function StockImportPage() {
   const [images, setImages] = useState<PreviewImage[]>([]);
   const [dragging, setDragging] = useState(false);
   const [message, setMessage] = useState("");
+  const [draftOpen, setDraftOpen] = useState(false);
+  const [draftImageIds, setDraftImageIds] = useState<string[]>([]);
+  const [draft, setDraft] = useState<ProductDraft>({
+    title: "",
+    category: "SKZ",
+    collection: "",
+    groupName: "Stray Kids",
+    itemType: "",
+    releasePrice: "",
+    desiredPrice: "",
+    memo: "",
+    mode: "single",
+    coverImageId: "",
+    quantity: 1,
+    location: "미지정",
+    variants: [],
+  });
 
   useEffect(() => {
     imagesRef.current = images;
@@ -144,8 +200,111 @@ export default function StockImportPage() {
       return;
     }
 
-    alert(
-      `선택한 사진 ${selectedImages.length}장으로 상품 초안을 만들 준비가 됐어.\n다음 단계에서 Storage 업로드와 상품 등록 폼을 연결하면 돼.`
+    const ids = selectedImages.map((image) => image.id);
+    setDraftImageIds(ids);
+    setDraft((prev) => ({
+      ...prev,
+      coverImageId: ids[0] || "",
+      variants: [],
+    }));
+    setDraftOpen(true);
+    setMessage(`선택한 사진 ${ids.length}장으로 상품 초안을 만들고 있어.`);
+
+    requestAnimationFrame(() => {
+      document.getElementById("stock-product-draft")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  }
+
+  function updateDraft(patch: Partial<ProductDraft>) {
+    setDraft((prev) => ({ ...prev, ...patch }));
+  }
+
+  function addVariant() {
+    setDraft((prev) => ({
+      ...prev,
+      mode: "variants",
+      variants: [
+        ...prev.variants,
+        {
+          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          name: "",
+          code: "",
+          imageId: "",
+          quantity: 1,
+          location: "미지정",
+          desiredPrice: "",
+        },
+      ],
+    }));
+  }
+
+  function loadSkzVariants() {
+    setDraft((prev) => ({
+      ...prev,
+      mode: "variants",
+      category: "SKZ",
+      groupName: "Stray Kids",
+      variants: SKZ_VARIANTS.map(([name, code], index) => ({
+        id: `${code}-${Date.now()}-${index}`,
+        name,
+        code,
+        imageId: draftImageIds[index + 1] || draftImageIds[index] || "",
+        quantity: 1,
+        location: "미지정",
+        desiredPrice: "",
+      })),
+    }));
+  }
+
+  function updateVariant(id: string, patch: Partial<VariantDraft>) {
+    setDraft((prev) => ({
+      ...prev,
+      variants: prev.variants.map((variant) =>
+        variant.id === id ? { ...variant, ...patch } : variant
+      ),
+    }));
+  }
+
+  function removeVariant(id: string) {
+    setDraft((prev) => ({
+      ...prev,
+      variants: prev.variants.filter((variant) => variant.id !== id),
+    }));
+  }
+
+  function validateDraft() {
+    if (!draft.title.trim()) {
+      alert("상품명을 입력해줘.");
+      return;
+    }
+
+    if (!draft.coverImageId) {
+      alert("대표사진을 선택해줘.");
+      return;
+    }
+
+    if (draft.mode === "variants") {
+      if (!draft.variants.length) {
+        alert("하위항목을 하나 이상 추가해줘.");
+        return;
+      }
+
+      const invalid = draft.variants.find(
+        (variant) => !variant.name.trim() || !variant.code.trim()
+      );
+      if (invalid) {
+        alert("하위항목의 이름과 코드를 모두 입력해줘.");
+        return;
+      }
+    }
+
+    setMessage(
+      `상품 초안 확인 완료: ${draft.title} / ${
+        draft.mode === "single" ? "단일 상품" : `하위 ${draft.variants.length}개`
+      }. 다음 단계에서 Storage와 DB 저장을 연결하면 돼.`
     );
   }
 
@@ -294,6 +453,171 @@ export default function StockImportPage() {
           아직 선택한 사진이 없어. 위 영역에 사진을 올려줘.
         </section>
       )}
+
+      {draftOpen ? (
+        <section id="stock-product-draft" style={{ ...cardStyle, borderColor: "#111827" }}>
+          <div style={draftHeaderStyle}>
+            <div>
+              <h2 style={{ margin: 0 }}>상품 초안 만들기</h2>
+              <p style={descriptionStyle}>
+                선택한 사진을 하나의 상품으로 묶고 대표사진과 재고 형태를 정합니다.
+              </p>
+            </div>
+            <button type="button" onClick={() => setDraftOpen(false)} style={dangerOutlineButtonStyle}>
+              초안 닫기
+            </button>
+          </div>
+
+          <div style={draftGridStyle}>
+            <div>
+              <h3 style={{ marginTop: 0 }}>1. 대표사진 선택</h3>
+              <div style={draftImageGridStyle}>
+                {images
+                  .filter((image) => draftImageIds.includes(image.id))
+                  .map((image) => {
+                    const isCover = draft.coverImageId === image.id;
+                    return (
+                      <button
+                        key={image.id}
+                        type="button"
+                        onClick={() => updateDraft({ coverImageId: image.id })}
+                        style={coverImageButtonStyle(isCover)}
+                      >
+                        <img src={image.previewUrl} alt={image.file.name} style={previewImageStyle} />
+                        <span style={coverBadgeStyle(isCover)}>
+                          {isCover ? "대표사진" : "대표로 지정"}
+                        </span>
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+
+            <div>
+              <h3 style={{ marginTop: 0 }}>2. 상품 정보</h3>
+              <div style={formGridStyle}>
+                <label style={labelStyle}>
+                  상품명 *
+                  <input value={draft.title} onChange={(e) => updateDraft({ title: e.target.value })} style={inputStyle} />
+                </label>
+                <label style={labelStyle}>
+                  카테고리
+                  <select value={draft.category} onChange={(e) => updateDraft({ category: e.target.value })} style={inputStyle}>
+                    <option value="SKZ">SKZ</option>
+                    <option value="피규어">피규어</option>
+                    <option value="가챠">가챠</option>
+                    <option value="랜덤굿즈">랜덤굿즈</option>
+                    <option value="기타">기타</option>
+                  </select>
+                </label>
+                <label style={labelStyle}>
+                  그룹/작품
+                  <input value={draft.groupName} onChange={(e) => updateDraft({ groupName: e.target.value })} style={inputStyle} />
+                </label>
+                <label style={labelStyle}>
+                  컬렉션/활동기
+                  <input value={draft.collection} onChange={(e) => updateDraft({ collection: e.target.value })} style={inputStyle} />
+                </label>
+                <label style={labelStyle}>
+                  굿즈 종류
+                  <input value={draft.itemType} onChange={(e) => updateDraft({ itemType: e.target.value })} style={inputStyle} placeholder="포토카드, 피규어, 캔뱃지" />
+                </label>
+                <label style={labelStyle}>
+                  발매가
+                  <input value={draft.releasePrice} onChange={(e) => updateDraft({ releasePrice: e.target.value })} style={inputStyle} inputMode="numeric" />
+                </label>
+                <label style={labelStyle}>
+                  희망판매가
+                  <input value={draft.desiredPrice} onChange={(e) => updateDraft({ desiredPrice: e.target.value })} style={inputStyle} inputMode="numeric" />
+                </label>
+              </div>
+              <label style={{ ...labelStyle, marginTop: 12 }}>
+                메모
+                <textarea value={draft.memo} onChange={(e) => updateDraft({ memo: e.target.value })} style={textareaStyle} />
+              </label>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 22 }}>
+            <h3 style={{ marginBottom: 10 }}>3. 재고 형태</h3>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button type="button" onClick={() => updateDraft({ mode: "single" })} style={modeButtonStyle(draft.mode === "single")}>
+                단일 상품
+              </button>
+              <button type="button" onClick={() => updateDraft({ mode: "variants" })} style={modeButtonStyle(draft.mode === "variants")}>
+                하위항목 있음
+              </button>
+            </div>
+          </div>
+
+          {draft.mode === "single" ? (
+            <div style={{ ...formGridStyle, marginTop: 14 }}>
+              <label style={labelStyle}>
+                수량
+                <input type="number" min={0} value={draft.quantity} onChange={(e) => updateDraft({ quantity: Number(e.target.value || 0) })} style={inputStyle} />
+              </label>
+              <label style={labelStyle}>
+                위치
+                <input value={draft.location} onChange={(e) => updateDraft({ location: e.target.value })} style={inputStyle} />
+              </label>
+            </div>
+          ) : (
+            <div style={{ marginTop: 14 }}>
+              <div style={variantActionStyle}>
+                <strong>하위항목 {draft.variants.length}개</strong>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button type="button" onClick={loadSkzVariants} style={smallButtonStyle}>SKZ 8명 불러오기</button>
+                  <button type="button" onClick={addVariant} style={primaryButtonStyle}>+ 하위항목</button>
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gap: 10 }}>
+                {draft.variants.map((variant, index) => (
+                  <div key={variant.id} style={variantRowStyle}>
+                    <strong style={{ paddingTop: 10 }}>{index + 1}</strong>
+                    <label style={labelStyle}>
+                      이름
+                      <input value={variant.name} onChange={(e) => updateVariant(variant.id, { name: e.target.value })} style={inputStyle} />
+                    </label>
+                    <label style={labelStyle}>
+                      코드
+                      <input value={variant.code} onChange={(e) => updateVariant(variant.id, { code: e.target.value.toUpperCase() })} style={inputStyle} />
+                    </label>
+                    <label style={labelStyle}>
+                      사진
+                      <select value={variant.imageId} onChange={(e) => updateVariant(variant.id, { imageId: e.target.value })} style={inputStyle}>
+                        <option value="">미지정</option>
+                        {images.filter((image) => draftImageIds.includes(image.id)).map((image, imageIndex) => (
+                          <option key={image.id} value={image.id}>사진 {imageIndex + 1} · {image.file.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={labelStyle}>
+                      수량
+                      <input type="number" min={0} value={variant.quantity} onChange={(e) => updateVariant(variant.id, { quantity: Number(e.target.value || 0) })} style={inputStyle} />
+                    </label>
+                    <label style={labelStyle}>
+                      위치
+                      <input value={variant.location} onChange={(e) => updateVariant(variant.id, { location: e.target.value })} style={inputStyle} />
+                    </label>
+                    <label style={labelStyle}>
+                      희망가
+                      <input value={variant.desiredPrice} onChange={(e) => updateVariant(variant.id, { desiredPrice: e.target.value })} style={inputStyle} inputMode="numeric" />
+                    </label>
+                    <button type="button" onClick={() => removeVariant(variant.id)} style={dangerButtonStyle}>삭제</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 20 }}>
+            <button type="button" onClick={validateDraft} style={saveDraftButtonStyle}>
+              상품 초안 확인
+            </button>
+          </div>
+        </section>
+      ) : null}
     </main>
   );
 }
@@ -494,4 +818,121 @@ const emptyStyle: CSSProperties = {
   textAlign: "center",
   color: "#6b7280",
   background: "#fff",
+};
+
+
+const draftHeaderStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  alignItems: "flex-start",
+  flexWrap: "wrap",
+  marginBottom: 18,
+};
+
+const draftGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(300px, 0.9fr) minmax(420px, 1.4fr)",
+  gap: 22,
+};
+
+const draftImageGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
+  gap: 10,
+};
+
+function coverImageButtonStyle(active: boolean): CSSProperties {
+  return {
+    position: "relative",
+    aspectRatio: "1 / 1",
+    padding: 0,
+    overflow: "hidden",
+    borderRadius: 12,
+    border: active ? "3px solid #111827" : "1px solid #d1d5db",
+    background: "#f3f4f6",
+    cursor: "pointer",
+  };
+}
+
+function coverBadgeStyle(active: boolean): CSSProperties {
+  return {
+    position: "absolute",
+    left: 6,
+    right: 6,
+    bottom: 6,
+    padding: "5px 7px",
+    borderRadius: 8,
+    background: active ? "#111827" : "rgba(255,255,255,.9)",
+    color: active ? "#fff" : "#111827",
+    fontSize: 11,
+    fontWeight: 900,
+  };
+}
+
+const formGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+  gap: 10,
+};
+
+const labelStyle: CSSProperties = {
+  display: "grid",
+  gap: 5,
+  fontSize: 12,
+  fontWeight: 800,
+};
+
+const inputStyle: CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  border: "1px solid #d1d5db",
+  borderRadius: 9,
+  padding: "9px 10px",
+  background: "#fff",
+};
+
+const textareaStyle: CSSProperties = {
+  ...inputStyle,
+  minHeight: 78,
+  resize: "vertical",
+};
+
+function modeButtonStyle(active: boolean): CSSProperties {
+  return {
+    ...smallButtonStyle,
+    borderColor: active ? "#111827" : "#d1d5db",
+    background: active ? "#111827" : "#fff",
+    color: active ? "#fff" : "#111827",
+  };
+}
+
+const variantActionStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 12,
+  flexWrap: "wrap",
+  marginBottom: 10,
+};
+
+const variantRowStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "34px 1fr 110px minmax(190px, 1.3fr) 90px 130px 110px auto",
+  gap: 8,
+  alignItems: "end",
+  padding: 10,
+  border: "1px solid #e5e7eb",
+  borderRadius: 12,
+  background: "#f9fafb",
+};
+
+const saveDraftButtonStyle: CSSProperties = {
+  border: 0,
+  borderRadius: 11,
+  padding: "12px 20px",
+  background: "#111827",
+  color: "#fff",
+  fontWeight: 900,
+  cursor: "pointer",
 };
