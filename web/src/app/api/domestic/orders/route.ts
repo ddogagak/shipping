@@ -111,6 +111,7 @@ export async function PATCH(req: Request) {
       .from("domestic_order")
       .update({
         memo: body.memo ?? null,
+        item_summary: body.item_summary ?? null,
         order_status: nextOrderStatus,
         updated_at: now,
       })
