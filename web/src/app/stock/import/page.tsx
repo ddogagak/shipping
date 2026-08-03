@@ -31,6 +31,7 @@ type VariantDraft = {
 type ProductDraft = {
   id: string;
   imageIds: string[];
+  coverImageId: string;
   title: string;
   category: string;
   groupName: string;
@@ -76,6 +77,8 @@ export default function StockImportPage() {
   const [dragging, setDragging] = useState(false);
   const [message, setMessage] = useState("");
   const [composerOpen, setComposerOpen] = useState(false);
+  const [assignSheetOpen, setAssignSheetOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   useEffect(() => {
     imagesRef.current = images;
@@ -184,6 +187,7 @@ export default function StockImportPage() {
       {
         id: draftId,
         imageIds,
+        coverImageId: imageIds[0] || "",
         title: "",
         category: mode === "variants" ? "SKZ" : "피규어",
         groupName: mode === "variants" ? "Stray Kids" : "",
@@ -321,6 +325,92 @@ export default function StockImportPage() {
     return images.find((image) => image.id === id);
   }
 
+  function setCoverImage(draftId: string, imageId: string) {
+    setDrafts((prev) =>
+      prev.map((draft) =>
+        draft.id === draftId && draft.imageIds.includes(imageId)
+          ? { ...draft, coverImageId: imageId }
+          : draft
+      )
+    );
+  }
+
+  function unassignImage(draftId: string, imageId: string) {
+    setDrafts((prev) =>
+      prev
+        .map((draft) => {
+          if (draft.id !== draftId) return draft;
+          const nextImageIds = draft.imageIds.filter((id) => id !== imageId);
+          return {
+            ...draft,
+            imageIds: nextImageIds,
+            coverImageId:
+              draft.coverImageId === imageId
+                ? nextImageIds[0] || ""
+                : draft.coverImageId,
+          };
+        })
+        .filter((draft) => draft.imageIds.length > 0)
+    );
+
+    setImages((prev) =>
+      prev.map((image) =>
+        image.id === imageId
+          ? { ...image, draftId: null, selected: false }
+          : image
+      )
+    );
+    setMessage("사진을 미분류로 되돌렸어.");
+  }
+
+  function addSelectedToDraft(draftId: string) {
+    if (!selectedImages.length) return;
+    const imageIds = selectedImages.map((image) => image.id);
+
+    setDrafts((prev) =>
+      prev.map((draft) =>
+        draft.id === draftId
+          ? {
+              ...draft,
+              imageIds: [...draft.imageIds, ...imageIds],
+              coverImageId: draft.coverImageId || imageIds[0] || "",
+            }
+          : draft
+      )
+    );
+    setImages((prev) =>
+      prev.map((image) =>
+        imageIds.includes(image.id)
+          ? { ...image, draftId, selected: false }
+          : image
+      )
+    );
+    setAssignSheetOpen(false);
+    setMessage(`기존 초안에 사진 ${imageIds.length}장 추가`);
+  }
+
+  function draftIssues(draft: ProductDraft) {
+    const issues: string[] = [];
+    if (!draft.title.trim()) issues.push("상품명 없음");
+    if (!draft.imageIds.length) issues.push("사진 없음");
+    if (draft.mode === "variants") {
+      if (!draft.variants.length) issues.push("하위옵션 없음");
+      if (draft.variants.some((variant) => !variant.name.trim()))
+        issues.push("옵션 이름 누락");
+      if (draft.variants.some((variant) => !variant.code.trim()))
+        issues.push("옵션 코드 누락");
+    }
+    return issues;
+  }
+
+  function openReview() {
+    if (!drafts.length) {
+      setMessage("확인할 초안이 없어.");
+      return;
+    }
+    setReviewOpen(true);
+  }
+
   return (
     <main style={pageStyle}>
       <header style={headerStyle}>
@@ -415,11 +505,33 @@ export default function StockImportPage() {
               </div>
 
               <div style={draftThumbsStyle}>
-                {draft.imageIds.slice(0, 6).map((imageId) => {
+                {draft.imageIds.map((imageId) => {
                   const image = imageById(imageId);
-                  return image ? <img key={imageId} src={image.previewUrl} alt="" style={draftThumbStyle} /> : null;
+                  if (!image) return null;
+                  const isCover = draft.coverImageId === imageId;
+
+                  return (
+                    <div key={imageId} style={draftThumbWrapStyle}>
+                      <button
+                        type="button"
+                        style={{ ...coverThumbButtonStyle, ...(isCover ? coverSelectedStyle : {}) }}
+                        onClick={() => setCoverImage(draft.id, imageId)}
+                        title="대표사진 지정"
+                      >
+                        <img src={image.previewUrl} alt="" style={draftThumbStyle} />
+                        <span style={coverBadgeStyle}>{isCover ? "대표" : "☆"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        style={unassignButtonStyle}
+                        onClick={() => unassignImage(draft.id, imageId)}
+                        aria-label="미분류로 되돌리기"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
                 })}
-                {draft.imageIds.length > 6 ? <span style={moreThumbStyle}>+{draft.imageIds.length - 6}</span> : null}
               </div>
 
               {draft.expanded ? (
@@ -547,9 +659,9 @@ export default function StockImportPage() {
           <button
             type="button"
             style={saveAllStyle}
-            onClick={() => setMessage(`초안 ${drafts.length}개 확인 완료. 다음 단계에서 Storage와 DB 저장을 연결하면 돼.`)}
+            onClick={openReview}
           >
-            초안 {drafts.length}개 확인
+            초안 {drafts.length}개 일괄 저장 검수
           </button>
         </section>
       ) : null}
@@ -557,7 +669,71 @@ export default function StockImportPage() {
       {selectedImages.length ? (
         <div style={bottomBarStyle}>
           <strong>선택 {selectedImages.length}장</strong>
-          <button type="button" style={primaryButtonStyle} onClick={openComposer}>상품 묶음 만들기</button>
+          <div style={{ display: "flex", gap: 7 }}>
+            {drafts.length ? (
+              <button type="button" style={secondaryBottomButtonStyle} onClick={() => setAssignSheetOpen(true)}>기존 초안에 추가</button>
+            ) : null}
+            <button type="button" style={primaryButtonStyle} onClick={openComposer}>새 상품 묶음</button>
+          </div>
+        </div>
+      ) : null}
+
+      {assignSheetOpen ? (
+        <div style={sheetBackdropStyle} onClick={() => setAssignSheetOpen(false)}>
+          <div style={bottomSheetStyle} onClick={(event) => event.stopPropagation()}>
+            <div style={sheetHandleStyle} />
+            <h3 style={{ margin: "4px 0 6px" }}>기존 초안에 사진 추가</h3>
+            <p style={subTextStyle}>선택한 {selectedImages.length}장을 넣을 초안을 골라줘.</p>
+            <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+              {drafts.map((draft, index) => (
+                <button key={draft.id} type="button" style={sheetChoiceStyle} onClick={() => addSelectedToDraft(draft.id)}>
+                  <strong>초안 {index + 1} · {draft.title || "상품명 미입력"}</strong>
+                  <span>현재 사진 {draft.imageIds.length}장</span>
+                </button>
+              ))}
+            </div>
+            <button type="button" style={cancelButtonStyle} onClick={() => setAssignSheetOpen(false)}>취소</button>
+          </div>
+        </div>
+      ) : null}
+
+      {reviewOpen ? (
+        <div style={sheetBackdropStyle} onClick={() => setReviewOpen(false)}>
+          <div style={{ ...bottomSheetStyle, maxHeight: "82vh", overflowY: "auto" }} onClick={(event) => event.stopPropagation()}>
+            <div style={sheetHandleStyle} />
+            <h3 style={{ margin: "4px 0 6px" }}>일괄 저장 전 검수</h3>
+            <p style={subTextStyle}>아직 DB에는 저장되지 않아요. 누락된 항목을 확인하는 화면입니다.</p>
+            <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+              {drafts.map((draft, index) => {
+                const issues = draftIssues(draft);
+                const cover = imageById(draft.coverImageId);
+                return (
+                  <div key={draft.id} style={reviewCardStyle}>
+                    {cover ? <img src={cover.previewUrl} alt="" style={reviewImageStyle} /> : <div style={reviewImageEmptyStyle}>사진 없음</div>}
+                    <div style={{ minWidth: 0 }}>
+                      <strong>초안 {index + 1} · {draft.title || "상품명 미입력"}</strong>
+                      <div style={subTextStyle}>사진 {draft.imageIds.length}장 · {draft.mode === "variants" ? `옵션 ${draft.variants.length}개` : "단일상품"}</div>
+                      <div style={{ marginTop: 6, color: issues.length ? "#b45309" : "#047857", fontWeight: 900, fontSize: 12 }}>
+                        {issues.length ? `확인 필요: ${issues.join(" / ")}` : "저장 준비 완료"}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              style={saveAllStyle}
+              onClick={() => {
+                const issueCount = drafts.filter((draft) => draftIssues(draft).length).length;
+                setReviewOpen(false);
+                setMessage(issueCount ? `초안 ${issueCount}개에 확인할 항목이 있어.` : "모든 초안 검수 완료. 다음 단계에서 압축·Storage·DB 저장을 연결하면 돼.");
+              }}
+            >
+              검수 완료
+            </button>
+            <button type="button" style={cancelButtonStyle} onClick={() => setReviewOpen(false)}>닫기</button>
+          </div>
         </div>
       ) : null}
 
@@ -620,8 +796,12 @@ const draftCardStyle: CSSProperties = { background: "#fff", border: "1px solid #
 const draftHeaderStyle: CSSProperties = { display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" };
 const draftTitleButtonStyle: CSSProperties = { border: 0, background: "transparent", padding: 0, fontWeight: 900, fontSize: 15, display: "flex", gap: 8, alignItems: "center" };
 const draftThumbsStyle: CSSProperties = { display: "flex", gap: 6, overflowX: "auto", marginTop: 10 };
-const draftThumbStyle: CSSProperties = { width: 58, height: 58, objectFit: "cover", borderRadius: 9, flex: "0 0 auto" };
-const moreThumbStyle: CSSProperties = { width: 58, height: 58, borderRadius: 9, display: "grid", placeItems: "center", background: "#f3f4f6", fontWeight: 900, flex: "0 0 auto" };
+const draftThumbWrapStyle: CSSProperties = { position: "relative", flex: "0 0 auto" };
+const coverThumbButtonStyle: CSSProperties = { position: "relative", border: "2px solid transparent", borderRadius: 11, padding: 0, background: "transparent", overflow: "hidden" };
+const coverSelectedStyle: CSSProperties = { borderColor: "#7c3aed" };
+const draftThumbStyle: CSSProperties = { width: 66, height: 66, objectFit: "cover", display: "block" };
+const coverBadgeStyle: CSSProperties = { position: "absolute", left: 4, bottom: 4, borderRadius: 999, background: "rgba(17,24,39,.84)", color: "#fff", padding: "2px 6px", fontSize: 10, fontWeight: 900 };
+const unassignButtonStyle: CSSProperties = { position: "absolute", top: -5, right: -5, width: 23, height: 23, borderRadius: 999, border: "2px solid #fff", background: "#dc2626", color: "#fff", fontWeight: 900, lineHeight: 1 };
 const labelStyle: CSSProperties = { display: "grid", gap: 6, fontSize: 13, fontWeight: 800 };
 const inputStyle: CSSProperties = { width: "100%", boxSizing: "border-box", border: "1px solid #d1d5db", borderRadius: 10, padding: "10px 11px", background: "#fff", fontSize: 14 };
 const twoColumnStyle: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 };
@@ -679,8 +859,13 @@ const emptyOptionStyle: CSSProperties = { padding: 12, background: "#f9fafb", co
 const saveAllStyle: CSSProperties = { border: 0, borderRadius: 14, padding: "14px 16px", background: "#111827", color: "#fff", fontWeight: 900, fontSize: 15 };
 const bottomBarStyle: CSSProperties = { position: "fixed", left: "50%", bottom: 14, transform: "translateX(-50%)", width: "calc(100% - 28px)", maxWidth: 852, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, background: "rgba(17,24,39,.96)", color: "#fff", borderRadius: 16, padding: "10px 12px", boxShadow: "0 14px 40px rgba(0,0,0,.24)", zIndex: 30 };
 const primaryButtonStyle: CSSProperties = { border: 0, borderRadius: 11, padding: "11px 14px", background: "#7c3aed", color: "#fff", fontWeight: 900 };
+const secondaryBottomButtonStyle: CSSProperties = { border: "1px solid #6b7280", borderRadius: 11, padding: "10px 11px", background: "#fff", color: "#111827", fontWeight: 900, fontSize: 12 };
 const sheetBackdropStyle: CSSProperties = { position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 50, display: "flex", alignItems: "flex-end", justifyContent: "center" };
 const bottomSheetStyle: CSSProperties = { width: "100%", maxWidth: 880, background: "#fff", borderRadius: "22px 22px 0 0", padding: "12px 16px 24px", boxShadow: "0 -20px 50px rgba(0,0,0,.2)" };
 const sheetHandleStyle: CSSProperties = { width: 42, height: 5, borderRadius: 999, background: "#d1d5db", margin: "0 auto 12px" };
 const sheetChoiceStyle: CSSProperties = { width: "100%", display: "grid", gap: 3, textAlign: "left", border: "1px solid #e5e7eb", borderRadius: 14, background: "#fff", padding: 14, marginTop: 10 };
 const cancelButtonStyle: CSSProperties = { width: "100%", border: 0, borderRadius: 12, background: "#f3f4f6", padding: 12, marginTop: 10, fontWeight: 800 };
+
+const reviewCardStyle: CSSProperties = { display: "grid", gridTemplateColumns: "64px minmax(0, 1fr)", gap: 10, alignItems: "center", border: "1px solid #e5e7eb", borderRadius: 13, padding: 9 };
+const reviewImageStyle: CSSProperties = { width: 64, height: 64, objectFit: "cover", borderRadius: 10 };
+const reviewImageEmptyStyle: CSSProperties = { width: 64, height: 64, borderRadius: 10, background: "#f3f4f6", display: "grid", placeItems: "center", fontSize: 11, color: "#6b7280" };
