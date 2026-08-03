@@ -62,3 +62,168 @@ export async function POST(req: Request) {
   }
   return NextResponse.json({ ok: true, id: product.id, sku: product.sku });
 }
+
+
+export async function PATCH(req: Request) {
+  const supabase = createServiceRoleClient();
+
+  try {
+    const body = await req.json();
+    const productId = String(body.product_id || "").trim();
+
+    if (!productId) {
+      return NextResponse.json({ error: "product_id가 없습니다." }, { status: 400 });
+    }
+
+    let categoryId: string | null = null;
+    const categoryCode = String(body.category_code || "").trim();
+
+    if (categoryCode) {
+      const { data: category, error: categoryError } = await supabase
+        .from("stock_category")
+        .select("id")
+        .eq("code", categoryCode)
+        .maybeSingle();
+
+      if (categoryError) {
+        return NextResponse.json(
+          { error: "카테고리 조회 실패", detail: categoryError.message },
+          { status: 500 }
+        );
+      }
+
+      categoryId = category?.id || null;
+    }
+
+    const { error: productError } = await supabase
+      .from("stock_product")
+      .update({
+        category_id: categoryId,
+        title: String(body.title || "").trim(),
+        folder_name: String(body.group_name || "").trim() || null,
+        collection_name: String(body.collection_name || "").trim() || null,
+        item_type: String(body.item_type || "").trim() || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", productId);
+
+    if (productError) {
+      return NextResponse.json(
+        { error: "상품 수정 실패", detail: productError.message },
+        { status: 500 }
+      );
+    }
+
+    const { data: defaultLocation, error: locationError } = await supabase
+      .from("stock_location")
+      .select("id")
+      .eq("name", "미지정")
+      .maybeSingle();
+
+    if (locationError) {
+      return NextResponse.json(
+        { error: "미지정 위치 조회 실패", detail: locationError.message },
+        { status: 500 }
+      );
+    }
+
+    let defaultLocationId = defaultLocation?.id || "";
+    if (!defaultLocationId) {
+      const { data: insertedLocation, error: insertLocationError } = await supabase
+        .from("stock_location")
+        .insert({ name: "미지정", sort_order: 0 })
+        .select("id")
+        .single();
+
+      if (insertLocationError) {
+        return NextResponse.json(
+          { error: "미지정 위치 생성 실패", detail: insertLocationError.message },
+          { status: 500 }
+        );
+      }
+
+      defaultLocationId = insertedLocation.id;
+    }
+
+    const variants = Array.isArray(body.variants) ? body.variants : [];
+
+    for (let index = 0; index < variants.length; index += 1) {
+      const variant = variants[index];
+      const variantId = String(variant.id || "").trim();
+      if (!variantId) continue;
+
+      const quantity = Math.max(0, Math.floor(Number(variant.quantity || 0)));
+
+      const { error: variantError } = await supabase
+        .from("stock_variant")
+        .update({
+          variant_name: String(variant.variant_name || "").trim() || "기본",
+          variant_code: String(variant.variant_code || "").trim().toUpperCase() || `V${index + 1}`,
+          sort_order: index,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", variantId)
+        .eq("product_id", productId);
+
+      if (variantError) {
+        return NextResponse.json(
+          { error: "하위옵션 수정 실패", detail: variantError.message },
+          { status: 500 }
+        );
+      }
+
+      const { data: existingQuantity, error: quantityLookupError } = await supabase
+        .from("stock_quantity")
+        .select("id,quantity")
+        .eq("variant_id", variantId)
+        .eq("location_id", defaultLocationId)
+        .maybeSingle();
+
+      if (quantityLookupError) {
+        return NextResponse.json(
+          { error: "수량 조회 실패", detail: quantityLookupError.message },
+          { status: 500 }
+        );
+      }
+
+      if (existingQuantity?.id) {
+        const { error: quantityUpdateError } = await supabase
+          .from("stock_quantity")
+          .update({ quantity, updated_at: new Date().toISOString() })
+          .eq("id", existingQuantity.id);
+
+        if (quantityUpdateError) {
+          return NextResponse.json(
+            { error: "수량 수정 실패", detail: quantityUpdateError.message },
+            { status: 500 }
+          );
+        }
+      } else {
+        const { error: quantityInsertError } = await supabase
+          .from("stock_quantity")
+          .insert({
+            variant_id: variantId,
+            location_id: defaultLocationId,
+            quantity,
+          });
+
+        if (quantityInsertError) {
+          return NextResponse.json(
+            { error: "수량 생성 실패", detail: quantityInsertError.message },
+            { status: 500 }
+          );
+        }
+      }
+    }
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: "STOCK 수정 중 오류",
+        detail: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 }
+    );
+  }
+}
