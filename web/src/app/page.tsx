@@ -42,12 +42,12 @@ export default async function HomePage() {
         <h2 style={sectionTitleMarginStyle}>Overseas</h2>
 
         <div style={gridStyle}>
-          <Link href="/orders" style={cardStyle("#fff", "#e5e7eb")}>
+          <Link href="/orders" style={cardStyle()}>
             <div style={titleStyle}>Overseas Order</div>
             <p style={descStyle}>해외 주문 조회 및 상태 관리</p>
           </Link>
 
-          <Link href="/order-upload" style={cardStyle("#fff8d7", "#fde68a")}>
+          <Link href="/order-upload" style={cardStyle()}>
             <div style={titleStyle}>Order Upload</div>
             <p style={descStyle}>eBay CSV 주문 업로드</p>
             <p style={metaStyle}>
@@ -58,7 +58,7 @@ export default async function HomePage() {
             </p>
           </Link>
 
-          <Link href="/tracking-upload" style={cardStyle("#eff6ff", "#bfdbfe")}>
+          <Link href="/tracking-upload" style={cardStyle()}>
             <div style={titleStyle}>Tracking Upload</div>
             <p style={descStyle}>K-Packet · EGS 운송장 매칭/업데이트</p>
             <p style={metaStyle}>
@@ -70,22 +70,22 @@ export default async function HomePage() {
         <h2 style={sectionTitleMarginStyle}>Domestic</h2>
 
         <div style={gridStyle}>
-          <Link href="/domestic-upload" style={cardStyle("#f9fafb", "#e5e7eb")}>
+          <Link href="/domestic-upload" style={cardStyle()}>
             <div style={titleStyle}>Domestic Upload</div>
             <p style={descStyle}>국내 주문 텍스트 업로드/엑셀 추출</p>
           </Link>
 
-          <Link href="/domestic-orders" style={cardStyle("#f9fafb", "#e5e7eb")}>
+          <Link href="/domestic-orders" style={cardStyle()}>
             <div style={titleStyle}>Domestic Orders</div>
             <p style={descStyle}>국내 주문 조회 및 상태 관리</p>
           </Link>
 
-          <Link href="/domestic-tracking" style={cardStyle("#f9fafb", "#e5e7eb")}>
+          <Link href="/domestic-tracking" style={cardStyle()}>
             <div style={titleStyle}>Domestic Tracking</div>
             <p style={descStyle}>국내 운송장 매칭/업데이트</p>
           </Link>
 
-          <Link href="/archive" style={cardStyle("#fff", "#e5e7eb")}>
+          <Link href="/archive" style={cardStyle()}>
             <div style={titleStyle}>보관소</div>
             <p style={descStyle}>
               PDF / 엑셀 파일을 업로드하고 내려받습니다.
@@ -96,50 +96,41 @@ export default async function HomePage() {
         <h2 style={sectionTitleMarginStyle}>Inventory</h2>
 
         <div style={gridStyle}>
-          <Link
-            href="/domestic-inventory-input"
-            style={cardStyle("#fff7ed", "#fdba74")}
-          >
+          <Link href="/domestic-inventory-input" style={cardStyle()}>
             <div style={titleStyle}>Inventory Input</div>
             <p style={descStyle}>주문내역 / 이미지 URL 기반 재고 등록</p>
           </Link>
 
-          <Link
-            href="/domestic-inventory-cards"
-            style={cardStyle("#f5f3ff", "#c4b5fd")}
-          >
+          <Link href="/domestic-inventory-cards" style={cardStyle()}>
             <div style={titleStyle}>Inventory Cards</div>
             <p style={descStyle}>카드형 이미지 기반 재고 관리</p>
           </Link>
 
-          <Link
-            href="/domestic-inventory"
-            style={cardStyle("#f0fdf4", "#86efac")}
-          >
+          <Link href="/domestic-inventory" style={cardStyle()}>
             <div style={titleStyle}>Inventory DB</div>
             <p style={descStyle}>DB 테이블 형태 전체 재고 관리</p>
           </Link>
 
-          <Link
-            href="/sourcing-research"
-            style={cardStyle("#ecfeff", "#67e8f9")}
-          >
+          <Link href="/sourcing-research" style={cardStyle()}>
             <div style={titleStyle}>Sourcing Research</div>
             <p style={descStyle}>
               사입 전 상품 링크, 원가, 예상 판매가를 저장하고 이윤을 계산합니다.
             </p>
           </Link>
-
+        </div>
 
         <h2 style={sectionTitleMarginStyle}>STOCK</h2>
 
         <div style={gridStyle}>
           <Link href="/stock" style={cardStyle()}>
-            <div style={titleStyle}>📦 STOCK</div>
-            <p style={descStyle}>사진 기반 재고 관리 및 상품 등록</p>
+            <div style={titleStyle}>STOCK 조회</div>
+            <p style={descStyle}>등록된 상품과 재고를 조회하고 수정합니다.</p>
           </Link>
-        </div>
 
+          <Link href="/stock/import" style={cardStyle()}>
+            <div style={titleStyle}>재고 등록</div>
+            <p style={descStyle}>사진을 업로드해 상품 초안을 만들고 등록합니다.</p>
+          </Link>
         </div>
       </section>
     </main>
@@ -158,20 +149,18 @@ function formatDate(value?: string | null) {
   }).format(new Date(value));
 }
 
-function cardStyle(
-  bg: string = "#FEFF5A",
-  border: string = "#0047FF"
-): React.CSSProperties {
+function cardStyle(): React.CSSProperties {
   return {
     textDecoration: "none",
     color: "#111111",
     padding: 20,
-    border: `3px solid ${border}`,
-    borderRadius: 18,
-    background: bg,
+    border: "2px solid #0047FF",
+    borderRadius: 16,
+    background: "#FEFF5A",
     display: "block",
     transition: "0.15s ease",
-    boxShadow: `0 4px 0 ${border}`,
+    boxShadow: "0 3px 0 #0047FF",
+    boxSizing: "border-box",
   };
 }
 
