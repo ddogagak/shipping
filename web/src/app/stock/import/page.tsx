@@ -42,6 +42,83 @@ type ProductDraft = {
   expanded: boolean;
 };
 
+type StoredImportImage = Omit<ImportImage, "previewUrl">;
+
+type StockWorkRecord = {
+  id: string;
+  name: string;
+  images: StoredImportImage[];
+  drafts: ProductDraft[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+const WORK_DB_NAME = "ddoga-stock-import";
+const WORK_DB_VERSION = 1;
+const WORK_STORE_NAME = "works";
+const ACTIVE_WORK_KEY = "ddoga-stock-active-work";
+
+function openWorkDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(WORK_DB_NAME, WORK_DB_VERSION);
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(WORK_STORE_NAME)) {
+        db.createObjectStore(WORK_STORE_NAME, { keyPath: "id" });
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("IndexedDB 열기 실패"));
+  });
+}
+
+async function listWorkRecords(): Promise<StockWorkRecord[]> {
+  const db = await openWorkDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(WORK_STORE_NAME, "readonly");
+    const request = tx.objectStore(WORK_STORE_NAME).getAll();
+    request.onsuccess = () => {
+      const rows = (request.result || []) as StockWorkRecord[];
+      resolve(rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+    };
+    request.onerror = () => reject(request.error || new Error("작업 목록 조회 실패"));
+    tx.oncomplete = () => db.close();
+  });
+}
+
+async function getWorkRecord(id: string): Promise<StockWorkRecord | null> {
+  const db = await openWorkDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(WORK_STORE_NAME, "readonly");
+    const request = tx.objectStore(WORK_STORE_NAME).get(id);
+    request.onsuccess = () => resolve((request.result as StockWorkRecord | undefined) || null);
+    request.onerror = () => reject(request.error || new Error("작업 불러오기 실패"));
+    tx.oncomplete = () => db.close();
+  });
+}
+
+async function putWorkRecord(record: StockWorkRecord): Promise<void> {
+  const db = await openWorkDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(WORK_STORE_NAME, "readwrite");
+    tx.objectStore(WORK_STORE_NAME).put(record);
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error || new Error("작업 저장 실패")); };
+  });
+}
+
+async function removeWorkRecord(id: string): Promise<void> {
+  const db = await openWorkDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(WORK_STORE_NAME, "readwrite");
+    tx.objectStore(WORK_STORE_NAME).delete(id);
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error || new Error("작업 삭제 실패")); };
+  });
+}
+
 const SKZ_VARIANTS = [
   { name: "방찬", code: "CHAN" },
   { name: "리노", code: "KNOW" },
@@ -79,6 +156,97 @@ export default function StockImportPage() {
   const [composerOpen, setComposerOpen] = useState(false);
   const [assignSheetOpen, setAssignSheetOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [activeWorkId, setActiveWorkId] = useState("");
+  const [workName, setWorkName] = useState("");
+  const [workList, setWorkList] = useState<StockWorkRecord[]>([]);
+  const [hydrated, setHydrated] = useState(false);
+  const [autosaveStatus, setAutosaveStatus] = useState("준비 중");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrate() {
+      try {
+        const works = await listWorkRecords();
+        if (cancelled) return;
+        setWorkList(works);
+
+        const savedActiveId = localStorage.getItem(ACTIVE_WORK_KEY) || works[0]?.id || "";
+        const target = savedActiveId ? await getWorkRecord(savedActiveId) : null;
+
+        if (target) {
+          const restoredImages: ImportImage[] = target.images.map((image) => ({
+            ...image,
+            previewUrl: URL.createObjectURL(image.file),
+          }));
+          setActiveWorkId(target.id);
+          setWorkName(target.name);
+          setImages(restoredImages);
+          setDrafts(target.drafts || []);
+          localStorage.setItem(ACTIVE_WORK_KEY, target.id);
+          setMessage(`작업중인 초안을 복구했어 · 사진 ${restoredImages.length}장`);
+        } else {
+          const id = makeId("work");
+          const now = new Date().toISOString();
+          const fresh: StockWorkRecord = {
+            id,
+            name: `작업 ${new Date().toLocaleDateString("ko-KR")}`,
+            images: [],
+            drafts: [],
+            createdAt: now,
+            updatedAt: now,
+          };
+          await putWorkRecord(fresh);
+          if (cancelled) return;
+          setActiveWorkId(id);
+          setWorkName(fresh.name);
+          setWorkList([fresh]);
+          localStorage.setItem(ACTIVE_WORK_KEY, id);
+        }
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "임시작업 불러오기 실패");
+      } finally {
+        if (!cancelled) {
+          setHydrated(true);
+          setAutosaveStatus("자동저장 켜짐");
+        }
+      }
+    }
+
+    void hydrate();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated || !activeWorkId) return;
+
+    setAutosaveStatus("저장 중...");
+    const timer = window.setTimeout(() => {
+      const now = new Date().toISOString();
+      const record: StockWorkRecord = {
+        id: activeWorkId,
+        name: workName.trim() || "이름 없는 작업",
+        images: images.map(({ previewUrl: _previewUrl, ...image }) => image),
+        drafts,
+        createdAt:
+          workList.find((work) => work.id === activeWorkId)?.createdAt || now,
+        updatedAt: now,
+      };
+
+      void putWorkRecord(record)
+        .then(async () => {
+          const works = await listWorkRecords();
+          setWorkList(works);
+          setAutosaveStatus(`자동저장 ${new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}`);
+        })
+        .catch((error) => {
+          setAutosaveStatus("자동저장 실패");
+          setMessage(error instanceof Error ? error.message : "자동저장 실패");
+        });
+    }, 500);
+
+    return () => window.clearTimeout(timer);
+  }, [activeWorkId, drafts, hydrated, images, workName]);
 
   useEffect(() => {
     imagesRef.current = images;
@@ -101,6 +269,77 @@ export default function StockImportPage() {
   );
 
   const assignedCount = images.length - availableImages.length;
+  const progressPercent = images.length
+    ? Math.round((assignedCount / images.length) * 100)
+    : 0;
+
+  function revokeCurrentPreviewUrls() {
+    imagesRef.current.forEach((image) => URL.revokeObjectURL(image.previewUrl));
+  }
+
+  async function switchWork(id: string) {
+    if (!id || id === activeWorkId) return;
+    const target = await getWorkRecord(id);
+    if (!target) return;
+
+    revokeCurrentPreviewUrls();
+    const restoredImages: ImportImage[] = target.images.map((image) => ({
+      ...image,
+      previewUrl: URL.createObjectURL(image.file),
+    }));
+    setActiveWorkId(target.id);
+    setWorkName(target.name);
+    setImages(restoredImages);
+    setDrafts(target.drafts || []);
+    setComposerOpen(false);
+    setAssignSheetOpen(false);
+    setReviewOpen(false);
+    localStorage.setItem(ACTIVE_WORK_KEY, target.id);
+    setMessage(`작업 전환 완료 · 사진 ${restoredImages.length}장`);
+  }
+
+  async function createNewWork() {
+    const id = makeId("work");
+    const now = new Date().toISOString();
+    const record: StockWorkRecord = {
+      id,
+      name: `새 작업 ${new Date().toLocaleDateString("ko-KR")}`,
+      images: [],
+      drafts: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    await putWorkRecord(record);
+    revokeCurrentPreviewUrls();
+    setActiveWorkId(id);
+    setWorkName(record.name);
+    setImages([]);
+    setDrafts([]);
+    setWorkList(await listWorkRecords());
+    localStorage.setItem(ACTIVE_WORK_KEY, id);
+    setMessage("새 작업을 만들었어.");
+  }
+
+  async function deleteCurrentWork() {
+    if (!activeWorkId) return;
+    if (!confirm("현재 작업과 임시 사진을 삭제할까?")) return;
+
+    await removeWorkRecord(activeWorkId);
+    revokeCurrentPreviewUrls();
+    const remaining = await listWorkRecords();
+    setWorkList(remaining);
+
+    if (remaining.length) {
+      await switchWork(remaining[0].id);
+    } else {
+      setActiveWorkId("");
+      setWorkName("");
+      setImages([]);
+      setDrafts([]);
+      localStorage.removeItem(ACTIVE_WORK_KEY);
+      await createNewWork();
+    }
+  }
 
   function addFiles(fileList: FileList | File[]) {
     const allFiles = Array.from(fileList);
@@ -411,6 +650,14 @@ export default function StockImportPage() {
     setReviewOpen(true);
   }
 
+  if (!hydrated) {
+    return (
+      <main style={pageStyle}>
+        <div style={{ ...cardStyle, marginTop: 40, textAlign: "center" }}>작업중인 사진을 불러오는 중...</div>
+      </main>
+    );
+  }
+
   return (
     <main style={pageStyle}>
       <header style={headerStyle}>
@@ -420,6 +667,51 @@ export default function StockImportPage() {
         </div>
         <Link href="/stock" style={outlineButtonStyle}>목록</Link>
       </header>
+
+      <section style={workPanelStyle}>
+        <div style={{ display: "grid", gap: 6, minWidth: 0, flex: 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+            <strong style={{ fontSize: 13 }}>작업중</strong>
+            <span style={autosaveTextStyle}>{autosaveStatus}</span>
+          </div>
+          <input
+            value={workName}
+            onChange={(event) => setWorkName(event.target.value)}
+            style={workNameInputStyle}
+            placeholder="작업 이름"
+          />
+          <select
+            value={activeWorkId}
+            onChange={(event) => void switchWork(event.target.value)}
+            style={workSelectStyle}
+          >
+            {workList.map((work) => (
+              <option key={work.id} value={work.id}>
+                {work.name} · 사진 {work.images.length} · 초안 {work.drafts.length}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div style={{ display: "grid", gap: 6 }}>
+          <button type="button" style={smallButtonStyle} onClick={() => void createNewWork()}>+ 새 작업</button>
+          <button type="button" style={dangerSmallStyle} onClick={() => void deleteCurrentWork()}>작업 삭제</button>
+        </div>
+      </section>
+
+      <section style={progressCardStyle}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+          <strong>분류 진행률</strong>
+          <strong>{progressPercent}%</strong>
+        </div>
+        <div style={progressTrackStyle}>
+          <div style={{ ...progressFillStyle, width: `${progressPercent}%` }} />
+        </div>
+        <div style={progressMetaStyle}>
+          <span>전체 {images.length}장</span>
+          <span>분류 {assignedCount}장</span>
+          <span>미분류 {availableImages.length}장</span>
+        </div>
+      </section>
 
       <section style={summaryStyle}>
         <strong>전체 {images.length}</strong>
@@ -758,6 +1050,71 @@ export default function StockImportPage() {
     </main>
   );
 }
+
+const workPanelStyle: CSSProperties = {
+  display: "flex",
+  gap: 10,
+  alignItems: "stretch",
+  background: "#fff",
+  border: "1px solid #e5e7eb",
+  borderRadius: 16,
+  padding: 12,
+  marginBottom: 10,
+};
+const workNameInputStyle: CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  border: 0,
+  borderBottom: "1px solid #e5e7eb",
+  padding: "5px 2px 7px",
+  fontSize: 16,
+  fontWeight: 900,
+  outline: "none",
+};
+const workSelectStyle: CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  border: "1px solid #d1d5db",
+  borderRadius: 9,
+  padding: "7px 8px",
+  background: "#fff",
+  fontSize: 12,
+};
+const autosaveTextStyle: CSSProperties = {
+  color: "#047857",
+  fontSize: 11,
+  fontWeight: 800,
+  whiteSpace: "nowrap",
+};
+const progressCardStyle: CSSProperties = {
+  background: "#fff",
+  border: "1px solid #e5e7eb",
+  borderRadius: 16,
+  padding: 12,
+  marginBottom: 10,
+};
+const progressTrackStyle: CSSProperties = {
+  height: 9,
+  background: "#e5e7eb",
+  borderRadius: 999,
+  overflow: "hidden",
+  marginTop: 9,
+};
+const progressFillStyle: CSSProperties = {
+  height: "100%",
+  background: "#7c3aed",
+  borderRadius: 999,
+  transition: "width .2s ease",
+};
+const progressMetaStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 8,
+  marginTop: 7,
+  color: "#6b7280",
+  fontSize: 11,
+  fontWeight: 700,
+};
 
 const pageStyle: CSSProperties = {
   maxWidth: 880,
