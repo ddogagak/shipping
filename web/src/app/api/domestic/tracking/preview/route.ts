@@ -8,6 +8,7 @@ type IncomingRow = {
   selected?: boolean;
   order_key?: string;
   phone?: string;
+  product_name?: string;
   tracking_number?: string;
   final_product_status?: string;
 };
@@ -16,6 +17,7 @@ type DomesticOrderMatchRow = {
   order_id: string;
   customer_order_no: string | null;
   recipient_name: string | null;
+  nickname: string | null;
   phone: string | null;
 };
 
@@ -33,6 +35,14 @@ function cleanTrackingNumber(value: unknown) {
 
 function normalizePhone(value: unknown) {
   return safeText(value).replace(/\D/g, "");
+}
+
+function hasMaskedPhone(value: unknown) {
+  return /[*xX]/.test(safeText(value));
+}
+
+function normalizeNickname(value: unknown) {
+  return safeText(value).replace(/\s+/g, "").toLowerCase();
 }
 
 function normalizeOrderKey(value: unknown) {
@@ -86,7 +96,9 @@ export async function POST(req: Request) {
       order_key: safeText(row.order_key),
       normalized_order_key: normalizeOrderKey(row.order_key),
       phone: safeText(row.phone),
-      normalized_phone: normalizePhone(row.phone),
+      normalized_phone: hasMaskedPhone(row.phone) ? "" : normalizePhone(row.phone),
+      product_name: safeText(row.product_name),
+      normalized_nickname: normalizeNickname(row.product_name),
       tracking_number: cleanTrackingNumber(row.tracking_number),
       final_product_status: safeText(row.final_product_status),
     }));
@@ -103,10 +115,23 @@ export async function POST(req: Request) {
       new Set(normalizedRows.map((row) => row.normalized_phone).filter(Boolean))
     );
 
+    const nicknameKeys = Array.from(
+      new Set(normalizedRows.map((row) => row.normalized_nickname).filter(Boolean))
+    );
+
     const supabase = createServiceRoleClient();
 
     const orderMap = new Map<string, DomesticOrderMatchRow>();
     const phoneMap = new Map<string, DomesticOrderMatchRow[]>();
+    const nicknameMap = new Map<string, DomesticOrderMatchRow[]>();
+
+    const addNicknameMatch = (order: DomesticOrderMatchRow) => {
+      const nickname = normalizeNickname(order.nickname);
+      if (!nickname) return;
+      const list = nicknameMap.get(nickname) || [];
+      if (!list.some((item) => item.order_id === order.order_id)) list.push(order);
+      nicknameMap.set(nickname, list);
+    };
 
     const addPhoneMatch = (order: DomesticOrderMatchRow) => {
       const phone = normalizePhone(order.phone);
@@ -122,7 +147,7 @@ export async function POST(req: Request) {
     if (phoneKeys.length) {
       const { data: phoneOrders, error: phoneOrdersError } = await supabase
         .from("domestic_order")
-        .select("order_id, customer_order_no, recipient_name, phone")
+        .select("order_id, customer_order_no, recipient_name, nickname, phone")
         .not("phone", "is", null);
 
       if (phoneOrdersError) {
@@ -136,6 +161,28 @@ export async function POST(req: Request) {
         const typedOrder = order as DomesticOrderMatchRow;
         if (phoneKeys.includes(normalizePhone(typedOrder.phone))) {
           addPhoneMatch(typedOrder);
+          addNicknameMatch(typedOrder);
+        }
+      }
+    }
+
+    if (nicknameKeys.length) {
+      const { data: nicknameOrders, error: nicknameOrdersError } = await supabase
+        .from("domestic_order")
+        .select("order_id, customer_order_no, recipient_name, nickname, phone")
+        .not("nickname", "is", null);
+
+      if (nicknameOrdersError) {
+        return NextResponse.json(
+          { error: "닉네임 조회 실패", detail: nicknameOrdersError.message },
+          { status: 500 }
+        );
+      }
+
+      for (const order of nicknameOrders || []) {
+        const typedOrder = order as DomesticOrderMatchRow;
+        if (nicknameKeys.includes(normalizeNickname(typedOrder.nickname))) {
+          addNicknameMatch(typedOrder);
         }
       }
     }
@@ -143,7 +190,7 @@ export async function POST(req: Request) {
     if (orderKeys.length) {
       const { data: byOrderId, error: orderIdError } = await supabase
         .from("domestic_order")
-        .select("order_id, customer_order_no, recipient_name, phone")
+        .select("order_id, customer_order_no, recipient_name, nickname, phone")
         .in("order_id", orderKeys);
 
       if (orderIdError) {
@@ -155,7 +202,7 @@ export async function POST(req: Request) {
 
       const { data: byCustomerOrderNo, error: customerOrderNoError } = await supabase
         .from("domestic_order")
-        .select("order_id, customer_order_no, recipient_name, phone")
+        .select("order_id, customer_order_no, recipient_name, nickname, phone")
         .in("customer_order_no", orderKeys);
 
       if (customerOrderNoError) {
@@ -169,6 +216,7 @@ export async function POST(req: Request) {
         const typedRow = row as DomesticOrderMatchRow;
         addOrderToMap(orderMap, typedRow);
         addPhoneMatch(typedRow);
+        addNicknameMatch(typedRow);
       }
 
       const stillUnmatchedKeys = normalizedRows
@@ -190,7 +238,7 @@ export async function POST(req: Request) {
       if (stillUnmatchedKeys.length) {
         const { data: allOrders, error: allOrdersError } = await supabase
           .from("domestic_order")
-          .select("order_id, customer_order_no, recipient_name, phone");
+          .select("order_id, customer_order_no, recipient_name, nickname, phone");
 
         if (allOrdersError) {
           return NextResponse.json(
@@ -203,6 +251,7 @@ export async function POST(req: Request) {
           const typedRow = row as DomesticOrderMatchRow;
           addOrderToMap(orderMap, typedRow);
           addPhoneMatch(typedRow);
+        addNicknameMatch(typedRow);
         }
       }
     }
@@ -212,14 +261,20 @@ export async function POST(req: Request) {
         ? phoneMap.get(row.normalized_phone) || []
         : [];
 
+      const nicknameMatches = row.normalized_nickname
+        ? nicknameMap.get(row.normalized_nickname) || []
+        : [];
+
       const matchedByPhone =
         phoneMatches.length === 1 ? phoneMatches[0] : undefined;
+      const matchedByNickname =
+        nicknameMatches.length === 1 ? nicknameMatches[0] : undefined;
 
       const matchedByOrderNo =
         orderMap.get(row.order_key) ||
         orderMap.get(row.normalized_order_key);
 
-      const matched = matchedByPhone || matchedByOrderNo;
+      const matched = matchedByPhone || matchedByOrderNo || matchedByNickname;
       const complete = isCompleteStatus(row.final_product_status);
       let matchStatus = "not_found";
 
@@ -229,6 +284,10 @@ export async function POST(req: Request) {
         matchStatus = "duplicate_phone";
       } else if (matchedByPhone) {
         matchStatus = "matched_by_phone";
+      } else if (nicknameMatches.length > 1) {
+        matchStatus = "duplicate_nickname";
+      } else if (matchedByNickname) {
+        matchStatus = "matched_by_nickname";
       } else if (matched?.order_id === row.order_key) {
         matchStatus = "matched_by_order_id";
       } else if (matched?.customer_order_no === row.order_key) {
@@ -239,12 +298,19 @@ export async function POST(req: Request) {
 
       return {
         ...row,
-        selected: Boolean(matched && row.tracking_number && phoneMatches.length <= 1),
+        selected: Boolean(
+          matched &&
+          row.tracking_number &&
+          row.tracking_number.length >= 8 &&
+          phoneMatches.length <= 1 &&
+          nicknameMatches.length <= 1
+        ),
         matched_order_id: matched?.order_id || "",
         customer_order_no: matched?.customer_order_no || "",
         recipient_name: matched?.recipient_name || "",
         match_status: matchStatus,
         duplicate_phone_count: phoneMatches.length > 1 ? phoneMatches.length : 0,
+        duplicate_nickname_count: nicknameMatches.length > 1 ? nicknameMatches.length : 0,
         next_shipping_status: complete ? "done" : "uploaded",
         next_order_status: complete ? "done" : "",
       };
