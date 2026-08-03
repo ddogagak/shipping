@@ -129,6 +129,17 @@ export default async function HomePage() {
               사입 전 상품 링크, 원가, 예상 판매가를 저장하고 이윤을 계산합니다.
             </p>
           </Link>
+
+
+        <h2 style={sectionTitleMarginStyle}>STOCK</h2>
+
+        <div style={gridStyle}>
+          <Link href="/stock" style={cardStyle()}>
+            <div style={titleStyle}>📦 STOCK</div>
+            <p style={descStyle}>사진 기반 재고 관리 및 상품 등록</p>
+          </Link>
+        </div>
+
         </div>
       </section>
     </main>
@@ -147,17 +158,20 @@ function formatDate(value?: string | null) {
   }).format(new Date(value));
 }
 
-function cardStyle(bg: string, border: string): React.CSSProperties {
+function cardStyle(
+  bg: string = "#FEFF5A",
+  border: string = "#0047FF"
+): React.CSSProperties {
   return {
     textDecoration: "none",
-    color: "inherit",
+    color: "#111111",
     padding: 20,
-    border: `1px solid ${border}`,
-    borderRadius: 16,
+    border: `3px solid ${border}`,
+    borderRadius: 18,
     background: bg,
     display: "block",
     transition: "0.15s ease",
-    boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+    boxShadow: `0 4px 0 ${border}`,
   };
 }
 
