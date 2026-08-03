@@ -145,6 +145,26 @@ function clampQuantity(value: number) {
   return Math.max(0, Math.floor(value));
 }
 
+async function compressImage(file: File): Promise<File> {
+  const bitmap = await createImageBitmap(file);
+  const maxSide = 1800;
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("이미지 압축 준비 실패");
+  context.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((value) => value ? resolve(value) : reject(new Error("이미지 압축 실패")), "image/webp", 0.82);
+  });
+  const base = file.name.replace(/\.[^.]+$/, "") || "stock-image";
+  return new File([blob], `${base}.webp`, { type: "image/webp", lastModified: Date.now() });
+}
+
 export default function StockImportPage() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const imagesRef = useRef<ImportImage[]>([]);
@@ -161,6 +181,8 @@ export default function StockImportPage() {
   const [workList, setWorkList] = useState<StockWorkRecord[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [autosaveStatus, setAutosaveStatus] = useState("준비 중");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitProgress, setSubmitProgress] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -650,6 +672,102 @@ export default function StockImportPage() {
     setReviewOpen(true);
   }
 
+  async function submitAllDrafts() {
+    const invalid = drafts.filter((draft) => draftIssues(draft).length);
+    if (invalid.length) {
+      setMessage(`초안 ${invalid.length}개에 확인할 항목이 있어.`);
+      return;
+    }
+    if (!drafts.length || submitting) return;
+    if (!confirm(`상품 초안 ${drafts.length}개를 최종 등록할까?`)) return;
+
+    setSubmitting(true);
+    setSubmitProgress(0);
+    setMessage("이미지 압축 및 업로드 중...");
+
+    try {
+      const usedImageIds = Array.from(new Set(drafts.flatMap((draft) => draft.imageIds)));
+      const uploadedImages: Array<{
+        image_id: string;
+        image_url: string;
+        storage_path: string;
+        file_name: string;
+        file_size: number;
+        mime_type: string;
+      }> = [];
+
+      for (let index = 0; index < usedImageIds.length; index += 1) {
+        const imageId = usedImageIds[index];
+        const image = images.find((item) => item.id === imageId);
+        if (!image) throw new Error("저장할 사진을 찾지 못했어.");
+        const compressed = await compressImage(image.file);
+        const imageForm = new FormData();
+        imageForm.append("file", compressed);
+        imageForm.append("work_id", activeWorkId);
+        imageForm.append("image_id", imageId);
+
+        const uploadResponse = await fetch("/api/stock/import/image", {
+          method: "POST",
+          body: imageForm,
+        });
+        const uploadJson = await uploadResponse.json();
+        if (!uploadResponse.ok) {
+          throw new Error(uploadJson.detail || uploadJson.error || "이미지 업로드 실패");
+        }
+        uploadedImages.push(uploadJson.image);
+        setSubmitProgress(Math.round(((index + 1) / usedImageIds.length) * 75));
+      }
+
+      setMessage("상품과 재고를 DB에 저장 중...");
+      const metadata = {
+        work_name: workName.trim() || "STOCK Import",
+        uploaded_images: uploadedImages,
+        drafts: drafts.map((draft) => ({
+          id: draft.id,
+          image_ids: draft.imageIds,
+          cover_image_id: draft.coverImageId,
+          title: draft.title.trim(),
+          category: draft.category,
+          group_name: draft.groupName.trim(),
+          collection: draft.collection.trim(),
+          item_type: draft.itemType.trim(),
+          mode: draft.mode,
+          variants: draft.mode === "variants"
+            ? draft.variants.map((variant) => ({
+                name: variant.name.trim(),
+                code: variant.code.trim().toUpperCase(),
+                quantity: clampQuantity(variant.quantity),
+              }))
+            : [{ name: "기본", code: "BASE", quantity: 0 }],
+        })),
+      };
+
+      const response = await fetch("/api/stock/import/commit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(metadata),
+      });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.detail || json.error || "STOCK 등록 실패");
+
+      setSubmitProgress(100);
+      await removeWorkRecord(activeWorkId);
+      revokeCurrentPreviewUrls();
+      setImages([]);
+      setDrafts([]);
+      setReviewOpen(false);
+      setMessage(`상품 ${json.product_count}개 등록 완료!`);
+      const remaining = await listWorkRecords();
+      setWorkList(remaining);
+      localStorage.removeItem(ACTIVE_WORK_KEY);
+      await createNewWork();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "STOCK 등록 실패");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   if (!hydrated) {
     return (
       <main style={pageStyle}>
@@ -994,7 +1112,7 @@ export default function StockImportPage() {
           <div style={{ ...bottomSheetStyle, maxHeight: "82vh", overflowY: "auto" }} onClick={(event) => event.stopPropagation()}>
             <div style={sheetHandleStyle} />
             <h3 style={{ margin: "4px 0 6px" }}>일괄 저장 전 검수</h3>
-            <p style={subTextStyle}>아직 DB에는 저장되지 않아요. 누락된 항목을 확인하는 화면입니다.</p>
+            <p style={subTextStyle}>검수 후 이미지를 압축하고 Storage와 DB에 최종 등록합니다.</p>
             <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
               {drafts.map((draft, index) => {
                 const issues = draftIssues(draft);
@@ -1013,16 +1131,14 @@ export default function StockImportPage() {
                 );
               })}
             </div>
-            <button
-              type="button"
-              style={saveAllStyle}
-              onClick={() => {
-                const issueCount = drafts.filter((draft) => draftIssues(draft).length).length;
-                setReviewOpen(false);
-                setMessage(issueCount ? `초안 ${issueCount}개에 확인할 항목이 있어.` : "모든 초안 검수 완료. 다음 단계에서 압축·Storage·DB 저장을 연결하면 돼.");
-              }}
-            >
-              검수 완료
+            {submitting ? (
+              <div style={{ marginTop: 14 }}>
+                <div style={progressTrackStyle}><div style={{ ...progressFillStyle, width: `${submitProgress}%` }} /></div>
+                <div style={{ ...subTextStyle, marginTop: 6 }}>등록 중 {submitProgress}%</div>
+              </div>
+            ) : null}
+            <button type="button" style={saveAllStyle} disabled={submitting} onClick={() => void submitAllDrafts()}>
+              {submitting ? "등록 중..." : `상품 ${drafts.length}개 최종 등록`}
             </button>
             <button type="button" style={cancelButtonStyle} onClick={() => setReviewOpen(false)}>닫기</button>
           </div>
