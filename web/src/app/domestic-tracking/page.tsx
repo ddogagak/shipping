@@ -9,6 +9,7 @@ type TrackingPreviewRow = {
   selected: boolean;
   order_key: string;
   phone: string;
+  product_name: string;
   tracking_number: string;
   final_product_status: string;
   matched_order_id?: string;
@@ -74,7 +75,9 @@ function matchStatusLabel(status: string) {
     matched_by_customer_order_no: "고객주문번호 매칭",
     matched_by_normalized_order_no: "정규화 주문번호 매칭",
     matched_by_phone: "전화번호 매칭",
+    matched_by_nickname: "물품명(닉네임) 매칭",
     duplicate_phone: "전화번호 중복",
+    duplicate_nickname: "닉네임 중복",
     missing_tracking: "운송장 없음",
     not_found: "미매칭",
   };
@@ -137,12 +140,16 @@ export default function DomesticTrackingPage() {
         "수하인전화번호",
         "받는분전화번호",
         "받는사람전화번호",
+        "받는분연락처",
+        "받는사람연락처",
+        "수취인연락처",
       ]);
+      const productNameIndex = findHeaderIndex(headers, ["물품명", "상품명", "닉네임"]);
       const finalStatusIndex = findHeaderIndex(headers, ["최종상품상태"]);
       const fallbackFinalStatusIndex = 17; // 엑셀 기준 R열
 
-      if (trackingIndex < 0 || (orderKeyIndex < 0 && phoneIndex < 0)) {
-        setMessage("운송장번호와 주문번호 또는 전화번호 컬럼을 찾을 수 없어.");
+      if (trackingIndex < 0 || (orderKeyIndex < 0 && phoneIndex < 0 && productNameIndex < 0)) {
+        setMessage("운송장번호와 주문번호, 전화번호 또는 물품명 컬럼을 찾을 수 없어.");
         return;
       }
 
@@ -159,11 +166,12 @@ export default function DomesticTrackingPage() {
             selected: true,
             order_key: valueAt(row, orderKeyIndex),
             phone: valueAt(row, phoneIndex),
+            product_name: valueAt(row, productNameIndex),
             tracking_number: cleanTrackingNumber(valueAt(row, trackingIndex)),
             final_product_status: finalStatus,
           };
         })
-        .filter((row) => row.order_key || row.phone || row.tracking_number);
+        .filter((row) => row.order_key || row.phone || row.product_name || row.tracking_number);
 
       if (!parsedRows.length) {
         setMessage("미리보기할 운송장 데이터가 없어.");
@@ -184,7 +192,7 @@ export default function DomesticTrackingPage() {
 
       const previewRows: TrackingPreviewRow[] = (json.rows || []).map((row: TrackingPreviewRow) => ({
         ...row,
-        selected: Boolean(row.matched_order_id && row.tracking_number),
+        selected: Boolean(row.selected && row.matched_order_id && row.tracking_number.length >= 8),
       }));
 
       setRows(previewRows);
@@ -337,6 +345,7 @@ export default function DomesticTrackingPage() {
                   <th style={thStyle}>DB 주문ID</th>
                   <th style={thStyle}>파일 주문번호</th>
                   <th style={thStyle}>전화번호</th>
+                  <th style={thStyle}>물품명</th>
                   <th style={thStyle}>운송장번호</th>
                   <th style={thStyle}>최종상품상태</th>
                   <th style={thStyle}>수취인</th>
@@ -344,7 +353,7 @@ export default function DomesticTrackingPage() {
               </thead>
               <tbody>
                 {rows.map((row) => {
-                  const canSave = Boolean(row.matched_order_id && row.tracking_number);
+                  const canSave = Boolean(row.matched_order_id && row.tracking_number.length >= 8);
                   return (
                     <tr key={row.id} style={!canSave ? warningRowStyle : undefined}>
                       <td style={tdStyle}>
@@ -375,6 +384,13 @@ export default function DomesticTrackingPage() {
                         <input
                           value={row.phone || ""}
                           onChange={(event) => updateRow(row.id, { phone: event.target.value })}
+                          style={inputStyle}
+                        />
+                      </td>
+                      <td style={tdStyle}>
+                        <input
+                          value={row.product_name || ""}
+                          onChange={(event) => updateRow(row.id, { product_name: event.target.value })}
                           style={inputStyle}
                         />
                       </td>
