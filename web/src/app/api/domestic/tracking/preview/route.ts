@@ -6,8 +6,9 @@ export const runtime = "nodejs";
 type IncomingRow = {
   id?: string;
   selected?: boolean;
+  order_key?: string;
   phone?: string;
-  file_recipient_name?: string;
+  product_name?: string;
   tracking_number?: string;
   final_product_status?: string;
 };
@@ -49,19 +50,19 @@ function normalizePhone(value: unknown) {
   return safeText(value).replace(/\D/g, "");
 }
 
-function visiblePhoneDigits(value: unknown) {
-  return normalizePhone(value);
-}
-
 function hasMaskedPhone(value: unknown) {
   return /[*xX]/.test(safeText(value));
 }
 
-function normalizeRecipientName(value: unknown) {
+function normalizeNickname(value: unknown) {
+  return safeText(value).replace(/\s+/g, "").toLowerCase();
+}
+
+function normalizeOrderKey(value: unknown) {
   return safeText(value)
     .replace(/\s+/g, "")
-    .replace(/[()（）]/g, "")
-    .toLowerCase();
+    .replace(/[（(][^）)]*[）)]/g, "")
+    .replace(/-C\d+$/i, "");
 }
 
 function isCompleteStatus(value: unknown) {
@@ -81,19 +82,24 @@ function shipping(order?: DomesticOrderMatchRow) {
   return order.domestic_shipping || null;
 }
 
-function uniqueOrders(orders: DomesticOrderMatchRow[]) {
-  return orders.filter(
-    (order, index, list) =>
-      list.findIndex((item) => item.order_id === order.order_id) === index
-  );
+function addCandidate(
+  map: Map<string, DomesticOrderMatchRow[]>,
+  key: string,
+  order: DomesticOrderMatchRow
+) {
+  if (!key) return;
+  const list = map.get(key) || [];
+  if (!list.some((item) => item.order_id === order.order_id)) {
+    list.push(order);
+  }
+  map.set(key, list);
 }
 
 function pickSingle(candidates: DomesticOrderMatchRow[]) {
-  const unique = uniqueOrders(candidates);
-  if (unique.length === 1) return unique[0];
+  if (candidates.length === 1) return candidates[0];
 
-  // 같은 번호에 여러 주문이 있더라도 미완료 주문이 정확히 하나면 그 주문을 사용한다.
-  const active = unique.filter((order) => {
+  // 같은 키로 여러 주문이 있을 때 완료되지 않은 주문이 정확히 하나면 그 주문을 사용한다.
+  const active = candidates.filter((order) => {
     const s = shipping(order);
     return order.order_status !== "done" && s?.shipping_status !== "done";
   });
@@ -112,10 +118,12 @@ export async function POST(req: Request) {
     const normalizedRows = rows.map((row: IncomingRow, index: number) => ({
       id: safeText(row.id) || String(index),
       selected: Boolean(row.selected),
+      order_key: safeText(row.order_key),
+      normalized_order_key: normalizeOrderKey(row.order_key),
       phone: safeText(row.phone),
-      phone_digits: visiblePhoneDigits(row.phone),
-      phone_masked: hasMaskedPhone(row.phone),
-      file_recipient_name: safeText(row.file_recipient_name),
+      normalized_phone: hasMaskedPhone(row.phone) ? "" : normalizePhone(row.phone),
+      product_name: safeText(row.product_name),
+      normalized_nickname: normalizeNickname(row.product_name),
       tracking_number: cleanTrackingNumber(row.tracking_number),
       final_product_status: safeText(row.final_product_status),
     }));
@@ -150,26 +158,41 @@ export async function POST(req: Request) {
     }
 
     const orders = (data || []) as DomesticOrderMatchRow[];
+    const orderKeyMap = new Map<string, DomesticOrderMatchRow[]>();
+    const phoneMap = new Map<string, DomesticOrderMatchRow[]>();
+    const nicknameMap = new Map<string, DomesticOrderMatchRow[]>();
+
+    for (const order of orders) {
+      const rawOrderId = safeText(order.order_id);
+      const rawCustomerNo = safeText(order.customer_order_no);
+
+      addCandidate(orderKeyMap, rawOrderId, order);
+      addCandidate(orderKeyMap, rawCustomerNo, order);
+      addCandidate(orderKeyMap, normalizeOrderKey(rawOrderId), order);
+      addCandidate(orderKeyMap, normalizeOrderKey(rawCustomerNo), order);
+      addCandidate(phoneMap, normalizePhone(order.phone), order);
+      addCandidate(nicknameMap, normalizeNickname(order.nickname), order);
+    }
 
     const previewRows = normalizedRows.map((row) => {
-      let phoneCandidates: DomesticOrderMatchRow[] = [];
+      const phoneCandidates = row.normalized_phone
+        ? phoneMap.get(row.normalized_phone) || []
+        : [];
+      const orderCandidates = [
+        ...(orderKeyMap.get(row.order_key) || []),
+        ...(orderKeyMap.get(row.normalized_order_key) || []),
+      ].filter(
+        (order, index, list) =>
+          list.findIndex((item) => item.order_id === order.order_id) === index
+      );
+      const nicknameCandidates = row.normalized_nickname
+        ? nicknameMap.get(row.normalized_nickname) || []
+        : [];
 
-      if (row.phone_digits) {
-        phoneCandidates = orders.filter((order) => {
-          const dbPhone = normalizePhone(order.phone);
-          if (!dbPhone) return false;
-
-          // 한진 파일처럼 뒷자리가 ****인 경우 보이는 앞자리 숫자만 비교한다.
-          if (row.phone_masked) {
-            return dbPhone.startsWith(row.phone_digits);
-          }
-
-          return dbPhone === row.phone_digits;
-        });
-      }
-
-      phoneCandidates = uniqueOrders(phoneCandidates);
-      const matched = pickSingle(phoneCandidates);
+      const matchedByPhone = pickSingle(phoneCandidates);
+      const matchedByOrder = pickSingle(orderCandidates);
+      const matchedByNickname = pickSingle(nicknameCandidates);
+      const matched = matchedByPhone || matchedByOrder || matchedByNickname;
       const currentShipping = shipping(matched);
       const completeFromFile = isCompleteStatus(row.final_product_status);
       const currentOrderStatus = matched?.order_status || "";
@@ -180,25 +203,29 @@ export async function POST(req: Request) {
       const alreadyDone =
         currentOrderStatus === "done" || currentShippingStatus === "done";
 
-      const fileRecipient = normalizeRecipientName(row.file_recipient_name);
-      const dbRecipient = normalizeRecipientName(matched?.recipient_name);
-      const recipientNameMismatch = Boolean(
-        matched && fileRecipient && dbRecipient && fileRecipient !== dbRecipient
-      );
-
       let matchStatus = "not_found";
       if (!row.tracking_number) {
         matchStatus = "missing_tracking";
-      } else if (!row.phone_digits) {
-        matchStatus = "missing_phone";
-      } else if (phoneCandidates.length > 1 && !matched) {
-        matchStatus = row.phone_masked
-          ? "duplicate_masked_phone"
-          : "duplicate_phone";
-      } else if (matched) {
-        matchStatus = row.phone_masked
-          ? "matched_by_masked_phone"
-          : "matched_by_phone";
+      } else if (row.normalized_phone && phoneCandidates.length > 1 && !matchedByPhone) {
+        matchStatus = "duplicate_phone";
+      } else if (matchedByPhone) {
+        matchStatus = "matched_by_phone";
+      } else if (matchedByOrder) {
+        if (matchedByOrder.order_id === row.order_key) {
+          matchStatus = "matched_by_order_id";
+        } else if (matchedByOrder.customer_order_no === row.order_key) {
+          matchStatus = "matched_by_customer_order_no";
+        } else {
+          matchStatus = "matched_by_normalized_order_no";
+        }
+      } else if (
+        row.normalized_nickname &&
+        nicknameCandidates.length > 1 &&
+        !matchedByNickname
+      ) {
+        matchStatus = "duplicate_nickname";
+      } else if (matchedByNickname) {
+        matchStatus = "matched_by_nickname";
       }
 
       const trackingComparison = !matched
@@ -218,7 +245,9 @@ export async function POST(req: Request) {
         ? "done"
         : currentOrderStatus;
 
-      const canSave = Boolean(matched && row.tracking_number && !alreadyDone);
+      const canSave = Boolean(
+        matched && row.tracking_number && !alreadyDone
+      );
 
       return {
         ...row,
@@ -241,8 +270,9 @@ export async function POST(req: Request) {
         can_save: canSave,
         next_shipping_status: nextShippingStatus,
         next_order_status: nextOrderStatus,
-        recipient_name_mismatch: recipientNameMismatch,
-        phone_candidate_count: phoneCandidates.length,
+        duplicate_phone_count: phoneCandidates.length > 1 ? phoneCandidates.length : 0,
+        duplicate_nickname_count:
+          nicknameCandidates.length > 1 ? nicknameCandidates.length : 0,
       };
     });
 
