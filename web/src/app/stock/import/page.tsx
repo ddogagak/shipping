@@ -11,11 +11,12 @@ import {
   type DragEvent,
 } from "react";
 
-type PreviewImage = {
+type ImportImage = {
   id: string;
   file: File;
   previewUrl: string;
   selected: boolean;
+  draftId: string | null;
 };
 
 type ProductMode = "single" | "variants";
@@ -28,56 +29,53 @@ type VariantDraft = {
 };
 
 type ProductDraft = {
+  id: string;
+  imageIds: string[];
   title: string;
   category: string;
-  collection: string;
   groupName: string;
+  collection: string;
   itemType: string;
-  memo: string;
   mode: ProductMode;
-  coverImageId: string;
   variants: VariantDraft[];
+  expanded: boolean;
 };
 
 const SKZ_VARIANTS = [
-  ["방찬", "CHAN"],
-  ["리노", "KNOW"],
-  ["창빈", "CBIN"],
-  ["현진", "HJIN"],
-  ["한", "HAN"],
-  ["필릭스", "FLIX"],
-  ["승민", "SMIN"],
-  ["아이엔", "IN"],
+  { name: "방찬", code: "CHAN" },
+  { name: "리노", code: "KNOW" },
+  { name: "창빈", code: "CBIN" },
+  { name: "현진", code: "HJIN" },
+  { name: "한", code: "HAN" },
+  { name: "필릭스", code: "FLIX" },
+  { name: "승민", code: "SMIN" },
+  { name: "아이엔", code: "IN" },
 ] as const;
 
-function makeImageId(file: File, index: number) {
-  return `${file.name}-${file.size}-${file.lastModified}-${Date.now()}-${index}`;
+const CATEGORIES = ["SKZ", "피규어", "가챠", "랜덤굿즈", "기타"];
+
+function makeId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function isImageFile(file: File) {
   return file.type.startsWith("image/");
 }
 
+function clampQuantity(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.floor(value));
+}
+
 export default function StockImportPage() {
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const imagesRef = useRef<PreviewImage[]>([]);
+  const imagesRef = useRef<ImportImage[]>([]);
 
-  const [images, setImages] = useState<PreviewImage[]>([]);
+  const [images, setImages] = useState<ImportImage[]>([]);
+  const [drafts, setDrafts] = useState<ProductDraft[]>([]);
   const [dragging, setDragging] = useState(false);
   const [message, setMessage] = useState("");
-  const [draftOpen, setDraftOpen] = useState(false);
-  const [draftImageIds, setDraftImageIds] = useState<string[]>([]);
-  const [draft, setDraft] = useState<ProductDraft>({
-    title: "",
-    category: "SKZ",
-    collection: "",
-    groupName: "Stray Kids",
-    itemType: "",
-    memo: "",
-    mode: "single",
-    coverImageId: "",
-    variants: [],
-  });
+  const [composerOpen, setComposerOpen] = useState(false);
 
   useEffect(() => {
     imagesRef.current = images;
@@ -89,10 +87,17 @@ export default function StockImportPage() {
     };
   }, []);
 
-  const selectedImages = useMemo(
-    () => images.filter((image) => image.selected),
+  const availableImages = useMemo(
+    () => images.filter((image) => !image.draftId),
     [images]
   );
+
+  const selectedImages = useMemo(
+    () => availableImages.filter((image) => image.selected),
+    [availableImages]
+  );
+
+  const assignedCount = images.length - availableImages.length;
 
   function addFiles(fileList: FileList | File[]) {
     const allFiles = Array.from(fileList);
@@ -103,57 +108,45 @@ export default function StockImportPage() {
       return;
     }
 
-    const next = imageFiles.map((file, index) => ({
-      id: makeImageId(file, index),
+    const next = imageFiles.map((file) => ({
+      id: makeId("image"),
       file,
       previewUrl: URL.createObjectURL(file),
-      selected: true,
+      selected: false,
+      draftId: null,
     }));
 
     setImages((prev) => [...prev, ...next]);
-
-    const skipped = allFiles.length - imageFiles.length;
-    setMessage(
-      skipped > 0
-        ? `이미지 ${imageFiles.length}장 추가 / 이미지가 아닌 파일 ${skipped}개 제외`
-        : `이미지 ${imageFiles.length}장 추가`
-    );
+    setMessage(`사진 ${imageFiles.length}장 추가`);
   }
 
   function onFileChange(event: ChangeEvent<HTMLInputElement>) {
-    if (event.target.files?.length) {
-      addFiles(event.target.files);
-    }
+    if (event.target.files?.length) addFiles(event.target.files);
     event.target.value = "";
   }
 
   function onDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setDragging(false);
-
-    if (event.dataTransfer.files?.length) {
-      addFiles(event.dataTransfer.files);
-    }
+    if (event.dataTransfer.files?.length) addFiles(event.dataTransfer.files);
   }
 
   function toggleImage(id: string) {
     setImages((prev) =>
       prev.map((image) =>
-        image.id === id ? { ...image, selected: !image.selected } : image
+        image.id === id && !image.draftId
+          ? { ...image, selected: !image.selected }
+          : image
       )
     );
   }
 
-  function selectAll(selected: boolean) {
-    setImages((prev) => prev.map((image) => ({ ...image, selected })));
-  }
-
-  function removeImage(id: string) {
-    setImages((prev) => {
-      const target = prev.find((image) => image.id === id);
-      if (target) URL.revokeObjectURL(target.previewUrl);
-      return prev.filter((image) => image.id !== id);
-    });
+  function selectAllAvailable(selected: boolean) {
+    setImages((prev) =>
+      prev.map((image) =>
+        image.draftId ? image : { ...image, selected }
+      )
+    );
   }
 
   function removeSelected() {
@@ -162,739 +155,492 @@ export default function StockImportPage() {
       return;
     }
 
-    const selectedIds = new Set(selectedImages.map((image) => image.id));
-
+    const targetIds = new Set(selectedImages.map((image) => image.id));
     setImages((prev) => {
       prev.forEach((image) => {
-        if (selectedIds.has(image.id)) URL.revokeObjectURL(image.previewUrl);
+        if (targetIds.has(image.id)) URL.revokeObjectURL(image.previewUrl);
       });
-      return prev.filter((image) => !selectedIds.has(image.id));
+      return prev.filter((image) => !targetIds.has(image.id));
     });
-
-    setMessage(`선택한 사진 ${selectedImages.length}장 제거`);
+    setMessage(`사진 ${selectedImages.length}장 삭제`);
   }
 
-  function clearAll() {
-    if (!images.length) return;
-    if (!confirm(`사진 ${images.length}장을 전부 비울까?`)) return;
-
-    images.forEach((image) => URL.revokeObjectURL(image.previewUrl));
-    setImages([]);
-    setMessage("사진을 모두 비웠어.");
-  }
-
-  function createProductDraft() {
+  function openComposer() {
     if (!selectedImages.length) {
-      alert("상품으로 묶을 사진을 선택해줘.");
+      setMessage("상품으로 묶을 사진을 선택해줘.");
       return;
     }
+    setComposerOpen(true);
+  }
 
-    const ids = selectedImages.map((image) => image.id);
-    setDraftImageIds(ids);
-    setDraft((prev) => ({
+  function createDraft(mode: ProductMode) {
+    if (!selectedImages.length) return;
+
+    const draftId = makeId("draft");
+    const imageIds = selectedImages.map((image) => image.id);
+
+    setDrafts((prev) => [
       ...prev,
-      coverImageId: ids[0] || "",
-      variants: [],
-    }));
-    setDraftOpen(true);
-    setMessage(`선택한 사진 ${ids.length}장으로 상품 초안을 만들고 있어.`);
+      {
+        id: draftId,
+        imageIds,
+        title: "",
+        category: mode === "variants" ? "SKZ" : "피규어",
+        groupName: mode === "variants" ? "Stray Kids" : "",
+        collection: "",
+        itemType: "",
+        mode,
+        variants: [],
+        expanded: true,
+      },
+    ]);
+
+    setImages((prev) =>
+      prev.map((image) =>
+        imageIds.includes(image.id)
+          ? { ...image, draftId, selected: false }
+          : image
+      )
+    );
+
+    setComposerOpen(false);
+    setMessage(`새 상품 초안 1개 생성 · 사진 ${imageIds.length}장`);
 
     requestAnimationFrame(() => {
-      document.getElementById("stock-product-draft")?.scrollIntoView({
+      document.getElementById(`draft-${draftId}`)?.scrollIntoView({
         behavior: "smooth",
         block: "start",
       });
     });
   }
 
-  function updateDraft(patch: Partial<ProductDraft>) {
-    setDraft((prev) => ({ ...prev, ...patch }));
-  }
-
-  function addVariant() {
-    setDraft((prev) => ({
-      ...prev,
-      mode: "variants",
-      variants: [
-        ...prev.variants,
-        {
-          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-          name: "",
-          code: "",
-          quantity: 1,
-        },
-      ],
-    }));
-  }
-
-  function loadSkzVariants() {
-    setDraft((prev) => ({
-      ...prev,
-      mode: "variants",
-      category: "SKZ",
-      groupName: "Stray Kids",
-      variants: SKZ_VARIANTS.map(([name, code], index) => ({
-        id: `${code}-${Date.now()}-${index}`,
-        name,
-        code,
-        quantity: 1,
-      })),
-    }));
-  }
-
-  function updateVariant(id: string, patch: Partial<VariantDraft>) {
-    setDraft((prev) => ({
-      ...prev,
-      variants: prev.variants.map((variant) =>
-        variant.id === id ? { ...variant, ...patch } : variant
-      ),
-    }));
-  }
-
-  function removeVariant(id: string) {
-    setDraft((prev) => ({
-      ...prev,
-      variants: prev.variants.filter((variant) => variant.id !== id),
-    }));
-  }
-
-  function validateDraft() {
-    if (!draft.title.trim()) {
-      alert("상품명을 입력해줘.");
-      return;
-    }
-
-    if (!draft.coverImageId) {
-      alert("대표사진을 선택해줘.");
-      return;
-    }
-
-    if (draft.mode === "variants") {
-      if (!draft.variants.length) {
-        alert("하위 옵션을 하나 이상 추가해줘.");
-        return;
-      }
-
-      const invalid = draft.variants.find(
-        (variant) => !variant.name.trim() || !variant.code.trim()
-      );
-      if (invalid) {
-        alert("하위 옵션의 이름과 코드를 모두 입력해줘.");
-        return;
-      }
-    }
-
-    setMessage(
-      `상품 초안 확인 완료: ${draft.title} / ${
-        draft.mode === "single" ? "단일 상품" : `하위 옵션 ${draft.variants.length}개`
-      }. 다음 단계에서 Storage와 DB 저장을 연결하면 돼.`
+  function updateDraft(id: string, patch: Partial<ProductDraft>) {
+    setDrafts((prev) =>
+      prev.map((draft) => (draft.id === id ? { ...draft, ...patch } : draft))
     );
   }
 
+  function deleteDraft(id: string) {
+    const target = drafts.find((draft) => draft.id === id);
+    if (!target) return;
+
+    setDrafts((prev) => prev.filter((draft) => draft.id !== id));
+    setImages((prev) =>
+      prev.map((image) =>
+        target.imageIds.includes(image.id)
+          ? { ...image, draftId: null, selected: false }
+          : image
+      )
+    );
+    setMessage("초안을 삭제하고 사진을 미분류로 되돌렸어.");
+  }
+
+  function addVariant(draftId: string) {
+    setDrafts((prev) =>
+      prev.map((draft) =>
+        draft.id === draftId
+          ? {
+              ...draft,
+              mode: "variants",
+              variants: [
+                ...draft.variants,
+                { id: makeId("variant"), name: "", code: "", quantity: 1 },
+              ],
+            }
+          : draft
+      )
+    );
+  }
+
+  function loadSkzVariants(draftId: string) {
+    setDrafts((prev) =>
+      prev.map((draft) =>
+        draft.id === draftId
+          ? {
+              ...draft,
+              mode: "variants",
+              category: "SKZ",
+              groupName: "Stray Kids",
+              variants: SKZ_VARIANTS.map((member) => ({
+                id: makeId(member.code),
+                name: member.name,
+                code: member.code,
+                quantity: 1,
+              })),
+            }
+          : draft
+      )
+    );
+  }
+
+  function updateVariant(
+    draftId: string,
+    variantId: string,
+    patch: Partial<VariantDraft>
+  ) {
+    setDrafts((prev) =>
+      prev.map((draft) =>
+        draft.id === draftId
+          ? {
+              ...draft,
+              variants: draft.variants.map((variant) =>
+                variant.id === variantId ? { ...variant, ...patch } : variant
+              ),
+            }
+          : draft
+      )
+    );
+  }
+
+  function changeQuantity(draftId: string, variantId: string, delta: number) {
+    const draft = drafts.find((item) => item.id === draftId);
+    const variant = draft?.variants.find((item) => item.id === variantId);
+    if (!variant) return;
+
+    updateVariant(draftId, variantId, {
+      quantity: clampQuantity(variant.quantity + delta),
+    });
+  }
+
+  function removeVariant(draftId: string, variantId: string) {
+    setDrafts((prev) =>
+      prev.map((draft) =>
+        draft.id === draftId
+          ? {
+              ...draft,
+              variants: draft.variants.filter(
+                (variant) => variant.id !== variantId
+              ),
+            }
+          : draft
+      )
+    );
+  }
+
+  function imageById(id: string) {
+    return images.find((image) => image.id === id);
+  }
+
   return (
-    <main style={{ maxWidth: 1500, margin: "0 auto", padding: 24 }}>
+    <main style={pageStyle}>
       <header style={headerStyle}>
         <div>
-          <h1 style={{ margin: 0 }}>STOCK Import</h1>
-          <p style={descriptionStyle}>
-            사진을 한꺼번에 올리고, 같은 상품으로 묶을 사진을 선택합니다.
-          </p>
+          <h1 style={{ margin: 0, fontSize: 24 }}>STOCK Import</h1>
+          <p style={subTextStyle}>사진을 먼저 묶고 상품 초안을 여러 개 만들어요.</p>
         </div>
-
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <Link href="/" style={outlineButtonStyle}>
-            홈으로
-          </Link>
-          <Link href="/stock" style={outlineButtonStyle}>
-            STOCK 목록
-          </Link>
-        </div>
+        <Link href="/stock" style={outlineButtonStyle}>목록</Link>
       </header>
 
-      <section style={cardStyle}>
-        <div
-          role="button"
-          tabIndex={0}
-          onClick={() => inputRef.current?.click()}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              inputRef.current?.click();
-            }
-          }}
-          onDragEnter={(event) => {
-            event.preventDefault();
-            setDragging(true);
-          }}
-          onDragOver={(event) => {
-            event.preventDefault();
-            setDragging(true);
-          }}
-          onDragLeave={(event) => {
-            event.preventDefault();
-            if (event.currentTarget === event.target) setDragging(false);
-          }}
-          onDrop={onDrop}
-          style={uploadBoxStyle(dragging)}
-        >
-          <div style={{ fontSize: 38, lineHeight: 1 }}>📷</div>
-          <strong style={{ fontSize: 18 }}>사진을 드래그하거나 클릭해서 선택</strong>
-          <span style={{ color: "#6b7280", fontSize: 13 }}>
-            JPG, PNG, WEBP 등 이미지 여러 장을 한 번에 선택할 수 있어요.
-          </span>
-
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            onChange={onFileChange}
-            style={{ display: "none" }}
-          />
-        </div>
-
-        {message ? <p style={messageStyle}>{message}</p> : null}
+      <section style={summaryStyle}>
+        <strong>전체 {images.length}</strong>
+        <span>미분류 {availableImages.length}</span>
+        <span>분류됨 {assignedCount}</span>
+        <span>초안 {drafts.length}</span>
       </section>
 
-      {images.length ? (
-        <section style={cardStyle}>
-          <div style={actionBarStyle}>
-            <div>
-              <strong style={{ fontSize: 17 }}>
-                전체 {images.length}장 · 선택 {selectedImages.length}장
-              </strong>
-              <p style={{ margin: "5px 0 0", color: "#6b7280", fontSize: 13 }}>
-                사진을 클릭하면 선택하거나 해제할 수 있어요.
-              </p>
-            </div>
+      <section
+        style={{ ...dropStyle, ...(dragging ? dropActiveStyle : {}) }}
+        onDragEnter={(event) => {
+          event.preventDefault();
+          setDragging(true);
+        }}
+        onDragOver={(event) => event.preventDefault()}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
+        onClick={() => inputRef.current?.click()}
+      >
+        <strong style={{ fontSize: 17 }}>사진을 터치하거나 드래그</strong>
+        <span style={subTextStyle}>여러 장을 한 번에 선택할 수 있어요.</span>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={onFileChange}
+        />
+      </section>
 
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button type="button" onClick={() => selectAll(true)} style={smallButtonStyle}>
-                전체선택
-              </button>
-              <button type="button" onClick={() => selectAll(false)} style={smallButtonStyle}>
-                전체해제
-              </button>
-              <button type="button" onClick={removeSelected} style={dangerButtonStyle}>
-                선택삭제
-              </button>
-              <button type="button" onClick={clearAll} style={dangerOutlineButtonStyle}>
-                전부비우기
-              </button>
-              <button type="button" onClick={createProductDraft} style={primaryButtonStyle}>
-                선택 사진으로 상품 만들기
-              </button>
+      {message ? <div style={messageStyle}>{message}</div> : null}
+
+      {availableImages.length ? (
+        <section style={cardStyle}>
+          <div style={sectionHeadStyle}>
+            <div>
+              <strong>미분류 사진</strong>
+              <div style={subTextStyle}>선택 {selectedImages.length}장</div>
+            </div>
+            <div style={miniActionsStyle}>
+              <button type="button" style={smallButtonStyle} onClick={() => selectAllAvailable(true)}>전체선택</button>
+              <button type="button" style={smallButtonStyle} onClick={() => selectAllAvailable(false)}>해제</button>
+              <button type="button" style={dangerSmallStyle} onClick={removeSelected}>삭제</button>
             </div>
           </div>
 
           <div style={imageGridStyle}>
-            {images.map((image, index) => (
-              <article
+            {availableImages.map((image) => (
+              <button
                 key={image.id}
+                type="button"
+                style={{
+                  ...imageTileStyle,
+                  ...(image.selected ? selectedTileStyle : {}),
+                }}
                 onClick={() => toggleImage(image.id)}
-                style={imageCardStyle(image.selected)}
               >
-                <div style={imageFrameStyle}>
-                  <img
-                    src={image.previewUrl}
-                    alt={image.file.name}
-                    style={previewImageStyle}
-                  />
-
-                  <span style={numberBadgeStyle}>{index + 1}</span>
-
-                  <span style={selectBadgeStyle(image.selected)}>
-                    {image.selected ? "✓ 선택" : "선택 안 함"}
-                  </span>
-
-                  <button
-                    type="button"
-                    aria-label={`${image.file.name} 삭제`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      removeImage(image.id);
-                    }}
-                    style={removeButtonStyle}
-                  >
-                    ×
-                  </button>
-                </div>
-
-                <div style={{ padding: 10 }}>
-                  <div title={image.file.name} style={fileNameStyle}>
-                    {image.file.name}
-                  </div>
-                  <div style={fileMetaStyle}>
-                    {(image.file.size / 1024 / 1024).toFixed(2)} MB
-                  </div>
-                </div>
-              </article>
+                <img src={image.previewUrl} alt={image.file.name} style={imageStyle} />
+                <span style={checkStyle}>{image.selected ? "✓" : ""}</span>
+              </button>
             ))}
           </div>
         </section>
-      ) : (
-        <section style={emptyStyle}>
-          아직 선택한 사진이 없어. 위 영역에 사진을 올려줘.
-        </section>
-      )}
+      ) : null}
 
-      {draftOpen ? (
-        <section id="stock-product-draft" style={{ ...cardStyle, borderColor: "#111827" }}>
-          <div style={draftHeaderStyle}>
-            <div>
-              <h2 style={{ margin: 0 }}>상품 초안 만들기</h2>
-              <p style={descriptionStyle}>
-                선택한 사진을 기준으로 상위 상품과 하위 옵션 구조만 먼저 만듭니다.
-              </p>
-            </div>
-            <button type="button" onClick={() => setDraftOpen(false)} style={dangerOutlineButtonStyle}>
-              초안 닫기
-            </button>
-          </div>
+      {drafts.length ? (
+        <section style={{ display: "grid", gap: 14 }}>
+          <h2 style={{ margin: "8px 0 0", fontSize: 20 }}>상품 초안</h2>
 
-          <div style={draftGridStyle}>
-            <div>
-              <h3 style={{ marginTop: 0 }}>1. 대표사진 선택</h3>
-              <div style={draftImageGridStyle}>
-                {images
-                  .filter((image) => draftImageIds.includes(image.id))
-                  .map((image) => {
-                    const isCover = draft.coverImageId === image.id;
-                    return (
-                      <button
-                        key={image.id}
-                        type="button"
-                        onClick={() => updateDraft({ coverImageId: image.id })}
-                        style={coverImageButtonStyle(isCover)}
+          {drafts.map((draft, draftIndex) => (
+            <article key={draft.id} id={`draft-${draft.id}`} style={draftCardStyle}>
+              <div style={draftHeaderStyle}>
+                <button
+                  type="button"
+                  style={draftTitleButtonStyle}
+                  onClick={() => updateDraft(draft.id, { expanded: !draft.expanded })}
+                >
+                  초안 {draftIndex + 1} · 사진 {draft.imageIds.length}장
+                  <span>{draft.expanded ? "▲" : "▼"}</span>
+                </button>
+                <button type="button" style={dangerSmallStyle} onClick={() => deleteDraft(draft.id)}>삭제</button>
+              </div>
+
+              <div style={draftThumbsStyle}>
+                {draft.imageIds.slice(0, 6).map((imageId) => {
+                  const image = imageById(imageId);
+                  return image ? <img key={imageId} src={image.previewUrl} alt="" style={draftThumbStyle} /> : null;
+                })}
+                {draft.imageIds.length > 6 ? <span style={moreThumbStyle}>+{draft.imageIds.length - 6}</span> : null}
+              </div>
+
+              {draft.expanded ? (
+                <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
+                  <label style={labelStyle}>
+                    상품명
+                    <input
+                      value={draft.title}
+                      onChange={(event) => updateDraft(draft.id, { title: event.target.value })}
+                      style={inputStyle}
+                      placeholder="예: Stray Kids ATE 포토카드"
+                    />
+                  </label>
+
+                  <div style={twoColumnStyle}>
+                    <label style={labelStyle}>
+                      카테고리
+                      <select
+                        value={draft.category}
+                        onChange={(event) => updateDraft(draft.id, { category: event.target.value })}
+                        style={inputStyle}
                       >
-                        <img src={image.previewUrl} alt={image.file.name} style={previewImageStyle} />
-                        <span style={coverBadgeStyle(isCover)}>
-                          {isCover ? "대표사진" : "대표로 지정"}
-                        </span>
-                      </button>
-                    );
-                  })}
-              </div>
-            </div>
-
-            <div>
-              <h3 style={{ marginTop: 0 }}>2. 상품 정보</h3>
-              <div style={formGridStyle}>
-                <label style={labelStyle}>
-                  상품명 *
-                  <input value={draft.title} onChange={(e) => updateDraft({ title: e.target.value })} style={inputStyle} />
-                </label>
-                <label style={labelStyle}>
-                  카테고리
-                  <select value={draft.category} onChange={(e) => updateDraft({ category: e.target.value })} style={inputStyle}>
-                    <option value="SKZ">SKZ</option>
-                    <option value="피규어">피규어</option>
-                    <option value="가챠">가챠</option>
-                    <option value="랜덤굿즈">랜덤굿즈</option>
-                    <option value="기타">기타</option>
-                  </select>
-                </label>
-                <label style={labelStyle}>
-                  그룹/작품
-                  <input value={draft.groupName} onChange={(e) => updateDraft({ groupName: e.target.value })} style={inputStyle} />
-                </label>
-                <label style={labelStyle}>
-                  컬렉션/활동기
-                  <input value={draft.collection} onChange={(e) => updateDraft({ collection: e.target.value })} style={inputStyle} />
-                </label>
-                <label style={labelStyle}>
-                  굿즈 종류
-                  <input value={draft.itemType} onChange={(e) => updateDraft({ itemType: e.target.value })} style={inputStyle} placeholder="포토카드, 피규어, 캔뱃지" />
-                </label>
-              </div>
-              <label style={{ ...labelStyle, marginTop: 12 }}>
-                메모
-                <textarea value={draft.memo} onChange={(e) => updateDraft({ memo: e.target.value })} style={textareaStyle} />
-              </label>
-            </div>
-          </div>
-
-          <div style={{ marginTop: 22 }}>
-            <h3 style={{ marginBottom: 10 }}>3. 상품 구조</h3>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button type="button" onClick={() => updateDraft({ mode: "single" })} style={modeButtonStyle(draft.mode === "single")}>
-                단일 상품
-              </button>
-              <button type="button" onClick={() => updateDraft({ mode: "variants" })} style={modeButtonStyle(draft.mode === "variants")}>
-                하위 옵션 있음
-              </button>
-            </div>
-          </div>
-
-          {draft.mode === "single" ? (
-            <div style={draftNoticeStyle}>
-              단일 상품 초안에는 상위 상품 정보만 저장합니다. 수량·위치·가격·추가사진은 상품 상세에서 입력합니다.
-            </div>
-          ) : (
-            <div style={{ marginTop: 14 }}>
-              <div style={variantActionStyle}>
-                <strong>하위 옵션 {draft.variants.length}개</strong>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button type="button" onClick={loadSkzVariants} style={smallButtonStyle}>SKZ 8명 불러오기</button>
-                  <button type="button" onClick={addVariant} style={primaryButtonStyle}>+ 하위 옵션</button>
-                </div>
-              </div>
-
-              <div style={{ display: "grid", gap: 10 }}>
-                {draft.variants.map((variant, index) => (
-                  <div key={variant.id} style={variantRowStyle}>
-                    <strong style={{ paddingTop: 10 }}>{index + 1}</strong>
-                    <label style={labelStyle}>
-                      이름
-                      <input value={variant.name} onChange={(e) => updateVariant(variant.id, { name: e.target.value })} style={inputStyle} />
+                        {CATEGORIES.map((category) => <option key={category}>{category}</option>)}
+                      </select>
                     </label>
                     <label style={labelStyle}>
-                      코드
-                      <input value={variant.code} onChange={(e) => updateVariant(variant.id, { code: e.target.value.toUpperCase() })} style={inputStyle} />
+                      단체·작품
+                      <input
+                        value={draft.groupName}
+                        onChange={(event) => updateDraft(draft.id, { groupName: event.target.value })}
+                        style={inputStyle}
+                        placeholder="Stray Kids / Hunter×Hunter"
+                      />
                     </label>
-                    <label style={labelStyle}>
-                      수량
-                      <input type="number" min={0} value={variant.quantity} onChange={(e) => updateVariant(variant.id, { quantity: Number(e.target.value || 0) })} style={inputStyle} />
-                    </label>
-                    <button type="button" onClick={() => removeVariant(variant.id)} style={dangerButtonStyle}>삭제</button>
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
 
-          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 20 }}>
-            <button type="button" onClick={validateDraft} style={saveDraftButtonStyle}>
-              상품 초안 확인
-            </button>
-          </div>
+                  <div style={twoColumnStyle}>
+                    <label style={labelStyle}>
+                      컬렉션·활동기
+                      <input
+                        value={draft.collection}
+                        onChange={(event) => updateDraft(draft.id, { collection: event.target.value })}
+                        style={inputStyle}
+                        placeholder="ATE / MAXIDENT"
+                      />
+                    </label>
+                    <label style={labelStyle}>
+                      굿즈 종류
+                      <input
+                        value={draft.itemType}
+                        onChange={(event) => updateDraft(draft.id, { itemType: event.target.value })}
+                        style={inputStyle}
+                        placeholder="포토카드 / 피규어"
+                      />
+                    </label>
+                  </div>
+
+                  <div style={modeButtonsStyle}>
+                    <button
+                      type="button"
+                      style={draft.mode === "single" ? activeModeStyle : modeStyle}
+                      onClick={() => updateDraft(draft.id, { mode: "single" })}
+                    >
+                      단일상품
+                    </button>
+                    <button
+                      type="button"
+                      style={draft.mode === "variants" ? activeModeStyle : modeStyle}
+                      onClick={() => updateDraft(draft.id, { mode: "variants" })}
+                    >
+                      하위옵션 있음
+                    </button>
+                  </div>
+
+                  {draft.mode === "variants" ? (
+                    <div style={variantBoxStyle}>
+                      <div style={sectionHeadStyle}>
+                        <strong>하위 옵션</strong>
+                        <div style={miniActionsStyle}>
+                          <button type="button" style={purpleSmallStyle} onClick={() => loadSkzVariants(draft.id)}>SKZ 8명</button>
+                          <button type="button" style={smallButtonStyle} onClick={() => addVariant(draft.id)}>+ 옵션</button>
+                        </div>
+                      </div>
+
+                      <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+                        {draft.variants.map((variant) => (
+                          <div key={variant.id} style={variantRowStyle}>
+                            <input
+                              value={variant.name}
+                              onChange={(event) => updateVariant(draft.id, variant.id, { name: event.target.value })}
+                              style={{ ...inputStyle, minWidth: 0 }}
+                              placeholder="옵션 이름"
+                            />
+                            <input
+                              value={variant.code}
+                              onChange={(event) => updateVariant(draft.id, variant.id, { code: event.target.value.toUpperCase() })}
+                              style={codeInputStyle}
+                              placeholder="CODE"
+                            />
+                            <div style={stepperStyle}>
+                              <button type="button" style={stepButtonStyle} onClick={() => changeQuantity(draft.id, variant.id, -1)}>−</button>
+                              <input
+                                inputMode="numeric"
+                                value={variant.quantity}
+                                onChange={(event) => updateVariant(draft.id, variant.id, { quantity: clampQuantity(Number(event.target.value)) })}
+                                style={qtyInputStyle}
+                              />
+                              <button type="button" style={stepButtonStyle} onClick={() => changeQuantity(draft.id, variant.id, 1)}>+</button>
+                            </div>
+                            <button type="button" style={removeVariantStyle} onClick={() => removeVariant(draft.id, variant.id)}>×</button>
+                          </div>
+                        ))}
+
+                        {!draft.variants.length ? <div style={emptyOptionStyle}>옵션을 추가하거나 SKZ 8명을 불러와줘.</div> : null}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={emptyOptionStyle}>단일상품 초안입니다. 수량·위치·가격은 상세 화면에서 입력해요.</div>
+                  )}
+                </div>
+              ) : null}
+            </article>
+          ))}
+
+          <button
+            type="button"
+            style={saveAllStyle}
+            onClick={() => setMessage(`초안 ${drafts.length}개 확인 완료. 다음 단계에서 Storage와 DB 저장을 연결하면 돼.`)}
+          >
+            초안 {drafts.length}개 확인
+          </button>
         </section>
+      ) : null}
+
+      {selectedImages.length ? (
+        <div style={bottomBarStyle}>
+          <strong>선택 {selectedImages.length}장</strong>
+          <button type="button" style={primaryButtonStyle} onClick={openComposer}>상품 묶음 만들기</button>
+        </div>
+      ) : null}
+
+      {composerOpen ? (
+        <div style={sheetBackdropStyle} onClick={() => setComposerOpen(false)}>
+          <div style={bottomSheetStyle} onClick={(event) => event.stopPropagation()}>
+            <div style={sheetHandleStyle} />
+            <h3 style={{ margin: "4px 0 6px" }}>선택 사진으로 초안 만들기</h3>
+            <p style={subTextStyle}>선택한 {selectedImages.length}장을 하나의 상품으로 묶습니다.</p>
+            <button type="button" style={sheetChoiceStyle} onClick={() => createDraft("single")}>
+              <strong>단일상품</strong>
+              <span>피규어처럼 상위상품만 있는 경우</span>
+            </button>
+            <button type="button" style={sheetChoiceStyle} onClick={() => createDraft("variants")}>
+              <strong>하위옵션 있음</strong>
+              <span>멤버·캐릭터·번호별 재고가 있는 경우</span>
+            </button>
+            <button type="button" style={cancelButtonStyle} onClick={() => setComposerOpen(false)}>취소</button>
+          </div>
+        </div>
       ) : null}
     </main>
   );
 }
 
+const pageStyle: CSSProperties = {
+  maxWidth: 880,
+  margin: "0 auto",
+  padding: "16px 14px 110px",
+  background: "#f7f7f8",
+  minHeight: "100vh",
+};
+
 const headerStyle: CSSProperties = {
   display: "flex",
-  justifyContent: "space-between",
-  gap: 16,
   alignItems: "flex-start",
-  flexWrap: "wrap",
-  marginBottom: 16,
-};
-
-const descriptionStyle: CSSProperties = {
-  margin: "6px 0 0",
-  color: "#6b7280",
-};
-
-const cardStyle: CSSProperties = {
-  border: "1px solid #e5e7eb",
-  borderRadius: 16,
-  padding: 18,
-  background: "#fff",
-  marginBottom: 16,
-};
-
-const outlineButtonStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  textDecoration: "none",
-  color: "#111827",
-  border: "1px solid #d1d5db",
-  borderRadius: 10,
-  padding: "10px 14px",
-  background: "#fff",
-  fontWeight: 800,
-};
-
-function uploadBoxStyle(active: boolean): CSSProperties {
-  return {
-    minHeight: 220,
-    border: active ? "2px dashed #2563eb" : "2px dashed #cbd5e1",
-    borderRadius: 16,
-    background: active ? "#eff6ff" : "#f8fafc",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    textAlign: "center",
-    cursor: "pointer",
-    outline: "none",
-  };
-}
-
-const messageStyle: CSSProperties = {
-  margin: "12px 0 0",
-  color: "#047857",
-  fontWeight: 800,
-};
-
-const actionBarStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: 12,
-  flexWrap: "wrap",
-  marginBottom: 16,
-};
-
-const smallButtonStyle: CSSProperties = {
-  border: "1px solid #d1d5db",
-  borderRadius: 10,
-  padding: "9px 12px",
-  background: "#fff",
-  color: "#111827",
-  fontWeight: 800,
-  cursor: "pointer",
-};
-
-const primaryButtonStyle: CSSProperties = {
-  ...smallButtonStyle,
-  borderColor: "#111827",
-  background: "#111827",
-  color: "#fff",
-};
-
-const dangerButtonStyle: CSSProperties = {
-  ...smallButtonStyle,
-  borderColor: "#dc2626",
-  background: "#dc2626",
-  color: "#fff",
-};
-
-const dangerOutlineButtonStyle: CSSProperties = {
-  ...smallButtonStyle,
-  borderColor: "#fecaca",
-  color: "#b91c1c",
-};
-
-const imageGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-  gap: 12,
-};
-
-function imageCardStyle(selected: boolean): CSSProperties {
-  return {
-    minWidth: 0,
-    border: selected ? "3px solid #2563eb" : "1px solid #e5e7eb",
-    borderRadius: 14,
-    overflow: "hidden",
-    background: "#fff",
-    cursor: "pointer",
-    boxShadow: selected ? "0 0 0 2px rgba(37, 99, 235, 0.12)" : "none",
-  };
-}
-
-const imageFrameStyle: CSSProperties = {
-  position: "relative",
-  aspectRatio: "1 / 1",
-  background: "#f3f4f6",
-  overflow: "hidden",
-};
-
-const previewImageStyle: CSSProperties = {
-  width: "100%",
-  height: "100%",
-  objectFit: "cover",
-  display: "block",
-};
-
-const numberBadgeStyle: CSSProperties = {
-  position: "absolute",
-  top: 8,
-  left: 8,
-  minWidth: 26,
-  height: 26,
-  padding: "0 7px",
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  borderRadius: 999,
-  background: "rgba(17, 24, 39, 0.85)",
-  color: "#fff",
-  fontSize: 12,
-  fontWeight: 900,
-};
-
-function selectBadgeStyle(selected: boolean): CSSProperties {
-  return {
-    position: "absolute",
-    left: 8,
-    bottom: 8,
-    borderRadius: 999,
-    padding: "5px 8px",
-    background: selected ? "#2563eb" : "rgba(255, 255, 255, 0.9)",
-    color: selected ? "#fff" : "#374151",
-    fontSize: 12,
-    fontWeight: 900,
-  };
-}
-
-const removeButtonStyle: CSSProperties = {
-  position: "absolute",
-  top: 8,
-  right: 8,
-  width: 28,
-  height: 28,
-  border: 0,
-  borderRadius: 999,
-  background: "rgba(220, 38, 38, 0.9)",
-  color: "#fff",
-  fontSize: 21,
-  lineHeight: 1,
-  cursor: "pointer",
-};
-
-const fileNameStyle: CSSProperties = {
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  fontSize: 13,
-  fontWeight: 800,
-};
-
-const fileMetaStyle: CSSProperties = {
-  marginTop: 4,
-  color: "#6b7280",
-  fontSize: 12,
-};
-
-const emptyStyle: CSSProperties = {
-  border: "1px dashed #d1d5db",
-  borderRadius: 16,
-  padding: 36,
-  textAlign: "center",
-  color: "#6b7280",
-  background: "#fff",
-};
-
-
-const draftHeaderStyle: CSSProperties = {
-  display: "flex",
   justifyContent: "space-between",
   gap: 12,
-  alignItems: "flex-start",
-  flexWrap: "wrap",
-  marginBottom: 18,
+  marginBottom: 12,
 };
 
-const draftGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "minmax(300px, 0.9fr) minmax(420px, 1.4fr)",
-  gap: 22,
-};
-
-const draftImageGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
-  gap: 10,
-};
-
-function coverImageButtonStyle(active: boolean): CSSProperties {
-  return {
-    position: "relative",
-    aspectRatio: "1 / 1",
-    padding: 0,
-    overflow: "hidden",
-    borderRadius: 12,
-    border: active ? "3px solid #111827" : "1px solid #d1d5db",
-    background: "#f3f4f6",
-    cursor: "pointer",
-  };
-}
-
-function coverBadgeStyle(active: boolean): CSSProperties {
-  return {
-    position: "absolute",
-    left: 6,
-    right: 6,
-    bottom: 6,
-    padding: "5px 7px",
-    borderRadius: 8,
-    background: active ? "#111827" : "rgba(255,255,255,.9)",
-    color: active ? "#fff" : "#111827",
-    fontSize: 11,
-    fontWeight: 900,
-  };
-}
-
-const formGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
-  gap: 10,
-};
-
-const labelStyle: CSSProperties = {
-  display: "grid",
-  gap: 5,
-  fontSize: 12,
-  fontWeight: 800,
-};
-
-const inputStyle: CSSProperties = {
-  width: "100%",
-  boxSizing: "border-box",
-  border: "1px solid #d1d5db",
-  borderRadius: 9,
-  padding: "9px 10px",
-  background: "#fff",
-};
-
-const textareaStyle: CSSProperties = {
-  ...inputStyle,
-  minHeight: 78,
-  resize: "vertical",
-};
-
-function modeButtonStyle(active: boolean): CSSProperties {
-  return {
-    ...smallButtonStyle,
-    borderColor: active ? "#111827" : "#d1d5db",
-    background: active ? "#111827" : "#fff",
-    color: active ? "#fff" : "#111827",
-  };
-}
-
-const variantActionStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: 12,
-  flexWrap: "wrap",
-  marginBottom: 10,
-};
-
-const variantRowStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "34px 1fr 110px minmax(190px, 1.3fr) 90px 130px 110px auto",
-  gap: 8,
-  alignItems: "end",
-  padding: 10,
-  border: "1px solid #e5e7eb",
-  borderRadius: 12,
-  background: "#f9fafb",
-};
-
-const saveDraftButtonStyle: CSSProperties = {
-  border: 0,
-  borderRadius: 11,
-  padding: "12px 20px",
-  background: "#111827",
-  color: "#fff",
-  fontWeight: 900,
-  cursor: "pointer",
-};
-
-const draftNoticeStyle: CSSProperties = {
-  marginTop: 14,
-  padding: 14,
-  border: "1px solid #d1d5db",
-  borderRadius: 12,
-  background: "#f9fafb",
-  color: "#4b5563",
-  fontSize: 13,
-  fontWeight: 700,
-};
+const subTextStyle: CSSProperties = { color: "#6b7280", fontSize: 13, margin: "5px 0 0" };
+const outlineButtonStyle: CSSProperties = { textDecoration: "none", color: "#111827", background: "#fff", border: "1px solid #d1d5db", borderRadius: 10, padding: "9px 12px", fontWeight: 800 };
+const summaryStyle: CSSProperties = { display: "flex", gap: 10, overflowX: "auto", padding: "10px 12px", marginBottom: 12, background: "#111827", color: "#fff", borderRadius: 14, fontSize: 13, whiteSpace: "nowrap" };
+const dropStyle: CSSProperties = { minHeight: 112, border: "2px dashed #cbd5e1", borderRadius: 18, background: "#fff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, cursor: "pointer", padding: 18 };
+const dropActiveStyle: CSSProperties = { borderColor: "#7c3aed", background: "#faf5ff" };
+const messageStyle: CSSProperties = { marginTop: 10, padding: "10px 12px", borderRadius: 12, background: "#eef2ff", color: "#4338ca", fontSize: 13, fontWeight: 800 };
+const cardStyle: CSSProperties = { marginTop: 14, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 18, padding: 12 };
+const sectionHeadStyle: CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 };
+const miniActionsStyle: CSSProperties = { display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" };
+const smallButtonStyle: CSSProperties = { border: "1px solid #d1d5db", background: "#fff", borderRadius: 9, padding: "7px 9px", fontWeight: 800, fontSize: 12 };
+const dangerSmallStyle: CSSProperties = { ...smallButtonStyle, borderColor: "#fecaca", color: "#b91c1c", background: "#fff1f2" };
+const purpleSmallStyle: CSSProperties = { ...smallButtonStyle, borderColor: "#ddd6fe", color: "#6d28d9", background: "#f5f3ff" };
+const imageGridStyle: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 7, marginTop: 12 };
+const imageTileStyle: CSSProperties = { position: "relative", aspectRatio: "1 / 1", border: "2px solid transparent", borderRadius: 12, overflow: "hidden", padding: 0, background: "#e5e7eb" };
+const selectedTileStyle: CSSProperties = { borderColor: "#7c3aed", boxShadow: "0 0 0 2px #ddd6fe" };
+const imageStyle: CSSProperties = { width: "100%", height: "100%", objectFit: "cover", display: "block" };
+const checkStyle: CSSProperties = { position: "absolute", top: 6, right: 6, width: 24, height: 24, display: "grid", placeItems: "center", borderRadius: 999, background: "rgba(17,24,39,.8)", color: "#fff", fontWeight: 900 };
+const draftCardStyle: CSSProperties = { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 18, padding: 12 };
+const draftHeaderStyle: CSSProperties = { display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" };
+const draftTitleButtonStyle: CSSProperties = { border: 0, background: "transparent", padding: 0, fontWeight: 900, fontSize: 15, display: "flex", gap: 8, alignItems: "center" };
+const draftThumbsStyle: CSSProperties = { display: "flex", gap: 6, overflowX: "auto", marginTop: 10 };
+const draftThumbStyle: CSSProperties = { width: 58, height: 58, objectFit: "cover", borderRadius: 9, flex: "0 0 auto" };
+const moreThumbStyle: CSSProperties = { width: 58, height: 58, borderRadius: 9, display: "grid", placeItems: "center", background: "#f3f4f6", fontWeight: 900, flex: "0 0 auto" };
+const labelStyle: CSSProperties = { display: "grid", gap: 6, fontSize: 13, fontWeight: 800 };
+const inputStyle: CSSProperties = { width: "100%", boxSizing: "border-box", border: "1px solid #d1d5db", borderRadius: 10, padding: "10px 11px", background: "#fff", fontSize: 14 };
+const twoColumnStyle: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 };
+const modeButtonsStyle: CSSProperties = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 };
+const modeStyle: CSSProperties = { border: "1px solid #d1d5db", borderRadius: 11, padding: "10px", background: "#fff", fontWeight: 800 };
+const activeModeStyle: CSSProperties = { ...modeStyle, borderColor: "#7c3aed", background: "#f5f3ff", color: "#6d28d9" };
+const variantBoxStyle: CSSProperties = { border: "1px solid #e5e7eb", borderRadius: 14, padding: 10, background: "#fafafa" };
+const variantRowStyle: CSSProperties = { display: "grid", gridTemplateColumns: "minmax(92px, 1fr) 74px auto 30px", gap: 6, alignItems: "center" };
+const codeInputStyle: CSSProperties = { ...inputStyle, width: 74, paddingInline: 7, textAlign: "center", fontWeight: 900, fontSize: 12 };
+const stepperStyle: CSSProperties = { display: "grid", gridTemplateColumns: "34px 42px 34px", alignItems: "center", border: "1px solid #d1d5db", borderRadius: 10, overflow: "hidden", background: "#fff" };
+const stepButtonStyle: CSSProperties = { height: 38, border: 0, background: "#f3f4f6", fontSize: 20, fontWeight: 900 };
+const qtyInputStyle: CSSProperties = { width: 42, height: 38, border: 0, textAlign: "center", fontWeight: 900, padding: 0 };
+const removeVariantStyle: CSSProperties = { width: 30, height: 30, borderRadius: 999, border: 0, background: "#fee2e2", color: "#b91c1c", fontWeight: 900 };
+const emptyOptionStyle: CSSProperties = { padding: 12, background: "#f9fafb", color: "#6b7280", borderRadius: 10, fontSize: 13 };
+const saveAllStyle: CSSProperties = { border: 0, borderRadius: 14, padding: "14px 16px", background: "#111827", color: "#fff", fontWeight: 900, fontSize: 15 };
+const bottomBarStyle: CSSProperties = { position: "fixed", left: "50%", bottom: 14, transform: "translateX(-50%)", width: "calc(100% - 28px)", maxWidth: 852, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, background: "rgba(17,24,39,.96)", color: "#fff", borderRadius: 16, padding: "10px 12px", boxShadow: "0 14px 40px rgba(0,0,0,.24)", zIndex: 30 };
+const primaryButtonStyle: CSSProperties = { border: 0, borderRadius: 11, padding: "11px 14px", background: "#7c3aed", color: "#fff", fontWeight: 900 };
+const sheetBackdropStyle: CSSProperties = { position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 50, display: "flex", alignItems: "flex-end", justifyContent: "center" };
+const bottomSheetStyle: CSSProperties = { width: "100%", maxWidth: 880, background: "#fff", borderRadius: "22px 22px 0 0", padding: "12px 16px 24px", boxShadow: "0 -20px 50px rgba(0,0,0,.2)" };
+const sheetHandleStyle: CSSProperties = { width: 42, height: 5, borderRadius: 999, background: "#d1d5db", margin: "0 auto 12px" };
+const sheetChoiceStyle: CSSProperties = { width: "100%", display: "grid", gap: 3, textAlign: "left", border: "1px solid #e5e7eb", borderRadius: 14, background: "#fff", padding: 14, marginTop: 10 };
+const cancelButtonStyle: CSSProperties = { width: "100%", border: 0, borderRadius: 12, background: "#f3f4f6", padding: 12, marginTop: 10, fontWeight: 800 };
