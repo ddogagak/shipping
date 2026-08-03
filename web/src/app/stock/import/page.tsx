@@ -24,10 +24,7 @@ type VariantDraft = {
   id: string;
   name: string;
   code: string;
-  imageId: string;
   quantity: number;
-  location: string;
-  desiredPrice: string;
 };
 
 type ProductDraft = {
@@ -36,13 +33,9 @@ type ProductDraft = {
   collection: string;
   groupName: string;
   itemType: string;
-  releasePrice: string;
-  desiredPrice: string;
   memo: string;
   mode: ProductMode;
   coverImageId: string;
-  quantity: number;
-  location: string;
   variants: VariantDraft[];
 };
 
@@ -80,13 +73,9 @@ export default function StockImportPage() {
     collection: "",
     groupName: "Stray Kids",
     itemType: "",
-    releasePrice: "",
-    desiredPrice: "",
     memo: "",
     mode: "single",
     coverImageId: "",
-    quantity: 1,
-    location: "미지정",
     variants: [],
   });
 
@@ -232,10 +221,7 @@ export default function StockImportPage() {
           id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
           name: "",
           code: "",
-          imageId: "",
           quantity: 1,
-          location: "미지정",
-          desiredPrice: "",
         },
       ],
     }));
@@ -251,10 +237,7 @@ export default function StockImportPage() {
         id: `${code}-${Date.now()}-${index}`,
         name,
         code,
-        imageId: draftImageIds[index + 1] || draftImageIds[index] || "",
         quantity: 1,
-        location: "미지정",
-        desiredPrice: "",
       })),
     }));
   }
@@ -288,7 +271,7 @@ export default function StockImportPage() {
 
     if (draft.mode === "variants") {
       if (!draft.variants.length) {
-        alert("하위항목을 하나 이상 추가해줘.");
+        alert("하위 옵션을 하나 이상 추가해줘.");
         return;
       }
 
@@ -296,14 +279,14 @@ export default function StockImportPage() {
         (variant) => !variant.name.trim() || !variant.code.trim()
       );
       if (invalid) {
-        alert("하위항목의 이름과 코드를 모두 입력해줘.");
+        alert("하위 옵션의 이름과 코드를 모두 입력해줘.");
         return;
       }
     }
 
     setMessage(
       `상품 초안 확인 완료: ${draft.title} / ${
-        draft.mode === "single" ? "단일 상품" : `하위 ${draft.variants.length}개`
+        draft.mode === "single" ? "단일 상품" : `하위 옵션 ${draft.variants.length}개`
       }. 다음 단계에서 Storage와 DB 저장을 연결하면 돼.`
     );
   }
@@ -460,7 +443,7 @@ export default function StockImportPage() {
             <div>
               <h2 style={{ margin: 0 }}>상품 초안 만들기</h2>
               <p style={descriptionStyle}>
-                선택한 사진을 하나의 상품으로 묶고 대표사진과 재고 형태를 정합니다.
+                선택한 사진을 기준으로 상위 상품과 하위 옵션 구조만 먼저 만듭니다.
               </p>
             </div>
             <button type="button" onClick={() => setDraftOpen(false)} style={dangerOutlineButtonStyle}>
@@ -522,14 +505,6 @@ export default function StockImportPage() {
                   굿즈 종류
                   <input value={draft.itemType} onChange={(e) => updateDraft({ itemType: e.target.value })} style={inputStyle} placeholder="포토카드, 피규어, 캔뱃지" />
                 </label>
-                <label style={labelStyle}>
-                  발매가
-                  <input value={draft.releasePrice} onChange={(e) => updateDraft({ releasePrice: e.target.value })} style={inputStyle} inputMode="numeric" />
-                </label>
-                <label style={labelStyle}>
-                  희망판매가
-                  <input value={draft.desiredPrice} onChange={(e) => updateDraft({ desiredPrice: e.target.value })} style={inputStyle} inputMode="numeric" />
-                </label>
               </div>
               <label style={{ ...labelStyle, marginTop: 12 }}>
                 메모
@@ -539,35 +514,28 @@ export default function StockImportPage() {
           </div>
 
           <div style={{ marginTop: 22 }}>
-            <h3 style={{ marginBottom: 10 }}>3. 재고 형태</h3>
+            <h3 style={{ marginBottom: 10 }}>3. 상품 구조</h3>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button type="button" onClick={() => updateDraft({ mode: "single" })} style={modeButtonStyle(draft.mode === "single")}>
                 단일 상품
               </button>
               <button type="button" onClick={() => updateDraft({ mode: "variants" })} style={modeButtonStyle(draft.mode === "variants")}>
-                하위항목 있음
+                하위 옵션 있음
               </button>
             </div>
           </div>
 
           {draft.mode === "single" ? (
-            <div style={{ ...formGridStyle, marginTop: 14 }}>
-              <label style={labelStyle}>
-                수량
-                <input type="number" min={0} value={draft.quantity} onChange={(e) => updateDraft({ quantity: Number(e.target.value || 0) })} style={inputStyle} />
-              </label>
-              <label style={labelStyle}>
-                위치
-                <input value={draft.location} onChange={(e) => updateDraft({ location: e.target.value })} style={inputStyle} />
-              </label>
+            <div style={draftNoticeStyle}>
+              단일 상품 초안에는 상위 상품 정보만 저장합니다. 수량·위치·가격·추가사진은 상품 상세에서 입력합니다.
             </div>
           ) : (
             <div style={{ marginTop: 14 }}>
               <div style={variantActionStyle}>
-                <strong>하위항목 {draft.variants.length}개</strong>
+                <strong>하위 옵션 {draft.variants.length}개</strong>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <button type="button" onClick={loadSkzVariants} style={smallButtonStyle}>SKZ 8명 불러오기</button>
-                  <button type="button" onClick={addVariant} style={primaryButtonStyle}>+ 하위항목</button>
+                  <button type="button" onClick={addVariant} style={primaryButtonStyle}>+ 하위 옵션</button>
                 </div>
               </div>
 
@@ -584,25 +552,8 @@ export default function StockImportPage() {
                       <input value={variant.code} onChange={(e) => updateVariant(variant.id, { code: e.target.value.toUpperCase() })} style={inputStyle} />
                     </label>
                     <label style={labelStyle}>
-                      사진
-                      <select value={variant.imageId} onChange={(e) => updateVariant(variant.id, { imageId: e.target.value })} style={inputStyle}>
-                        <option value="">미지정</option>
-                        {images.filter((image) => draftImageIds.includes(image.id)).map((image, imageIndex) => (
-                          <option key={image.id} value={image.id}>사진 {imageIndex + 1} · {image.file.name}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label style={labelStyle}>
                       수량
                       <input type="number" min={0} value={variant.quantity} onChange={(e) => updateVariant(variant.id, { quantity: Number(e.target.value || 0) })} style={inputStyle} />
-                    </label>
-                    <label style={labelStyle}>
-                      위치
-                      <input value={variant.location} onChange={(e) => updateVariant(variant.id, { location: e.target.value })} style={inputStyle} />
-                    </label>
-                    <label style={labelStyle}>
-                      희망가
-                      <input value={variant.desiredPrice} onChange={(e) => updateVariant(variant.id, { desiredPrice: e.target.value })} style={inputStyle} inputMode="numeric" />
                     </label>
                     <button type="button" onClick={() => removeVariant(variant.id)} style={dangerButtonStyle}>삭제</button>
                   </div>
@@ -935,4 +886,15 @@ const saveDraftButtonStyle: CSSProperties = {
   color: "#fff",
   fontWeight: 900,
   cursor: "pointer",
+};
+
+const draftNoticeStyle: CSSProperties = {
+  marginTop: 14,
+  padding: 14,
+  border: "1px solid #d1d5db",
+  borderRadius: 12,
+  background: "#f9fafb",
+  color: "#4b5563",
+  fontSize: 13,
+  fontWeight: 700,
 };
