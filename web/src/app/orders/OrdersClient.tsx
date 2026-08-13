@@ -75,6 +75,30 @@ const SHIPPING_METHOD_OPTIONS = [
   { value: "check", label: "Check" },
 ];
 
+const FORCE_EGS_COUNTRY_CODES = new Set([
+  "DE", // 독일
+  "DK", // 덴마크
+  "GR", // 그리스
+  "LU", // 룩셈부르크
+  "BE", // 벨기에
+  "AT", // 오스트리아
+  "PT", // 포르투갈
+  "FR", // 프랑스
+  "MC", // 모나코
+  "FI", // 핀란드
+]);
+
+function shouldForceEgs(row: OrderListRow) {
+  return FORCE_EGS_COUNTRY_CODES.has(
+    String(row.country_code || "").trim().toUpperCase(),
+  );
+}
+
+function resolvedShippingMethod(row: OrderListRow) {
+  if (shouldForceEgs(row)) return "egs";
+  return row.label_shipping_method || row.shipping_method || "check";
+}
+
 const ORDER_STATUS_OPTIONS = [
   { value: "accepted", label: "주문 업로드" },
   { value: "check", label: "재고 확인" },
@@ -157,7 +181,7 @@ function getSortValue(row: OrderListRow, key: SortKey): string | number {
   if (key === "country_code") return row.country_code || "";
   if (key === "quantity") return Number(row.quantity || 0);
   if (key === "shipping_method")
-    return row.label_shipping_method || row.shipping_method || "check";
+    return resolvedShippingMethod(row);
   if (key === "order_status") return row.order_status || "accepted";
   if (key === "shipping_label_status")
     return row.shipping_label_status || "start";
@@ -264,7 +288,7 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
 
   const selectedKPacketRows = useMemo(() => {
     return selectedRows.filter((row) => {
-      const method = row.label_shipping_method || row.shipping_method;
+      const method = resolvedShippingMethod(row);
       return method === "k-packet";
     });
   }, [selectedRows]);
@@ -382,7 +406,7 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
     }
 
     if (key === "shipping_method") {
-      return row.label_shipping_method || row.shipping_method || "check";
+      return resolvedShippingMethod(row);
     }
 
     if (key === "order_status") {
@@ -401,8 +425,7 @@ export default function OrdersClient({ rows }: { rows: OrderListRow[] }) {
 
     if (!draft) return false;
 
-    const savedShippingMethod =
-      row.label_shipping_method || row.shipping_method || "check";
+    const savedShippingMethod = resolvedShippingMethod(row);
     const savedOrderStatus = row.order_status || "accepted";
     const savedLabelStatus = row.shipping_label_status || "start";
     const savedMemo = row.memo || "";
@@ -1141,6 +1164,8 @@ ${row.name || ""}`}
                         <select
                           aria-label="배송방식"
                           value={getRowDraftValue(row, "shipping_method")}
+                          disabled={shouldForceEgs(row)}
+                          title={shouldForceEgs(row) ? "해당 국가는 EGS 고정" : "배송방식"}
                           onChange={(event) =>
                             changeRowDraft(
                               row.order_number,
@@ -1148,7 +1173,13 @@ ${row.name || ""}`}
                               event.target.value,
                             )
                           }
-                          style={{ ...selectStyle(changed), width: "100%" }}
+                          style={{
+                            ...selectStyle(changed),
+                            width: "100%",
+                            ...(shouldForceEgs(row)
+                              ? { background: "#eff6ff", color: "#1d4ed8" }
+                              : {}),
+                          }}
                         >
                           {SHIPPING_METHOD_OPTIONS.map((option) => (
                             <option key={option.value} value={option.value}>
@@ -1156,6 +1187,18 @@ ${row.name || ""}`}
                             </option>
                           ))}
                         </select>
+
+                        {shouldForceEgs(row) ? (
+                          <div
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 800,
+                              color: "#2563eb",
+                            }}
+                          >
+                            EGS 고정 국가
+                          </div>
+                        ) : null}
 
                         <select
                           aria-label="주문상태"
