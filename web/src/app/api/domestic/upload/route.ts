@@ -38,6 +38,13 @@ function safeText(value: unknown) {
   return String(value ?? "").trim();
 }
 
+// [닉네임 정리]
+// "(이전"이 나오면 그 지점부터 뒤를 모두 제거해서 DB에는 현재 닉네임만 저장합니다.
+// 예: "또가 (이전 닉네임: 또또가)" -> "또가"
+function cleanNickname(value: unknown) {
+  return safeText(value).split("(이전")[0].trim();
+}
+
 function normalizePlatform(value: unknown): Platform {
   const v = safeText(value).toLowerCase();
   if (v === "x") return "x";
@@ -610,7 +617,7 @@ export async function POST(req: Request) {
       platform: row.platform,
       source_order_dates: row.sourceOrderDates || [],
       first_order_date: row.firstOrderDate || null,
-      nickname: row.nickname || null,
+      nickname: cleanNickname(row.nickname) || null, // [닉네임 정리] DB 저장 직전 "(이전" 이후 제거
       recipient_name: row.recipientName || null,
       phone: removeApostrophe(row.phone) || null,
       postal_code: removeApostrophe(row.postalCode) || null,
