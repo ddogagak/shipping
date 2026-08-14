@@ -318,11 +318,7 @@ export default function InventoryCardsClient({
 
                     <InfoItem
                       label="원가"
-                      value={
-                        (item.currency || "JPY") === "JPY"
-                          ? formatWon(profitInfo.cost)
-                          : "환율 계산 미설정"
-                      }
+                      value={formatWon(profitInfo.cost)}
                     />
 
                     <EditableInfoItem
@@ -335,20 +331,12 @@ export default function InventoryCardsClient({
 
                     <InfoItem
                       label="낱개가격"
-                      value={
-                        (item.currency || "JPY") === "JPY"
-                          ? formatNullableWon(profitInfo.unitPrice)
-                          : "-"
-                      }
+                      value={formatNullableWon(profitInfo.unitPrice)}
                     />
 
                     <InfoItem
                       label="최소마진가격"
-                      value={
-                        (item.currency || "JPY") === "JPY"
-                          ? formatNullableWon(profitInfo.minMarginPrice)
-                          : "-"
-                      }
+                      value={formatNullableWon(profitInfo.minMarginPrice)}
                     />
 
                     <EditableInfoItem
@@ -361,15 +349,8 @@ export default function InventoryCardsClient({
 
                     <InfoItem
                       label="이익"
-                      value={
-                        (item.currency || "JPY") === "JPY"
-                          ? formatNullableWon(profitInfo.profit)
-                          : "-"
-                      }
-                      highlight={
-                        (item.currency || "JPY") === "JPY" &&
-                        profitInfo.profit !== null
-                      }
+                      value={formatNullableWon(profitInfo.profit)}
+                      highlight={profitInfo.profit !== null}
                     />
                   </div>
 
@@ -445,32 +426,31 @@ export default function InventoryCardsClient({
 function calcInventoryProfit(item: {
   purchase_price?: number | null;
   total_price?: number | null;
-  domestic_shipping_fee?: number | null;
+  currency?: string | null;
   component_count?: number | null;
   unit_sale_price?: number | null;
 }) {
-  const yenPrice = Number(item.purchase_price ?? item.total_price ?? 0);
-  const domesticShipping = Number(item.domestic_shipping_fee ?? 0);
+  const purchasePrice = Number(item.purchase_price ?? item.total_price ?? 0);
+  const currency = String(item.currency ?? "JPY").toUpperCase();
+  const exchangeRate = currency === "CNY" ? 230 : 10;
   const componentCount = Number(item.component_count ?? 0);
   const unitSalePrice = Number(item.unit_sale_price ?? 0);
 
-  const cost =
-    (yenPrice + domesticShipping * (yenPrice / 23000)) * 10 +
-    40000 * (yenPrice / 23000);
-
+  // 원가 = 구매가 × 각 나라 환율 × 1.2 + 5,000원
+  const cost = purchasePrice * exchangeRate * 1.2 + 5000;
   const roundedCost = Math.round(cost);
 
+  // 최소마진가격 = 원가 × 1.1 × 1.07 + 10,000원
+  const minMarginPrice = Math.ceil(cost * 1.1 * 1.07 + 10000);
+
+  // 낱개가격 = 최소마진가격 ÷ 박스당 팩 수
   const unitPrice =
-    componentCount > 0 ? Math.ceil((cost * 1.2) / componentCount) : null;
+    componentCount > 0 ? Math.ceil(minMarginPrice / componentCount) : null;
 
-  const minMarginPrice =
-    componentCount > 0
-      ? Math.ceil((cost * 1.2) / componentCount + 10000 / componentCount)
-      : null;
-
+  // 입력한 개당판매가 기준 박스 전체 이익
   const profit =
-    componentCount > 0 && unitSalePrice > 0 && unitPrice !== null
-      ? Math.round((unitSalePrice - unitPrice) * componentCount)
+    componentCount > 0 && unitSalePrice > 0
+      ? Math.round(unitSalePrice * componentCount - cost)
       : null;
 
   return {
