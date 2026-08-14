@@ -108,7 +108,8 @@ function orderStatusLabel(value?: string) {
   const labels: Record<string, string> = {
     accepted: "입력됨",
     checked: "재고확인",
-    kept: "킵",
+    // [명칭 변경] 내부값 kept 유지
+    kept: "직배킵",
     packaged: "포장완료",
     done: "완료",
   };
