@@ -9,8 +9,12 @@ type InventoryItem = {
   item_type: string | null;
   series_name: string | null;
   image_url: string | null;
+  lineup_image_url: string | null;
+  source_url: string | null;
   quantity: number | null;
   total_price: number | null;
+  currency: string | null;
+  purchase_price: number | null;
   domestic_shipping_fee: number | null;
   status: string | null;
   memo: string | null;
@@ -68,6 +72,7 @@ export default function InventoryCardsClient({
   const [message, setMessage] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
+  const [lineupImage, setLineupImage] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     return (items ?? []).filter((item) => {
@@ -101,7 +106,11 @@ export default function InventoryCardsClient({
       prev.map((item) => {
         if (item.id !== id) return item;
 
-        if (field === "component_count" || field === "unit_sale_price") {
+        if (
+          field === "component_count" ||
+          field === "unit_sale_price" ||
+          field === "purchase_price"
+        ) {
           return {
             ...item,
             [field]: value === "" ? null : Number(value),
@@ -250,7 +259,20 @@ export default function InventoryCardsClient({
               <article key={item.id} style={cardStyle}>
                 <div style={imageWrapStyle}>
                   {item.image_url ? (
-                    <img src={item.image_url} alt="" style={imageStyle} />
+                    <img
+                      src={item.image_url}
+                      alt=""
+                      style={{
+                        ...imageStyle,
+                        cursor: item.lineup_image_url ? "zoom-in" : "default",
+                      }}
+                      title={item.lineup_image_url ? "더블클릭: 라인업 보기" : undefined}
+                      onDoubleClick={() => {
+                        if (item.lineup_image_url) {
+                          setLineupImage(item.lineup_image_url);
+                        }
+                      }}
+                    />
                   ) : (
                     <div style={emptyImageStyle}>NO IMAGE</div>
                   )}
@@ -288,19 +310,23 @@ export default function InventoryCardsClient({
                     />
 
                     <InfoItem
-                      label="금액"
-                      value={`¥${Number(
-                        item.total_price ?? 0
+                      label="구매가"
+                      value={`${formatCurrencySymbol(item.currency)}${Number(
+                        item.purchase_price ?? item.total_price ?? 0
                       ).toLocaleString()}`}
                     />
 
                     <InfoItem
                       label="원가"
-                      value={formatWon(profitInfo.cost)}
+                      value={
+                        (item.currency || "JPY") === "JPY"
+                          ? formatWon(profitInfo.cost)
+                          : "환율 계산 미설정"
+                      }
                     />
 
                     <EditableInfoItem
-                      label="구성품개수"
+                      label="박스당 팩 수"
                       value={item.component_count}
                       onChange={(value) =>
                         updateItem(item.id, "component_count", value)
@@ -309,12 +335,20 @@ export default function InventoryCardsClient({
 
                     <InfoItem
                       label="낱개가격"
-                      value={formatNullableWon(profitInfo.unitPrice)}
+                      value={
+                        (item.currency || "JPY") === "JPY"
+                          ? formatNullableWon(profitInfo.unitPrice)
+                          : "-"
+                      }
                     />
 
                     <InfoItem
                       label="최소마진가격"
-                      value={formatNullableWon(profitInfo.minMarginPrice)}
+                      value={
+                        (item.currency || "JPY") === "JPY"
+                          ? formatNullableWon(profitInfo.minMarginPrice)
+                          : "-"
+                      }
                     />
 
                     <EditableInfoItem
@@ -327,12 +361,43 @@ export default function InventoryCardsClient({
 
                     <InfoItem
                       label="이익"
-                      value={formatNullableWon(profitInfo.profit)}
-                      highlight={profitInfo.profit !== null}
+                      value={
+                        (item.currency || "JPY") === "JPY"
+                          ? formatNullableWon(profitInfo.profit)
+                          : "-"
+                      }
+                      highlight={
+                        (item.currency || "JPY") === "JPY" &&
+                        profitInfo.profit !== null
+                      }
                     />
                   </div>
 
                   {item.memo ? <div style={memoStyle}>{item.memo}</div> : null}
+
+                  {(item.source_url || item.lineup_image_url) ? (
+                    <div style={quickLinkRowStyle}>
+                      {item.source_url ? (
+                        <a
+                          href={item.source_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={quickLinkStyle}
+                        >
+                          소싱 페이지
+                        </a>
+                      ) : null}
+                      {item.lineup_image_url ? (
+                        <button
+                          type="button"
+                          onClick={() => setLineupImage(item.lineup_image_url)}
+                          style={quickLinkButtonStyle}
+                        >
+                          라인업 보기
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
 
                   <button
                     type="button"
@@ -359,17 +424,32 @@ export default function InventoryCardsClient({
           })}
         </section>
       )}
+
+      {lineupImage ? (
+        <div
+          style={lineupModalBackdropStyle}
+          onClick={() => setLineupImage(null)}
+        >
+          <img
+            src={lineupImage}
+            alt="라인업"
+            style={lineupModalImageStyle}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      ) : null}
     </main>
   );
 }
 
 function calcInventoryProfit(item: {
+  purchase_price?: number | null;
   total_price?: number | null;
   domestic_shipping_fee?: number | null;
   component_count?: number | null;
   unit_sale_price?: number | null;
 }) {
-  const yenPrice = Number(item.total_price ?? 0);
+  const yenPrice = Number(item.purchase_price ?? item.total_price ?? 0);
   const domesticShipping = Number(item.domestic_shipping_fee ?? 0);
   const componentCount = Number(item.component_count ?? 0);
   const unitSalePrice = Number(item.unit_sale_price ?? 0);
@@ -399,6 +479,10 @@ function calcInventoryProfit(item: {
     minMarginPrice,
     profit,
   };
+}
+
+function formatCurrencySymbol(currency?: string | null) {
+  return currency === "CNY" ? "CNY " : "¥";
 }
 
 function formatWon(value: number) {
@@ -669,6 +753,53 @@ const memoStyle: React.CSSProperties = {
   background: "#fff7ed",
   fontSize: 13,
   lineHeight: 1.5,
+};
+
+
+const quickLinkRowStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 8,
+  marginTop: 10,
+  flexWrap: "wrap",
+};
+
+const quickLinkStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  height: 32,
+  padding: "0 10px",
+  borderRadius: 8,
+  border: "1px solid #d1d5db",
+  background: "#fff",
+  color: "#111827",
+  textDecoration: "none",
+  fontSize: 12,
+  fontWeight: 800,
+};
+
+const quickLinkButtonStyle: React.CSSProperties = {
+  ...quickLinkStyle,
+  cursor: "pointer",
+};
+
+const lineupModalBackdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 9999,
+  background: "rgba(0,0,0,0.72)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 20,
+  cursor: "zoom-out",
+};
+
+const lineupModalImageStyle: React.CSSProperties = {
+  maxWidth: "95vw",
+  maxHeight: "92vh",
+  objectFit: "contain",
+  borderRadius: 12,
+  background: "#fff",
 };
 
 const saveButtonStyle: React.CSSProperties = {
