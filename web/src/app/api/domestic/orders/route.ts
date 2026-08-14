@@ -56,6 +56,8 @@ export async function GET() {
       item_summary,
       item_total_price,
       order_status,
+      // [요청상태 추가]
+      request_status,
       created_at,
       memo,
       domestic_shipping (
@@ -113,6 +115,8 @@ export async function PATCH(req: Request) {
         memo: body.memo ?? null,
         item_summary: body.item_summary ?? null,
         order_status: nextOrderStatus,
+        // [요청상태 추가] 주문상태와 별도로 저장
+        request_status: body.request_status || "none",
         updated_at: now,
       })
       .eq("order_id", orderId);
@@ -167,6 +171,8 @@ export async function PATCH(req: Request) {
         item_total_price,
         memo,
         order_status,
+        // [요청상태 추가] 합배송 시 대표 주문 값 보존용
+        request_status,
         created_at,
         domestic_shipping (
           carrier,
@@ -304,6 +310,9 @@ export async function PATCH(req: Request) {
           ),
         memo,
         order_status: nextBaseOrderStatus,
+        // [요청상태 추가] 합배송 대표 주문의 요청상태를 유지
+        // 다른 합배송 대상의 요청상태까지 합칠지는 운영 규칙 확정 후 별도 처리 가능
+        request_status: base.request_status || "none",
         updated_at: now,
       })
       .eq("order_id", base.order_id);
