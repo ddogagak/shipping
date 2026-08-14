@@ -28,6 +28,8 @@ type DomesticOrder = {
   item_total_price: number | null;
   memo: string | null;
   order_status: string | null;
+  // [요청상태 추가] 주문 workflow와 분리된 고객 요청상태
+  request_status: string | null;
   created_at: string | null;
   domestic_shipping: ShippingInfo | ShippingInfo[] | null;
 };
@@ -58,6 +60,8 @@ type SortKey =
   | "first_order_date"
   | "memo"
   | "order_status"
+  // [요청상태 추가] 요청상태 정렬 지원
+  | "request_status"
   | "shipping_status"
   | "shipping_type"
   | "tracking_number"
@@ -76,9 +80,17 @@ const PLATFORM_OPTIONS = [
 const ORDER_STATUS_OPTIONS = [
   { value: "accepted", label: "입력됨" },
   { value: "checked", label: "재고확인" },
-  { value: "kept", label: "킵" },
+  // [명칭 변경] 내부값 kept는 유지하고 화면에서만 직배킵으로 표시
+  { value: "kept", label: "직배킵" },
   { value: "packaged", label: "포장완료" },
   { value: "done", label: "완료" },
+];
+
+// [요청상태 추가] 주문상태와 별개로 관리
+const REQUEST_STATUS_OPTIONS = [
+  { value: "none", label: "요청없음" },
+  { value: "keep", label: "킵" },
+  { value: "immediate", label: "바배" },
 ];
 
 const SHIPPING_STATUS_OPTIONS = [
@@ -289,6 +301,8 @@ function sortValue(row: Row, key: SortKey): string | number {
     case "first_order_date": return row.first_order_date || "";
     case "memo": return row.memo || "";
     case "order_status": return row.order_status || "";
+    // [요청상태 추가]
+    case "request_status": return row.request_status || "none";
     case "shipping_status": return s?.shipping_status || "start";
     case "shipping_type": return s?.shipping_type || "일반택배";
     case "tracking_number": return s?.tracking_number || "";
@@ -318,6 +332,8 @@ export default function DomesticOrdersPage() {
 
   const [platforms, setPlatforms] = useState<string[]>([]);
   const [orderStatuses, setOrderStatuses] = useState<string[]>(["accepted", "checked","packaged"]);
+  // [요청상태 추가] 기본은 전체 표시
+  const [requestStatuses, setRequestStatuses] = useState<string[]>([]);
   const [shippingStatuses, setShippingStatuses] = useState<string[]>([
     "start",
     "excel_exported",
@@ -370,6 +386,8 @@ export default function DomesticOrdersPage() {
 
         if (platforms.length && !platforms.includes(row.platform)) return false;
         if (orderStatuses.length && !orderStatuses.includes(row.order_status || "accepted")) return false;
+        // [요청상태 추가]
+        if (requestStatuses.length && !requestStatuses.includes(row.request_status || "none")) return false;
         if (shippingStatuses.length && !shippingStatuses.includes(shippingStatus)) return false;
         if (shippingTypes.length && !shippingTypes.includes(shippingType)) return false;
 
@@ -386,6 +404,8 @@ export default function DomesticOrdersPage() {
             row.first_order_date,
             row.item_summary,
             row.memo,
+            // [요청상태 추가] 검색에도 내부 요청값 포함
+            row.request_status,
             s?.tracking_number,
             shippingType,
           ].join(" ").toLowerCase();
@@ -396,7 +416,7 @@ export default function DomesticOrdersPage() {
         return true;
       })
       .sort((a, b) => compareRows(a, b, sortKey, sortDirection));
-  }, [rows, platforms, orderStatuses, shippingStatuses, shippingTypes, q, sortKey, sortDirection]);
+  }, [rows, platforms, orderStatuses, requestStatuses, shippingStatuses, shippingTypes, q, sortKey, sortDirection]);
 
   const keptAlarmRows = useMemo(() => {
     return rows
@@ -821,6 +841,8 @@ export default function DomesticOrdersPage() {
         memo: row.memo || "",
         item_summary: row.item_summary || "",
         order_status: row.order_status || "accepted",
+        // [요청상태 추가] 행 저장 시 함께 저장
+        request_status: row.request_status || "none",
         shipping_status: s.shipping_status || "start",
         shipping_type: s.shipping_type || "일반택배",
         tracking_number: s.tracking_number || "",
@@ -849,6 +871,11 @@ export default function DomesticOrdersPage() {
 
     if (patchRow.order_status) {
       updateRowValue(row.order_id, { order_status: patchRow.order_status });
+    }
+
+    // [요청상태 추가] 드롭다운 변경 즉시 화면 반영
+    if (patchRow.request_status !== undefined) {
+      updateRowValue(row.order_id, { request_status: patchRow.request_status });
     }
 
     if (patchShipping) {
@@ -1049,7 +1076,7 @@ export default function DomesticOrdersPage() {
         <section style={alarmBoardStyle}>
           <div style={alarmHeaderStyle}>
             <div>
-              <h2 style={alarmTitleStyle}>킵&배송현황</h2>
+              <h2 style={alarmTitleStyle}>직배킵&배송현황</h2>
               <p style={alarmDescriptionStyle}>
                 -- 킵&7일 경과 주문 현황 -- 매주 화수목 출고, 7일 경과 운송장 등록, 11일 경과 발송 대상 
                 바배, 킵, 합배 등의 요청은 별도로 요청해주셔야 합니다! 
@@ -1061,7 +1088,7 @@ export default function DomesticOrdersPage() {
           <div style={alarmListStyle}>
             {keptAlarmRows.length ? (
               <div style={keptAlarmGroupStyle}>
-                <div style={alarmDateStyle}>킵 현황</div>
+                <div style={alarmDateStyle}>직배킵 현황</div>
 
                 <div style={alarmNicknameListStyle}>
                   {keptAlarmRows.map((row) => {
@@ -1072,7 +1099,7 @@ export default function DomesticOrdersPage() {
                       <span key={row.order_id} style={alarmNicknameStyle}>
                         {row.nickname || row.recipient_name || displayOrderNo(row)}
 
-                        <span style={keepAlarmBadgeStyle}>킵</span>
+                        <span style={keepAlarmBadgeStyle}>직배킵</span>
 
                         {shippingStatus === "registered" ? (
                           <span style={trackingAlarmBadgeStyle}>운송장등록</span>
@@ -1101,7 +1128,7 @@ export default function DomesticOrdersPage() {
                         {row.nickname || row.recipient_name || displayOrderNo(row)}
 
                         {orderStatus === "kept" ? (
-                          <span style={keepAlarmBadgeStyle}>킵</span>
+                          <span style={keepAlarmBadgeStyle}>직배킵</span>
                         ) : null}
 
                         {shippingStatus === "registered" ? (
@@ -1132,6 +1159,14 @@ export default function DomesticOrdersPage() {
           options={ORDER_STATUS_OPTIONS}
           selected={orderStatuses}
           onToggle={(value) => setOrderStatuses((prev) => toggleList(prev, value))}
+        />
+
+        {/* [요청상태 추가] */}
+        <FilterGroup
+          title="요청상태"
+          options={REQUEST_STATUS_OPTIONS}
+          selected={requestStatuses}
+          onToggle={(value) => setRequestStatuses((prev) => toggleList(prev, value))}
         />
 
         <FilterGroup
@@ -1188,7 +1223,7 @@ export default function DomesticOrdersPage() {
             </button>
 
             <button type="button" onClick={() => patch("kept")} style={keepButtonStyle}>
-              킵 처리
+              직배킵 처리
             </button>
 
             <button type="button" onClick={() => patch("packaged")} style={orangeButtonStyle}>
@@ -1451,7 +1486,7 @@ export default function DomesticOrdersPage() {
             <table
               style={{
                 width: "100%",
-                minWidth: 1650,
+                minWidth: 1760,
                 borderCollapse: "collapse",
                 fontSize: 13,
               }}
@@ -1471,6 +1506,8 @@ export default function DomesticOrdersPage() {
                   <SortableTh label="메모" sortKeyValue="memo" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   <th style={thStyle}>저장</th>
                   <SortableTh label="주문상태" sortKeyValue="order_status" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                  {/* [요청상태 추가] */}
+                  <SortableTh label="요청상태" sortKeyValue="request_status" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   <SortableTh label="운송장" sortKeyValue="tracking_number" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   <SortableTh label="배송상태" sortKeyValue="shipping_status" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   <SortableTh label="아이템" sortKeyValue="item_summary" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
@@ -1527,6 +1564,23 @@ export default function DomesticOrdersPage() {
                           style={selectStyle}
                         >
                           {ORDER_STATUS_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+
+                      {/* [요청상태 추가] */}
+                      <td style={tdStyle}>
+                        <select
+                          value={row.request_status || "none"}
+                          onChange={(event) =>
+                            saveRowPatch(row, { request_status: event.target.value })
+                          }
+                          style={selectStyle}
+                        >
+                          {REQUEST_STATUS_OPTIONS.map((option) => (
                             <option key={option.value} value={option.value}>
                               {option.label}
                             </option>
