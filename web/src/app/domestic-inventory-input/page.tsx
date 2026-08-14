@@ -30,6 +30,7 @@ type PreviewItem = {
   currency: string;
   purchase_price: number;
   component_count: number | null;
+  unit_sale_price: number;
   quantity: number;
   status: InventoryStatus;
   memo: string;
@@ -60,6 +61,28 @@ const seriesList = [
 ];
 
 const currencyList = ["JPY", "CNY"];
+
+const EXCHANGE_RATE: Record<string, number> = {
+  JPY: 10,
+  CNY: 230,
+};
+
+function calculatePricing(currency: string, purchasePrice: number, boxCount: number | null) {
+  const rate = EXCHANGE_RATE[currency] ?? EXCHANGE_RATE.JPY;
+  const purchase = Number(purchasePrice) || 0;
+  const packs = Number(boxCount) || 0;
+
+  // 1) 원가 = 구매가 × 환율 × 1.2 + 5,000원
+  const costPrice = Math.round(purchase * rate * 1.2 + 5000);
+
+  // 2) 최소마진가격 = 원가 × 1.1 × 1.07 + 10,000원
+  const minimumMarginPrice = Math.round(costPrice * 1.1 * 1.07 + 10000);
+
+  // 3) 개당판매가 = 최소마진가격 ÷ 박스당 팩 수
+  const unitSalePrice = packs > 0 ? Math.ceil(minimumMarginPrice / packs) : 0;
+
+  return { costPrice, minimumMarginPrice, unitSalePrice };
+}
 
 const initialManualForm = {
   item_name: "",
@@ -127,6 +150,12 @@ export default function DomesticInventoryInputPage() {
       return;
     }
 
+    const pricing = calculatePricing(
+      manualForm.currency,
+      manualForm.purchase_price,
+      manualForm.component_count || null
+    );
+
     const item: PreviewItem = {
       local_id: `manual-${Date.now()}`,
       checked: true,
@@ -140,12 +169,13 @@ export default function DomesticInventoryInputPage() {
       yen_price: manualForm.currency === "JPY" ? manualForm.purchase_price : 0,
       shipping_fee: 0,
       domestic_shipping_fee: manualForm.domestic_shipping_fee,
-      total_price: manualForm.purchase_price,
+      total_price: pricing.costPrice,
       tracking_number: manualForm.tracking_number,
       image_url: manualForm.image_url,
       lineup_image_url: manualForm.lineup_image_url,
       source_url: manualForm.source_url,
       component_count: manualForm.component_count || null,
+      unit_sale_price: pricing.unitSalePrice,
       quantity: manualForm.quantity,
       status: manualForm.status,
       memo: manualForm.memo,
@@ -171,12 +201,41 @@ export default function DomesticInventoryInputPage() {
           field === "quantity" ||
           field === "purchase_price" ||
           field === "component_count" ||
+          field === "unit_sale_price" ||
           field === "yen_price" ||
           field === "shipping_fee" ||
           field === "domestic_shipping_fee" ||
           field === "total_price"
         ) {
-          return { ...item, [field]: Number(value), saved: false };
+          const nextItem = { ...item, [field]: Number(value), saved: false };
+          if (field === "purchase_price" || field === "component_count") {
+            const pricing = calculatePricing(
+              nextItem.currency,
+              nextItem.purchase_price,
+              nextItem.component_count
+            );
+            return {
+              ...nextItem,
+              total_price: pricing.costPrice,
+              unit_sale_price: pricing.unitSalePrice,
+            };
+          }
+          return nextItem;
+        }
+
+        if (field === "currency") {
+          const nextItem = { ...item, currency: String(value), saved: false };
+          const pricing = calculatePricing(
+            nextItem.currency,
+            nextItem.purchase_price,
+            nextItem.component_count
+          );
+          return {
+            ...nextItem,
+            yen_price: nextItem.currency === "JPY" ? nextItem.purchase_price : 0,
+            total_price: pricing.costPrice,
+            unit_sale_price: pricing.unitSalePrice,
+          };
         }
 
         return { ...item, [field]: value, saved: false };
@@ -208,10 +267,25 @@ export default function DomesticInventoryInputPage() {
           throw new Error("상품명이 없는 항목이 있어 저장을 중단했어.");
         }
 
+        const pricing = calculatePricing(
+          item.currency,
+          item.purchase_price,
+          item.component_count
+        );
+
+        const payload = {
+          ...item,
+          // 현재 DB 가격 컬럼이 integer라 저장 시 정수로 정규화
+          purchase_price: Math.round(item.purchase_price),
+          yen_price: item.currency === "JPY" ? Math.round(item.purchase_price) : 0,
+          total_price: pricing.costPrice,
+          unit_sale_price: pricing.unitSalePrice,
+        };
+
         const res = await fetch("/api/domestic-inventory/items", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(item),
+          body: JSON.stringify(payload),
         });
 
         const result = await res.json();
@@ -307,6 +381,21 @@ export default function DomesticInventoryInputPage() {
               <ManualField label="소싱 URL" value={manualForm.source_url} onChange={(v) => updateManualForm("source_url", v)} />
               <ManualField label="기타사항 / 등급 / 비율" value={manualForm.memo} onChange={(v) => updateManualForm("memo", v)} />
             </div>
+
+            {(() => {
+              const pricing = calculatePricing(
+                manualForm.currency,
+                manualForm.purchase_price,
+                manualForm.component_count || null
+              );
+              return (
+                <div style={pricingBoxStyle}>
+                  <span>원가 <strong>{pricing.costPrice.toLocaleString()}원</strong></span>
+                  <span>최소마진가격 <strong>{pricing.minimumMarginPrice.toLocaleString()}원</strong></span>
+                  <span>개당판매가 <strong>{pricing.unitSalePrice ? `${pricing.unitSalePrice.toLocaleString()}원` : "-"}</strong></span>
+                </div>
+              );
+            })()}
 
             <button type="button" onClick={addManualItem} style={saveButtonStyle}>
               입력 항목 추가
@@ -440,6 +529,17 @@ MEMO:`}
                   <EditableField label={`구매가 (${item.currency})`} value={String(item.purchase_price)} type="number" onChange={(v) => updateItem(item.local_id, "purchase_price", v)} />
                 </div>
 
+                {(() => {
+                  const pricing = calculatePricing(item.currency, item.purchase_price, item.component_count);
+                  return (
+                    <div style={pricingBoxStyle}>
+                      <span>원가 <strong>{pricing.costPrice.toLocaleString()}원</strong></span>
+                      <span>최소마진가격 <strong>{pricing.minimumMarginPrice.toLocaleString()}원</strong></span>
+                      <span>개당판매가 <strong>{pricing.unitSalePrice ? `${pricing.unitSalePrice.toLocaleString()}원` : "-"}</strong></span>
+                    </div>
+                  );
+                })()}
+
                 <div style={grid4Style}>
                   <EditableField label="박스당 팩 수" value={String(item.component_count ?? "")} type="number" onChange={(v) => updateItem(item.local_id, "component_count", v)} />
                   <EditableField label="내 배송비" value={String(item.domestic_shipping_fee)} type="number" onChange={(v) => updateItem(item.local_id, "domestic_shipping_fee", v)} />
@@ -510,6 +610,7 @@ function parseFixedInventoryText(rawText: string): PreviewItem[] {
     const qty = toNumber(getField(block, "QTY")) || 1;
     const currency = (getField(block, "CURRENCY") || "JPY").toUpperCase();
     const boxCount = toNumber(getField(block, "BOX_COUNT"));
+    const pricing = calculatePricing(currency, price, boxCount || null);
 
     return {
       local_id: `${getField(block, "ORDER_NO") || orderNo || "item"}-${index}-${Date.now()}`,
@@ -525,12 +626,13 @@ function parseFixedInventoryText(rawText: string): PreviewItem[] {
       shipping_fee: 0,
       domestic_shipping_fee:
         toNumber(getField(block, "DOMESTIC_SHIPPING")) || orderDomesticShipping,
-      total_price: price,
+      total_price: pricing.costPrice,
       tracking_number: getField(block, "TRACKING") || orderTracking,
       image_url: getField(block, "IMAGE"),
       lineup_image_url: getField(block, "LINEUP_IMAGE"),
       source_url: getField(block, "SOURCE_URL"),
       component_count: boxCount || null,
+      unit_sale_price: pricing.unitSalePrice,
       quantity: qty,
       status: (getField(block, "STATUS") || orderStatus) as InventoryStatus,
       memo: getField(block, "MEMO"),
@@ -677,6 +779,7 @@ const savedBadgeStyle: React.CSSProperties = { ...badgeStyle, background: "#dcfc
 const grid4Style: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(4, minmax(120px, 1fr))", gap: 8 };
 const grid3Style: React.CSSProperties = { display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr", gap: 8 };
 const manualGridStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 12 };
+const pricingBoxStyle: React.CSSProperties = { display: "flex", gap: 16, flexWrap: "wrap", margin: "10px 0 14px", padding: "10px 12px", borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0", fontSize: 14 };
 const labelStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 700 };
 const inputStyle: React.CSSProperties = { height: 34, padding: "0 9px", borderRadius: 7, border: "1px solid #d1d5db", fontSize: 13, background: "#fff" };
 const textareaStyle: React.CSSProperties = { minHeight: 48, padding: 9, borderRadius: 7, border: "1px solid #d1d5db", fontSize: 13, resize: "vertical" };
