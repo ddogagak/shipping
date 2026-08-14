@@ -927,24 +927,22 @@ const lineupModalBackdropStyle: React.CSSProperties = {
   inset: 0,
   zIndex: 9999,
   background: "rgba(0,0,0,0.72)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  padding: 20,
+  overflowY: "auto",
+  padding: "20px 12px 40px",
   cursor: "zoom-out",
 };
 
 const lineupModalContentStyle: React.CSSProperties = {
   position: "relative",
-  maxWidth: "95vw",
-  maxHeight: "92vh",
+  width: "min(700px, 100%)",
+  margin: "0 auto",
   cursor: "default",
 };
 
 const lineupModalImageStyle: React.CSSProperties = {
   display: "block",
-  maxWidth: "95vw",
-  maxHeight: "92vh",
+  width: "100%",
+  height: "auto",
   objectFit: "contain",
   borderRadius: 12,
   background: "#fff",
