@@ -862,6 +862,38 @@ export default function DomesticOrdersPage() {
     await load();
   }
 
+  // [요청상태 저장 수정]
+  // 요청상태는 다른 행 값과 섞지 않고 전용 PATCH로 즉시 저장합니다.
+  async function saveRequestStatus(row: Row, requestStatus: string) {
+    setSavingRowId(row.order_id);
+    updateRowValue(row.order_id, { request_status: requestStatus });
+
+    try {
+      const res = await fetch("/api/domestic/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update_request_status",
+          order_id: row.order_id,
+          request_status: requestStatus,
+        }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        alert(json.detail || json.error || "요청상태 저장 실패");
+        await load();
+        return;
+      }
+
+      setMessage("요청상태 저장 완료");
+      await load();
+    } finally {
+      setSavingRowId(null);
+    }
+  }
+
   async function saveRowPatch(
     row: Row,
     patchRow: Partial<Row>,
@@ -1576,7 +1608,7 @@ export default function DomesticOrdersPage() {
                         <select
                           value={row.request_status || "none"}
                           onChange={(event) =>
-                            saveRowPatch(row, { request_status: event.target.value })
+                            void saveRequestStatus(row, event.target.value)
                           }
                           style={selectStyle}
                         >
