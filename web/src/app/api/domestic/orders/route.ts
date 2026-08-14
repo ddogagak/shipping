@@ -90,6 +90,44 @@ export async function PATCH(req: Request) {
     ? body.order_ids.map((v: unknown) => String(v ?? "").trim()).filter(Boolean)
     : [];
 
+  // [요청상태 저장 수정]
+  // 요청상태 전용 저장. 다른 주문/배송 상태와 독립적으로 처리합니다.
+  if (action === "update_request_status") {
+    const orderId = String(body.order_id || "").trim();
+    const requestStatus = String(body.request_status || "none").trim();
+
+    if (!orderId) {
+      return NextResponse.json({ error: "order_id가 없습니다." }, { status: 400 });
+    }
+
+    if (!["none", "keep", "immediate"].includes(requestStatus)) {
+      return NextResponse.json({ error: "올바르지 않은 요청상태입니다." }, { status: 400 });
+    }
+
+    const { data: updatedOrder, error } = await supabase
+      .from("domestic_order")
+      .update({
+        request_status: requestStatus,
+        updated_at: now,
+      })
+      .eq("order_id", orderId)
+      .select("order_id, request_status")
+      .single();
+
+    if (error) {
+      return NextResponse.json(
+        { error: "요청상태 저장 실패", detail: error.message },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      order_id: updatedOrder.order_id,
+      request_status: updatedOrder.request_status,
+    });
+  }
+
   if (action === "update_row") {
     const orderId = String(body.order_id || "").trim();
 
