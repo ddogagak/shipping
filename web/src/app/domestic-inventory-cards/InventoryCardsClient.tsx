@@ -330,7 +330,7 @@ export default function InventoryCardsClient({
                     />
 
                     <InfoItem
-                      label="낱개가격"
+                      label="최소마진 낱개"
                       value={formatNullableWon(profitInfo.unitPrice)}
                     />
 
@@ -345,6 +345,11 @@ export default function InventoryCardsClient({
                       onChange={(value) =>
                         updateItem(item.id, "unit_sale_price", value)
                       }
+                    />
+
+                    <InfoItem
+                      label="예상 총매출"
+                      value={formatNullableWon(profitInfo.expectedRevenue)}
                     />
 
                     <InfoItem
@@ -447,16 +452,23 @@ function calcInventoryProfit(item: {
   const unitPrice =
     componentCount > 0 ? Math.ceil(minMarginPrice / componentCount) : null;
 
-  // 입력한 개당판매가 기준 박스 전체 이익
-  const profit =
+  // 예상 총매출 = 개당판매가 × 박스당 팩 수
+  const expectedRevenue =
     componentCount > 0 && unitSalePrice > 0
-      ? Math.round(unitSalePrice * componentCount - cost)
+      ? Math.round(unitSalePrice * componentCount)
+      : null;
+
+  // 이익 = 예상 총매출 - 최소마진가격
+  const profit =
+    expectedRevenue !== null
+      ? Math.round(expectedRevenue - minMarginPrice)
       : null;
 
   return {
     cost: roundedCost,
     unitPrice,
     minMarginPrice,
+    expectedRevenue,
     profit,
   };
 }
