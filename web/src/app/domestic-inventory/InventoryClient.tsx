@@ -9,25 +9,68 @@ type InventoryItem = {
   item_type: string | null;
   series_name: string | null;
   image_url: string | null;
+  lineup_image_url: string | null;
+  source_url: string | null;
   order_number: string | null;
   order_date: string | null;
   tracking_number: string | null;
   quantity: number | null;
+
+  // 기존 호환용
   yen_price: number | null;
   shipping_fee: number | null;
   domestic_shipping_fee: number | null;
   total_price: number | null;
+
+  // 신규
+  currency: string | null;
+  purchase_price: number | null;
+
   status: string | null;
   memo: string | null;
+
+  // 박스당 팩 수
   component_count: number | null;
   unit_sale_price: number | null;
 };
 
-const statusList = ["전체", "입고전", "해외배송", "입고완료", "판매중", "판매완료", "보류"];
-const typeList = ["전체", "아크릴", "지류", "뱃지", "피규어", "키링", "기타"];
-const seriesList = ["전체", "헌터헌터", "귀멸의칼날", "나의히어로아카데미아", "프리렌", "진격의거인", "기타"];
+const statusList = [
+  "전체",
+  "입고전",
+  "해외배송",
+  "입고완료",
+  "판매중",
+  "판매완료",
+  "보류",
+];
 
-export default function InventoryClient({ initialItems }: { initialItems: InventoryItem[] }) {
+const typeList = [
+  "전체",
+  "아크릴",
+  "지류",
+  "뱃지",
+  "피규어",
+  "키링",
+  "기타",
+];
+
+const seriesList = [
+  "전체",
+  "헌터헌터",
+  "귀멸의칼날",
+  "나의히어로아카데미아",
+  "프리렌",
+  "진격의거인",
+  "기타",
+];
+
+const currencyList = ["JPY", "CNY"];
+
+export default function InventoryClient({
+  initialItems,
+}: {
+  initialItems: InventoryItem[];
+}) {
   const [items, setItems] = useState<InventoryItem[]>(initialItems ?? []);
   const [keyword, setKeyword] = useState("");
   const [status, setStatus] = useState("전체");
@@ -37,6 +80,7 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
   const [message, setMessage] = useState("");
   const [savingId, setSavingId] = useState<string | number | null>(null);
   const [deletingId, setDeletingId] = useState<string | number | null>(null);
+  const [lineupImage, setLineupImage] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     return items.filter((item) => {
@@ -47,7 +91,8 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
         String(item.item_name ?? "").toLowerCase().includes(q) ||
         String(item.order_number ?? "").toLowerCase().includes(q) ||
         String(item.tracking_number ?? "").toLowerCase().includes(q) ||
-        String(item.memo ?? "").toLowerCase().includes(q);
+        String(item.memo ?? "").toLowerCase().includes(q) ||
+        String(item.source_url ?? "").toLowerCase().includes(q);
 
       const matchStatus = status === "전체" || item.status === status;
       const matchType = type === "전체" || item.item_type === type;
@@ -58,11 +103,21 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
         (trackingFilter === "운송장없음" && !item.tracking_number) ||
         (trackingFilter === "운송장있음" && !!item.tracking_number);
 
-      return matchKeyword && matchStatus && matchType && matchSeries && matchTracking;
+      return (
+        matchKeyword &&
+        matchStatus &&
+        matchType &&
+        matchSeries &&
+        matchTracking
+      );
     });
   }, [items, keyword, status, type, series, trackingFilter]);
 
-  const updateItem = (id: string | number, field: keyof InventoryItem, value: string) => {
+  const updateItem = (
+    id: string | number,
+    field: keyof InventoryItem,
+    value: string
+  ) => {
     setItems((prev) =>
       prev.map((item) => {
         if (item.id !== id) return item;
@@ -74,7 +129,8 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
           field === "domestic_shipping_fee" ||
           field === "component_count" ||
           field === "unit_sale_price" ||
-          field === "total_price"
+          field === "total_price" ||
+          field === "purchase_price"
         ) {
           return {
             ...item,
@@ -106,7 +162,8 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
 
       setMessage("저장 완료");
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "저장 실패";
+      const errorMessage =
+        error instanceof Error ? error.message : "저장 실패";
       setMessage(errorMessage);
       alert(errorMessage);
     } finally {
@@ -114,7 +171,10 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
     }
   };
 
-  const saveStatusImmediately = async (item: InventoryItem, nextStatus: string) => {
+  const saveStatusImmediately = async (
+    item: InventoryItem,
+    nextStatus: string
+  ) => {
     const nextItem = {
       ...item,
       status: nextStatus,
@@ -151,7 +211,8 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
       setItems((prev) => prev.filter((row) => row.id !== item.id));
       setMessage("삭제 완료");
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "삭제 실패";
+      const errorMessage =
+        error instanceof Error ? error.message : "삭제 실패";
       setMessage(errorMessage);
       alert(errorMessage);
     } finally {
@@ -164,13 +225,21 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
       <div style={topStyle}>
         <div>
           <h1 style={{ margin: 0 }}>인벤토리</h1>
-          <p style={{ color: "#6b7280" }}>재고 DB 조회 / 수정 / 운송장 입력</p>
+          <p style={{ color: "#6b7280" }}>
+            재고 DB 조회 / 수정 / 운송장 입력
+          </p>
         </div>
 
-        <div style={{ display: "flex", gap: 8 }}>
-          <Link href="/" style={linkStyle}>메인</Link>
-          <Link href="/domestic-inventory-input" style={linkStyle}>재고입력</Link>
-          <Link href="/domestic-inventory-cards" style={linkStyle}>카드형</Link>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Link href="/" style={linkStyle}>
+            메인
+          </Link>
+          <Link href="/domestic-inventory-input" style={primaryLinkStyle}>
+            + 재고입력
+          </Link>
+          <Link href="/domestic-inventory-cards" style={linkStyle}>
+            카드관리
+          </Link>
         </div>
       </div>
 
@@ -178,20 +247,38 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
         <input
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
-          placeholder="상품명 / 주문번호 / 운송장 / 메모 검색"
+          placeholder="상품명 / 주문번호 / 운송장 / 기타사항 / 소싱URL 검색"
           style={searchStyle}
         />
 
-        <select value={status} onChange={(e) => setStatus(e.target.value)} style={selectStyle}>
-          {statusList.map((v) => <option key={v}>{v}</option>)}
+        <select
+          value={status}
+          onChange={(e) => setStatus(e.target.value)}
+          style={selectStyle}
+        >
+          {statusList.map((v) => (
+            <option key={v}>{v}</option>
+          ))}
         </select>
 
-        <select value={series} onChange={(e) => setSeries(e.target.value)} style={selectStyle}>
-          {seriesList.map((v) => <option key={v}>{v}</option>)}
+        <select
+          value={series}
+          onChange={(e) => setSeries(e.target.value)}
+          style={selectStyle}
+        >
+          {seriesList.map((v) => (
+            <option key={v}>{v}</option>
+          ))}
         </select>
 
-        <select value={type} onChange={(e) => setType(e.target.value)} style={selectStyle}>
-          {typeList.map((v) => <option key={v}>{v}</option>)}
+        <select
+          value={type}
+          onChange={(e) => setType(e.target.value)}
+          style={selectStyle}
+        >
+          {typeList.map((v) => (
+            <option key={v}>{v}</option>
+          ))}
         </select>
 
         <select
@@ -215,24 +302,64 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
             <article key={item.id} style={cardStyle}>
               <div style={imageWrapStyle}>
                 {item.image_url ? (
-                  <img src={item.image_url} alt="" style={imgStyle} />
+                  <img
+                    src={item.image_url}
+                    alt=""
+                    style={{
+                      ...imgStyle,
+                      cursor: item.lineup_image_url
+                        ? "zoom-in"
+                        : "default",
+                    }}
+                    title={
+                      item.lineup_image_url
+                        ? "더블클릭: 라인업 이미지 보기"
+                        : undefined
+                    }
+                    onDoubleClick={() => {
+                      if (item.lineup_image_url) {
+                        setLineupImage(item.lineup_image_url);
+                      }
+                    }}
+                  />
                 ) : (
                   <div style={emptyImgStyle}>IMG</div>
                 )}
+
+                {item.lineup_image_url ? (
+                  <button
+                    type="button"
+                    onClick={() => setLineupImage(item.lineup_image_url)}
+                    style={lineupMiniButtonStyle}
+                  >
+                    라인업
+                  </button>
+                ) : null}
               </div>
 
               <div style={bodyStyle}>
                 <div style={badgeRowStyle}>
-                  <span style={badgeStyle}>{item.series_name || "기타"}</span>
-                  <span style={typeBadgeStyle}>{item.item_type || "기타"}</span>
-                  <span style={statusBadgeStyle}>{item.status || "입고전"}</span>
+                  <span style={badgeStyle}>
+                    {item.series_name || "기타"}
+                  </span>
+                  <span style={typeBadgeStyle}>
+                    {item.item_type || "기타"}
+                  </span>
+                  <span style={statusBadgeStyle}>
+                    {item.status || "입고전"}
+                  </span>
+                  <span style={currencyBadgeStyle}>
+                    {item.currency || "JPY"}
+                  </span>
                 </div>
 
                 <label style={labelStyle}>
                   상품명
                   <textarea
                     value={item.item_name ?? ""}
-                    onChange={(e) => updateItem(item.id, "item_name", e.target.value)}
+                    onChange={(e) =>
+                      updateItem(item.id, "item_name", e.target.value)
+                    }
                     style={titleTextareaStyle}
                   />
                 </label>
@@ -242,95 +369,176 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
                     label="작품명"
                     value={item.series_name ?? "기타"}
                     options={seriesList.filter((v) => v !== "전체")}
-                    onChange={(value) => updateItem(item.id, "series_name", value)}
+                    onChange={(value) =>
+                      updateItem(item.id, "series_name", value)
+                    }
                   />
 
                   <FieldSelect
                     label="타입"
                     value={item.item_type ?? "기타"}
                     options={typeList.filter((v) => v !== "전체")}
-                    onChange={(value) => updateItem(item.id, "item_type", value)}
+                    onChange={(value) =>
+                      updateItem(item.id, "item_type", value)
+                    }
                   />
 
                   <FieldSelect
                     label="상태"
                     value={item.status ?? "입고전"}
                     options={statusList.filter((v) => v !== "전체")}
-                    onChange={(value) => saveStatusImmediately(item, value)}
+                    onChange={(value) =>
+                      saveStatusImmediately(item, value)
+                    }
                   />
 
                   <FieldInput
                     label="수량"
                     type="number"
                     value={String(item.quantity ?? 1)}
-                    onChange={(value) => updateItem(item.id, "quantity", value)}
+                    onChange={(value) =>
+                      updateItem(item.id, "quantity", value)
+                    }
                   />
                 </div>
 
                 <div style={grid4Style}>
+                  <FieldSelect
+                    label="통화"
+                    value={item.currency || "JPY"}
+                    options={currencyList}
+                    onChange={(value) =>
+                      updateItem(item.id, "currency", value)
+                    }
+                  />
+
                   <FieldInput
-                    label="총액(¥)"
+                    label={`구매가 (${item.currency || "JPY"})`}
                     type="number"
-                    value={String(item.total_price ?? 0)}
-                    onChange={(value) => updateItem(item.id, "total_price", value)}
+                    value={String(
+                      item.purchase_price ??
+                        item.total_price ??
+                        item.yen_price ??
+                        0
+                    )}
+                    onChange={(value) =>
+                      updateItem(item.id, "purchase_price", value)
+                    }
                   />
 
                   <FieldInput
-                    label="일본내배송비"
-                    type="number"
-                    value={String(item.domestic_shipping_fee ?? 0)}
-                    onChange={(value) => updateItem(item.id, "domestic_shipping_fee", value)}
-                  />
-
-                  <FieldInput
-                    label="주문번호"
-                    value={item.order_number ?? ""}
-                    onChange={(value) => updateItem(item.id, "order_number", value)}
-                  />
-
-                  <FieldInput
-                    label="주문일"
-                    value={item.order_date ?? ""}
-                    onChange={(value) => updateItem(item.id, "order_date", value)}
-                  />
-                </div>
-
-                <div style={grid2Style}>
-                  <FieldInput
-                    label="운송장"
-                    value={item.tracking_number ?? ""}
-                    onChange={(value) => updateItem(item.id, "tracking_number", value)}
-                  />
-
-                  <FieldInput
-                    label="이미지 URL"
-                    value={item.image_url ?? ""}
-                    onChange={(value) => updateItem(item.id, "image_url", value)}
-                  />
-                </div>
-
-                <div style={grid2Style}>
-                  <FieldInput
-                    label="구성품개수"
+                    label="박스당 팩 수"
                     type="number"
                     value={String(item.component_count ?? "")}
-                    onChange={(value) => updateItem(item.id, "component_count", value)}
+                    onChange={(value) =>
+                      updateItem(item.id, "component_count", value)
+                    }
                   />
 
                   <FieldInput
                     label="개당판매가"
                     type="number"
                     value={String(item.unit_sale_price ?? "")}
-                    onChange={(value) => updateItem(item.id, "unit_sale_price", value)}
+                    onChange={(value) =>
+                      updateItem(item.id, "unit_sale_price", value)
+                    }
                   />
                 </div>
 
+                <div style={grid4Style}>
+                  <FieldInput
+                    label="현지내 배송비"
+                    type="number"
+                    value={String(item.domestic_shipping_fee ?? 0)}
+                    onChange={(value) =>
+                      updateItem(
+                        item.id,
+                        "domestic_shipping_fee",
+                        value
+                      )
+                    }
+                  />
+
+                  <FieldInput
+                    label="주문번호"
+                    value={item.order_number ?? ""}
+                    onChange={(value) =>
+                      updateItem(item.id, "order_number", value)
+                    }
+                  />
+
+                  <FieldInput
+                    label="주문일"
+                    value={item.order_date ?? ""}
+                    onChange={(value) =>
+                      updateItem(item.id, "order_date", value)
+                    }
+                  />
+
+                  <FieldInput
+                    label="운송장"
+                    value={item.tracking_number ?? ""}
+                    onChange={(value) =>
+                      updateItem(item.id, "tracking_number", value)
+                    }
+                  />
+                </div>
+
+                <div style={grid2Style}>
+                  <FieldInput
+                    label="대표 이미지 URL"
+                    value={item.image_url ?? ""}
+                    onChange={(value) =>
+                      updateItem(item.id, "image_url", value)
+                    }
+                  />
+
+                  <FieldInput
+                    label="라인업 이미지 URL"
+                    value={item.lineup_image_url ?? ""}
+                    onChange={(value) =>
+                      updateItem(item.id, "lineup_image_url", value)
+                    }
+                  />
+                </div>
+
+                <div style={grid2Style}>
+                  <FieldInput
+                    label="소싱 URL"
+                    value={item.source_url ?? ""}
+                    onChange={(value) =>
+                      updateItem(item.id, "source_url", value)
+                    }
+                  />
+
+                  <div style={sourceLinkBoxStyle}>
+                    <span style={sourceLinkLabelStyle}>바로가기</span>
+                    {item.source_url ? (
+                      <a
+                        href={item.source_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={sourceLinkStyle}
+                      >
+                        소싱 페이지 열기 ↗
+                      </a>
+                    ) : (
+                      <span style={sourceLinkEmptyStyle}>
+                        소싱 URL 없음
+                      </span>
+                    )}
+                  </div>
+                </div>
+
                 <label style={labelStyle}>
-                  메모
+                  기타사항 / 등급 / 비율
                   <textarea
                     value={item.memo ?? ""}
-                    onChange={(e) => updateItem(item.id, "memo", e.target.value)}
+                    onChange={(e) =>
+                      updateItem(item.id, "memo", e.target.value)
+                    }
                     style={memoStyle}
+                    placeholder="예: 일반 12종 + 시크릿 1종 / 시크릿 비율 미공개"
                   />
                 </label>
 
@@ -358,6 +566,31 @@ export default function InventoryClient({ initialItems }: { initialItems: Invent
           ))
         )}
       </section>
+
+      {lineupImage ? (
+        <div
+          style={lineupModalBackdropStyle}
+          onClick={() => setLineupImage(null)}
+        >
+          <div
+            style={lineupModalContentStyle}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setLineupImage(null)}
+              style={lineupCloseButtonStyle}
+            >
+              ×
+            </button>
+            <img
+              src={lineupImage}
+              alt="라인업"
+              style={lineupModalImageStyle}
+            />
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -400,8 +633,14 @@ function FieldSelect({
   return (
     <label style={labelStyle}>
       {label}
-      <select value={value} onChange={(e) => onChange(e.target.value)} style={inputStyle}>
-        {options.map((v) => <option key={v}>{v}</option>)}
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={inputStyle}
+      >
+        {options.map((v) => (
+          <option key={v}>{v}</option>
+        ))}
       </select>
     </label>
   );
@@ -418,6 +657,7 @@ const topStyle: React.CSSProperties = {
   justifyContent: "space-between",
   gap: 12,
   marginBottom: 16,
+  flexWrap: "wrap",
 };
 
 const linkStyle: React.CSSProperties = {
@@ -431,6 +671,13 @@ const linkStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   fontWeight: 700,
+};
+
+const primaryLinkStyle: React.CSSProperties = {
+  ...linkStyle,
+  border: "1px solid #111827",
+  background: "#111827",
+  color: "#fff",
 };
 
 const filterStyle: React.CSSProperties = {
@@ -483,7 +730,10 @@ const cardStyle: React.CSSProperties = {
 
 const imageWrapStyle: React.CSSProperties = {
   width: 120,
-  height: 120,
+  minHeight: 120,
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
 };
 
 const imgStyle: React.CSSProperties = {
@@ -506,10 +756,22 @@ const emptyImgStyle: React.CSSProperties = {
   fontWeight: 800,
 };
 
+const lineupMiniButtonStyle: React.CSSProperties = {
+  width: 120,
+  height: 32,
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  background: "#fff",
+  fontSize: 12,
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
 const bodyStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 10,
+  minWidth: 0,
 };
 
 const badgeRowStyle: React.CSSProperties = {
@@ -536,48 +798,91 @@ const statusBadgeStyle: React.CSSProperties = {
   background: "#fee2e2",
 };
 
+const currencyBadgeStyle: React.CSSProperties = {
+  ...badgeStyle,
+  background: "#dcfce7",
+};
+
 const labelStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 4,
   fontSize: 12,
   fontWeight: 800,
+  minWidth: 0,
 };
 
 const inputStyle: React.CSSProperties = {
+  width: "100%",
+  minWidth: 0,
   height: 36,
   border: "1px solid #d1d5db",
   borderRadius: 8,
   padding: "0 9px",
   background: "#fff",
+  boxSizing: "border-box",
 };
 
 const titleTextareaStyle: React.CSSProperties = {
+  width: "100%",
   minHeight: 54,
   border: "1px solid #d1d5db",
   borderRadius: 8,
   padding: 9,
   resize: "vertical",
+  boxSizing: "border-box",
 };
 
 const memoStyle: React.CSSProperties = {
-  minHeight: 54,
+  width: "100%",
+  minHeight: 70,
   border: "1px solid #d1d5db",
   borderRadius: 8,
   padding: 9,
   resize: "vertical",
+  boxSizing: "border-box",
 };
 
 const grid4Style: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(4, minmax(120px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
   gap: 8,
 };
 
 const grid2Style: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "1fr 1fr",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
   gap: 8,
+};
+
+const sourceLinkBoxStyle: React.CSSProperties = {
+  minHeight: 56,
+  padding: "6px 9px",
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  display: "flex",
+  flexDirection: "column",
+  justifyContent: "center",
+  gap: 4,
+  boxSizing: "border-box",
+};
+
+const sourceLinkLabelStyle: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 800,
+};
+
+const sourceLinkStyle: React.CSSProperties = {
+  fontSize: 13,
+  fontWeight: 800,
+  color: "#2563eb",
+  textDecoration: "none",
+  wordBreak: "break-all",
+};
+
+const sourceLinkEmptyStyle: React.CSSProperties = {
+  fontSize: 13,
+  color: "#9ca3af",
 };
 
 const buttonRowStyle: React.CSSProperties = {
@@ -615,4 +920,47 @@ const emptyStyle: React.CSSProperties = {
   padding: 32,
   textAlign: "center",
   color: "#6b7280",
+};
+
+const lineupModalBackdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 9999,
+  background: "rgba(0,0,0,0.72)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 20,
+  cursor: "zoom-out",
+};
+
+const lineupModalContentStyle: React.CSSProperties = {
+  position: "relative",
+  maxWidth: "95vw",
+  maxHeight: "92vh",
+  cursor: "default",
+};
+
+const lineupModalImageStyle: React.CSSProperties = {
+  display: "block",
+  maxWidth: "95vw",
+  maxHeight: "92vh",
+  objectFit: "contain",
+  borderRadius: 12,
+  background: "#fff",
+};
+
+const lineupCloseButtonStyle: React.CSSProperties = {
+  position: "absolute",
+  top: 8,
+  right: 8,
+  width: 36,
+  height: 36,
+  border: "none",
+  borderRadius: 999,
+  background: "rgba(0,0,0,0.7)",
+  color: "#fff",
+  fontSize: 24,
+  lineHeight: "36px",
+  cursor: "pointer",
 };
