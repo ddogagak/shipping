@@ -36,6 +36,21 @@ function combineBaseOrderNo(order: any) {
   return stripCombineSuffix(customerNo || orderId);
 }
 
+// 합배송 이력이 있으면 source_order_dates 전체를 포함해 가장 오래된 주문일을 찾는다.
+function oldestSourceDate(order: any) {
+  const dates = Array.isArray(order?.source_order_dates)
+    ? order.source_order_dates
+        .map((value: unknown) => String(value ?? "").trim())
+        .filter(Boolean)
+    : [];
+
+  if (order?.first_order_date) {
+    dates.push(String(order.first_order_date));
+  }
+
+  return Array.from(new Set(dates)).sort()[0] || order?.created_at || null;
+}
+
 export async function GET() {
   const supabase = createServiceRoleClient();
 
@@ -146,16 +161,41 @@ export async function PATCH(req: Request) {
         ? null
         : String(body.tracking_number).trim() || null;
 
+    const orderUpdate: Record<string, any> = {
+      memo: body.memo ?? null,
+      item_summary: body.item_summary ?? null,
+      order_status: nextOrderStatus,
+      // [요청상태 추가] 주문상태와 별도로 저장
+      request_status: body.request_status || "none",
+      updated_at: now,
+    };
+
+    // [직배킵 전환 시 최초주문일 복원]
+    // 이미 합배송된 대표 주문을 직배킵으로 바꾸는 경우,
+    // source_order_dates 전체 중 가장 오래된 날짜를 first_order_date로 되돌린다.
+    if (nextOrderStatus === "kept") {
+      const { data: currentOrder, error: currentOrderError } = await supabase
+        .from("domestic_order")
+        .select("source_order_dates, first_order_date, created_at")
+        .eq("order_id", orderId)
+        .single();
+
+      if (currentOrderError) {
+        return NextResponse.json(
+          { error: "직배킵 최초주문일 조회 실패", detail: currentOrderError.message },
+          { status: 500 }
+        );
+      }
+
+      const restoredFirstOrderDate = oldestSourceDate(currentOrder);
+      if (restoredFirstOrderDate) {
+        orderUpdate.first_order_date = restoredFirstOrderDate;
+      }
+    }
+
     const { error: orderError } = await supabase
       .from("domestic_order")
-      .update({
-        memo: body.memo ?? null,
-        item_summary: body.item_summary ?? null,
-        order_status: nextOrderStatus,
-        // [요청상태 추가] 주문상태와 별도로 저장
-        request_status: body.request_status || "none",
-        updated_at: now,
-      })
+      .update(orderUpdate)
       .eq("order_id", orderId);
 
     if (orderError) {
@@ -253,9 +293,9 @@ export async function PATCH(req: Request) {
 
     const base = sorted[0];
 
-    // [합배송 최초주문일 변경]
-    // 직배킵(order_status = kept) 주문의 날짜는 최초주문일 계산에서 제외한다.
-    // 직배킵이 아닌 주문 중 가장 빠른 주문일을 합배송 후 first_order_date로 사용한다.
+    // [합배송 최초주문일 규칙]
+    // 1) 직배킵 + 일반 주문이 섞이면: 일반 주문 중 가장 오래된 날짜
+    // 2) 전부 직배킵이면: 완료되지 않은 전체 주문 중 가장 오래된 날짜
     const nonDirectKeepOrders = sorted.filter(
       (order: any) => order.order_status !== "kept"
     );
@@ -447,6 +487,48 @@ export async function PATCH(req: Request) {
   if (action === "checked" || action === "kept" || action === "packaged") {
     const nextOrderStatus =
       action === "packaged" ? "packaged" : action === "kept" ? "kept" : "checked";
+
+    // [일괄 직배킵 전환 시 최초주문일 복원]
+    // 합배송 이력이 있는 주문은 source_order_dates 전체 중 가장 오래된 날짜로 복원한다.
+    if (action === "kept") {
+      const { data: targetOrders, error: targetError } = await supabase
+        .from("domestic_order")
+        .select("order_id, source_order_dates, first_order_date, created_at")
+        .in("order_id", orderIds);
+
+      if (targetError) {
+        return NextResponse.json(
+          { error: "직배킵 대상 조회 실패", detail: targetError.message },
+          { status: 500 }
+        );
+      }
+
+      for (const order of targetOrders || []) {
+        const restoredFirstOrderDate = oldestSourceDate(order);
+        const updatePayload: Record<string, any> = {
+          order_status: "kept",
+          updated_at: now,
+        };
+
+        if (restoredFirstOrderDate) {
+          updatePayload.first_order_date = restoredFirstOrderDate;
+        }
+
+        const { error } = await supabase
+          .from("domestic_order")
+          .update(updatePayload)
+          .eq("order_id", order.order_id);
+
+        if (error) {
+          return NextResponse.json(
+            { error: "직배킵 처리 실패", detail: error.message },
+            { status: 500 }
+          );
+        }
+      }
+
+      return NextResponse.json({ ok: true });
+    }
 
     const { error } = await supabase
       .from("domestic_order")
