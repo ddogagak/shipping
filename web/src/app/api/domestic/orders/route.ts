@@ -56,7 +56,6 @@ export async function GET() {
       item_summary,
       item_total_price,
       order_status,
-      // [요청상태 추가]
       request_status,
       created_at,
       memo,
@@ -171,7 +170,6 @@ export async function PATCH(req: Request) {
         item_total_price,
         memo,
         order_status,
-        // [요청상태 추가] 합배송 시 대표 주문 값 보존용
         request_status,
         created_at,
         domestic_shipping (
@@ -216,7 +214,27 @@ export async function PATCH(req: Request) {
     );
 
     const base = sorted[0];
-    const nextBaseOrderStatus = base.order_status === "kept" ? "accepted" : base.order_status;
+
+    // [합배송 최초주문일 변경]
+    // 직배킵(order_status = kept) 주문의 날짜는 최초주문일 계산에서 제외한다.
+    // 직배킵이 아닌 주문 중 가장 빠른 주문일을 합배송 후 first_order_date로 사용한다.
+    const nonDirectKeepOrders = sorted.filter(
+      (order: any) => order.order_status !== "kept"
+    );
+
+    const firstActiveOrder = nonDirectKeepOrders[0] || sorted[0];
+    const combinedFirstOrderDate =
+      firstActiveOrder?.first_order_date ||
+      firstActiveOrder?.created_at ||
+      base.first_order_date;
+
+    // [직배킵 + 신규주문 합배송]
+    // 직배킵이 아닌 주문이 하나라도 합쳐지면 대표 주문은 다시 일반 진행상태로 돌린다.
+    const nextBaseOrderStatus =
+      nonDirectKeepOrders.length > 0
+        ? "accepted"
+        : base.order_status;
+
     const mergeTargets = sorted.slice(1);
     const mergeTargetIds = mergeTargets.map((order: any) => order.order_id);
 
@@ -294,10 +312,9 @@ export async function PATCH(req: Request) {
       .update({
         customer_order_no: finalCustomerOrderNo,
         source_order_dates: combinedDates,
-        first_order_date:
-          String(combined.first_order_date ?? "").trim() ||
-          combinedDates[0] ||
-          base.first_order_date,
+        // [합배송 최초주문일 변경]
+        // 직배킵 날짜는 무시하고, 직배킵이 아닌 주문 중 가장 빠른 날짜를 사용
+        first_order_date: combinedFirstOrderDate,
         order_count:
           Number(combined.order_count || 0) ||
           sorted.reduce((sum: number, order: any) => sum + Number(order.order_count || 1), 0),
