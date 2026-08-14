@@ -20,8 +20,6 @@ type PreviewItem = {
   order_number: string;
   order_date: string;
   yen_price: number;
-  currency: string;
-  purchase_price: number;
   shipping_fee: number;
   domestic_shipping_fee: number;
   total_price: number;
@@ -29,8 +27,10 @@ type PreviewItem = {
   image_url: string;
   lineup_image_url: string;
   source_url: string;
-  quantity: number;
+  currency: string;
+  purchase_price: number;
   component_count: number | null;
+  quantity: number;
   status: InventoryStatus;
   memo: string;
   raw_text: string;
@@ -49,7 +49,6 @@ const statusList: InventoryStatus[] = [
 ];
 
 const typeList = ["아크릴", "지류", "뱃지", "피규어", "키링", "기타"];
-const currencyList = ["JPY", "CNY"];
 
 const seriesList = [
   "헌터헌터",
@@ -60,6 +59,8 @@ const seriesList = [
   "기타",
 ];
 
+const currencyList = ["JPY", "CNY"];
+
 const initialManualForm = {
   item_name: "",
   item_type: "기타",
@@ -68,14 +69,13 @@ const initialManualForm = {
   order_date: "",
   currency: "JPY",
   purchase_price: 0,
-  total_price: 0,
   domestic_shipping_fee: 0,
   tracking_number: "",
   image_url: "",
   lineup_image_url: "",
   source_url: "",
-  quantity: 1,
   component_count: 0,
+  quantity: 1,
   status: "입고전" as InventoryStatus,
   memo: "",
 };
@@ -111,10 +111,9 @@ export default function DomesticInventoryInputPage() {
       ...prev,
       [field]:
         field === "purchase_price" ||
-        field === "total_price" ||
+        field === "component_count" ||
         field === "domestic_shipping_fee" ||
-        field === "quantity" ||
-        field === "component_count"
+        field === "quantity"
           ? Number(value)
           : value,
     }));
@@ -146,8 +145,8 @@ export default function DomesticInventoryInputPage() {
       image_url: manualForm.image_url,
       lineup_image_url: manualForm.lineup_image_url,
       source_url: manualForm.source_url,
-      quantity: manualForm.quantity,
       component_count: manualForm.component_count || null,
+      quantity: manualForm.quantity,
       status: manualForm.status,
       memo: manualForm.memo,
       raw_text: "manual",
@@ -170,8 +169,8 @@ export default function DomesticInventoryInputPage() {
 
         if (
           field === "quantity" ||
-          field === "component_count" ||
           field === "purchase_price" ||
+          field === "component_count" ||
           field === "yen_price" ||
           field === "shipping_fee" ||
           field === "domestic_shipping_fee" ||
@@ -299,11 +298,11 @@ export default function DomesticInventoryInputPage() {
               <ManualSelect label="통화" value={manualForm.currency} options={currencyList} onChange={(v) => updateManualForm("currency", v)} />
               <ManualField label={`구매가 (${manualForm.currency})`} type="number" value={String(manualForm.purchase_price)} onChange={(v) => updateManualForm("purchase_price", v)} />
               <ManualField label="박스당 팩 수" type="number" value={String(manualForm.component_count)} onChange={(v) => updateManualForm("component_count", v)} />
-              <ManualField label={manualForm.currency === "CNY" ? "중국내배송비" : "일본내배송비"} type="number" value={String(manualForm.domestic_shipping_fee)} onChange={(v) => updateManualForm("domestic_shipping_fee", v)} />
+              <ManualField label="일본/중국내 배송비" type="number" value={String(manualForm.domestic_shipping_fee)} onChange={(v) => updateManualForm("domestic_shipping_fee", v)} />
               <ManualField label="주문번호" value={manualForm.order_number} onChange={(v) => updateManualForm("order_number", v)} />
               <ManualField label="주문일" value={manualForm.order_date} onChange={(v) => updateManualForm("order_date", v)} />
               <ManualField label="운송장" value={manualForm.tracking_number} onChange={(v) => updateManualForm("tracking_number", v)} />
-              <ManualField label="이미지 URL" value={manualForm.image_url} onChange={(v) => updateManualForm("image_url", v)} />
+              <ManualField label="대표 이미지 URL" value={manualForm.image_url} onChange={(v) => updateManualForm("image_url", v)} />
               <ManualField label="라인업 이미지 URL" value={manualForm.lineup_image_url} onChange={(v) => updateManualForm("lineup_image_url", v)} />
               <ManualField label="소싱 URL" value={manualForm.source_url} onChange={(v) => updateManualForm("source_url", v)} />
               <ManualField label="기타사항 / 등급 / 비율" value={manualForm.memo} onChange={(v) => updateManualForm("memo", v)} />
@@ -439,17 +438,16 @@ MEMO:`}
                   <EditableField label="주문번호" value={item.order_number} onChange={(v) => updateItem(item.local_id, "order_number", v)} />
                   <EditableSelect label="통화" value={item.currency} options={currencyList} onChange={(v) => updateItem(item.local_id, "currency", v)} />
                   <EditableField label={`구매가 (${item.currency})`} value={String(item.purchase_price)} type="number" onChange={(v) => updateItem(item.local_id, "purchase_price", v)} />
-                  <EditableField label={item.currency === "CNY" ? "중국내배송비" : "일본내배송비"} value={String(item.domestic_shipping_fee)} type="number" onChange={(v) => updateItem(item.local_id, "domestic_shipping_fee", v)} />
                 </div>
 
                 <div style={grid4Style}>
                   <EditableField label="박스당 팩 수" value={String(item.component_count ?? "")} type="number" onChange={(v) => updateItem(item.local_id, "component_count", v)} />
-                  <EditableField label="이미지 URL" value={item.image_url} onChange={(v) => updateItem(item.local_id, "image_url", v)} />
+                  <EditableField label="내 배송비" value={String(item.domestic_shipping_fee)} type="number" onChange={(v) => updateItem(item.local_id, "domestic_shipping_fee", v)} />
+                  <EditableField label="대표 이미지 URL" value={item.image_url} onChange={(v) => updateItem(item.local_id, "image_url", v)} />
                   <EditableField label="라인업 이미지 URL" value={item.lineup_image_url} onChange={(v) => updateItem(item.local_id, "lineup_image_url", v)} />
-                  <EditableField label="소싱 URL" value={item.source_url} onChange={(v) => updateItem(item.local_id, "source_url", v)} />
                 </div>
-
                 <div style={grid3Style}>
+                  <EditableField label="소싱 URL" value={item.source_url} onChange={(v) => updateItem(item.local_id, "source_url", v)} />
                   <EditableField label="운송장" value={item.tracking_number} onChange={(v) => updateItem(item.local_id, "tracking_number", v)} />
                   <EditableField label="기타사항 / 등급 / 비율" value={item.memo} onChange={(v) => updateItem(item.local_id, "memo", v)} />
                 </div>
@@ -508,9 +506,9 @@ function parseFixedInventoryText(rawText: string): PreviewItem[] {
       detectItemType(itemName) ||
       "기타";
 
-    const currency = (getField(block, "CURRENCY") || "JPY").toUpperCase();
     const price = toNumber(getField(block, "PRICE"));
     const qty = toNumber(getField(block, "QTY")) || 1;
+    const currency = (getField(block, "CURRENCY") || "JPY").toUpperCase();
     const boxCount = toNumber(getField(block, "BOX_COUNT"));
 
     return {
@@ -532,8 +530,8 @@ function parseFixedInventoryText(rawText: string): PreviewItem[] {
       image_url: getField(block, "IMAGE"),
       lineup_image_url: getField(block, "LINEUP_IMAGE"),
       source_url: getField(block, "SOURCE_URL"),
-      quantity: qty,
       component_count: boxCount || null,
+      quantity: qty,
       status: (getField(block, "STATUS") || orderStatus) as InventoryStatus,
       memo: getField(block, "MEMO"),
       raw_text: block,
