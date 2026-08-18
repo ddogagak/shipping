@@ -57,6 +57,8 @@ const seriesList = [
   "나의히어로아카데미아",
   "프리렌",
   "진격의거인",
+  "치이카와",
+  "나루토",
   "기타",
 ];
 
@@ -678,6 +680,8 @@ function detectSeriesName(text: string) {
   if (lower.includes("my hero academia") || lower.includes("boku no hero") || lower.includes("mha") || text.includes("僕のヒーローアカデミア") || text.includes("ヒロアカ") || text.includes("히로아카")) return "나의히어로아카데미아";
   if (lower.includes("frieren") || text.includes("フリーレン") || text.includes("프리렌")) return "프리렌";
   if (lower.includes("attack on titan") || lower.includes("shingeki") || text.includes("進撃") || text.includes("진격")) return "진격의거인";
+  if (lower.includes("chiikawa") || text.includes("ちいかわ") || text.includes("치이카와")) return "치이카와";
+  if (lower.includes("naruto") || text.includes("ナルト") || text.includes("나루토")) return "나루토";
 
   return "기타";
 }
