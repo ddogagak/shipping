@@ -14,9 +14,13 @@ export async function POST(req: Request) {
 
     const supabase = createServiceRoleClient();
 
+    const downloadName = path.replace(/^\d+_/, "");
+
     const { data, error } = await supabase.storage
       .from("archive-files")
-      .createSignedUrl(path, 60);
+      .createSignedUrl(path, 60, {
+        download: downloadName || true,
+      });
 
     if (error) {
       return NextResponse.json(
