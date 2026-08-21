@@ -124,17 +124,17 @@ export default function ArchivePage() {
       <section style={cardStyle}>
         <h1 style={{ marginTop: 0, marginBottom: 8 }}>보관소</h1>
         <p style={{ color: "#6b7280", margin: 0 }}>
-          PDF / 엑셀 / ZIP / HWP 파일을 간단히 업로드하고 내려받는 공간입니다.
+          PDF / 엑셀 / ZIP / HWP / 이미지 파일을 간단히 업로드하고 내려받는 공간입니다.
         </p>
 
         <label style={uploadBoxStyle}>
           <strong>파일 업로드</strong>
           <span style={{ color: "#6b7280", marginTop: 6 }}>
-            PDF, XLS, XLSX, ZIP, HWP, HWPX 파일 가능
+            PDF, XLS, XLSX, ZIP, HWP, HWPX, JPG, PNG, WEBP, GIF, HEIC 파일 가능
           </span>
           <input
             type="file"
-            accept=".pdf,.xls,.xlsx,.zip,.hwp,.hwpx"
+            accept=".pdf,.xls,.xlsx,.zip,.hwp,.hwpx,.jpg,.jpeg,.png,.webp,.gif,.heic,.heif,image/*"
             style={{ display: "none" }}
             disabled={loading}
             onChange={(event) => {
