@@ -3,36 +3,116 @@ import { createServiceRoleClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
+const ALLOWED_EXTENSIONS = [
+  ".pdf",
+  ".xls",
+  ".xlsx",
+  ".zip",
+  ".hwp",
+  ".hwpx",
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+  ".gif",
+  ".heic",
+  ".heif",
+];
+
+const ALLOWED_TYPES = [
+  "application/pdf",
+
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+
+  "application/zip",
+  "application/x-zip-compressed",
+
+  "application/x-hwp",
+  "application/hwp",
+  "application/haansofthwp",
+  "application/haansofthwpx",
+
+  "application/octet-stream",
+
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/heic",
+  "image/heif",
+];
+
+function safeFileName(name: string) {
+  return name.replace(/[^\w.\-가-힣\s]/g, "_");
+}
+
+function getExtension(name: string) {
+  const index = name.lastIndexOf(".");
+  if (index < 0) return "";
+  return name.slice(index).toLowerCase();
+}
+
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const path = String(body.path || "");
+    const form = await req.formData();
+    const file = form.get("file");
 
-    if (!path) {
-      return NextResponse.json({ error: "파일 경로가 없어." }, { status: 400 });
+    if (!(file instanceof File)) {
+      return NextResponse.json({ error: "파일이 없어." }, { status: 400 });
+    }
+
+    const extension = getExtension(file.name);
+
+    if (!ALLOWED_EXTENSIONS.includes(extension)) {
+      return NextResponse.json(
+        {
+          error: "PDF, XLS, XLSX, ZIP, HWP, HWPX 및 이미지(JPG, PNG, WEBP, GIF, HEIC) 파일을 업로드할 수 있어.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (file.type && !ALLOWED_TYPES.includes(file.type)) {
+      return NextResponse.json(
+        {
+          error: "PDF, XLS, XLSX, ZIP, HWP, HWPX 및 이미지(JPG, PNG, WEBP, GIF, HEIC) 파일을 업로드할 수 있어.",
+          detail: `허용되지 않은 파일 형식: ${file.type}`,
+        },
+        { status: 400 }
+      );
     }
 
     const supabase = createServiceRoleClient();
 
-    const downloadName = path.replace(/^\d+_/, "");
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const fileName = safeFileName(file.name);
+    const path = `${Date.now()}_${fileName}`;
 
-    const { data, error } = await supabase.storage
+    const contentType =
+      file.type ||
+      (extension === ".zip" || extension === ".hwpx"
+        ? "application/zip"
+        : "application/octet-stream");
+
+    const { error } = await supabase.storage
       .from("archive-files")
-      .createSignedUrl(path, 60, {
-        download: downloadName || true,
+      .upload(path, buffer, {
+        contentType,
+        upsert: false,
       });
 
     if (error) {
       return NextResponse.json(
-        { error: "다운로드 링크 생성 실패", detail: error.message },
+        { error: "업로드 실패", detail: error.message },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ ok: true, url: data.signedUrl });
+    return NextResponse.json({ ok: true, path });
   } catch (error: any) {
     return NextResponse.json(
-      { error: "다운로드 처리 중 오류", detail: error?.message },
+      { error: "업로드 처리 중 오류", detail: error?.message },
       { status: 500 }
     );
   }
