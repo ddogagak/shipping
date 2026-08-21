@@ -41,6 +41,8 @@ const ALLOWED_TYPES = [
   "image/gif",
   "image/heic",
   "image/heif",
+  "image/heic-sequence",
+  "image/heif-sequence",
 ];
 
 function safeFileName(name: string) {
@@ -67,7 +69,7 @@ export async function POST(req: Request) {
     if (!ALLOWED_EXTENSIONS.includes(extension)) {
       return NextResponse.json(
         {
-          error: "PDF, XLS, XLSX, ZIP, HWP, HWPX 및 이미지(JPG, PNG, WEBP, GIF, HEIC) 파일을 업로드할 수 있어.",
+          error: "PDF, XLS, XLSX, ZIP, HWP, HWPX, JPG, PNG, WEBP, GIF, HEIC 파일만 업로드 가능해.",
         },
         { status: 400 }
       );
@@ -76,7 +78,7 @@ export async function POST(req: Request) {
     if (file.type && !ALLOWED_TYPES.includes(file.type)) {
       return NextResponse.json(
         {
-          error: "PDF, XLS, XLSX, ZIP, HWP, HWPX 및 이미지(JPG, PNG, WEBP, GIF, HEIC) 파일을 업로드할 수 있어.",
+          error: "PDF, XLS, XLSX, ZIP, HWP, HWPX, JPG, PNG, WEBP, GIF, HEIC 파일만 업로드 가능해.",
           detail: `허용되지 않은 파일 형식: ${file.type}`,
         },
         { status: 400 }
