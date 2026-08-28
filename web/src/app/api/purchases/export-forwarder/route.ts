@@ -38,17 +38,17 @@ function setCell(ws: XLSX.WorkSheet, rowNumber: number, columnIndex: number, val
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const ids: string[] = Array.isArray(body.ids) ? body.ids : [];
-    const supabase = createServiceRoleClient();
+    const ids: string[] = Array.isArray(body.ids) ? body.ids.filter(Boolean) : [];
+    if (ids.length === 0) {
+      return NextResponse.json({ ok: false, message: "배대지 엑셀로 추출할 주문을 체크해줘." }, { status: 400 });
+    }
 
-    let query = supabase
+    const supabase = createServiceRoleClient();
+    const { data: orders, error } = await supabase
       .from("purchase_orders")
       .select("*, purchase_items(*)")
-      .eq("country", "CN");
-
-    if (ids.length > 0) query = query.in("id", ids);
-
-    const { data: orders, error } = await query;
+      .eq("country", "CN")
+      .in("id", ids);
     if (error) throw error;
 
     const { data: sourcingRows, error: sourcingError } = await supabase
@@ -58,7 +58,6 @@ export async function POST(req: Request) {
 
     const sourcingById = new Map<string, any>();
     const sourcingByProductId = new Map<string, any>();
-
     for (const row of sourcingRows ?? []) {
       sourcingById.set(String(row.id), row);
       const productId = extractSourceProductId(row.source_url);
@@ -66,16 +65,13 @@ export async function POST(req: Request) {
     }
 
     const templatePath = path.join(process.cwd(), "public/templates/basic_upload_sample_ko.xlsx");
-    if (!fs.existsSync(templatePath)) {
-      throw new Error("배대지 템플릿이 없어. public/templates/basic_upload_sample_ko.xlsx 경로를 확인해줘.");
-    }
+    if (!fs.existsSync(templatePath)) throw new Error("배대지 템플릿이 없어. public/templates/basic_upload_sample_ko.xlsx 경로를 확인해줘.");
 
     const workbook = XLSX.read(fs.readFileSync(templatePath), { type: "buffer" });
     const worksheet = workbook.Sheets["업로드"];
     if (!worksheet) throw new Error("배대지 템플릿에 '업로드' 시트가 없어.");
 
     let rowNumber = 2;
-
     for (const order of orders ?? []) {
       for (const item of order.purchase_items ?? []) {
         const customs = classifyCustomsItem(String(item.product_name || ""), String(item.option_text || ""));
@@ -85,40 +81,15 @@ export async function POST(req: Request) {
           (productId ? sourcingByProductId.get(productId) : null);
         const imageUrl = String(item.image_url || "").trim() || String(sourcing?.image_url || "").trim();
 
-        // A~AF: 사용자 지정 배대지 업로드 고정 매핑
         const values: Array<string | number> = [
-          customs.name,                              // A 상품명(영문)
-          customs.code,                              // B 품목분류코드
-          "",                                        // C 색상
-          "",                                        // D 사이즈
-          String(order.order_number || ""),          // E 주문번호
-          Number(item.unit_price || 0),              // F 단가
-          Number(item.quantity || 1),                // G 수량
-          String(order.order_number || ""),          // H 관리코드
-          String(item.product_name || ""),           // I 상품코드 = 중국어 상품명
-          1,                                         // J 포장박스수량
-          String(item.product_url || ""),            // K 상품URL
-          imageUrl,                                   // L 이미지URL
-          "",                                        // M 쇼핑몰명
-          "",                                        // N 쇼핑몰명(기타)
-          "",                                        // O 쇼핑몰관리번호
-          "",                                        // P 요청메시지
-          "",                                        // Q 원산지작업
-          "",                                        // R 포장보완
-          "",                                        // S 정밀검수
-          "케이템즈",                                 // T 수취인명
-          "KTEMS",                                   // U 수취인영문이름
-          "010-6452-8842",                           // V 휴대폰번호
-          "케이템즈5212011",                          // W 개인통관고유부호/사업자등록번호
-          "06736",                                   // X 우편번호
-          "서울 서초구 강남대로 224 (양재동, 양재한신휴플러스) B1층 에이-24호", // Y 주소
-          "",                                        // Z 상세주소
-          "",                                        // AA 택배사 요청사항
-          "",                                        // AB 자동배송요청
-          "",                                        // AC 팀머니 자동결제
-          "",                                        // AD 사업자 출고 알림톡
-          1,                                         // AE 검수
-          1,                                         // AF 포장
+          customs.name, customs.code, "", "",
+          String(order.order_number || ""), Number(item.unit_price || 0), Number(item.quantity || 1),
+          String(order.order_number || ""), String(item.product_name || ""), 1,
+          String(item.product_url || ""), imageUrl,
+          "", "", "", "", "", "", "",
+          "케이템즈", "KTEMS", "010-6452-8842", "케이템즈5212011", "06736",
+          "서울 서초구 강남대로 224 (양재동, 양재한신휴플러스) B1층 에이-24호",
+          "", "", "", "", "", 1, 1,
         ];
 
         values.forEach((value, columnIndex) => setCell(worksheet, rowNumber, columnIndex, value));
@@ -127,8 +98,15 @@ export async function POST(req: Request) {
     }
 
     worksheet["!ref"] = `A1:AF${Math.max(1, rowNumber - 1)}`;
-
     const output = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+
+    // 엑셀 생성에 성공한 선택 주문만 배대지 단계로 전환한다.
+    const { error: statusError } = await supabase
+      .from("purchase_orders")
+      .update({ order_status: "배대지" })
+      .in("id", ids);
+    if (statusError) throw statusError;
+
     return new NextResponse(output, {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
