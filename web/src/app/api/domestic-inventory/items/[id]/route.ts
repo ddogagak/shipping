@@ -55,3 +55,41 @@ export async function PATCH(
     );
   }
 }
+
+export async function DELETE(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const supabase = createServiceRoleClient();
+
+    const { data, error } = await supabase
+      .from("inventory_items")
+      .delete()
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
+
+    if (error) {
+      return NextResponse.json(
+        { ok: false, message: error.message },
+        { status: 500 }
+      );
+    }
+
+    if (!data) {
+      return NextResponse.json(
+        { ok: false, message: "삭제할 재고를 찾을 수 없습니다." },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ ok: true, id: data.id });
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, message: error instanceof Error ? error.message : "삭제 실패" },
+      { status: 500 }
+    );
+  }
+}
