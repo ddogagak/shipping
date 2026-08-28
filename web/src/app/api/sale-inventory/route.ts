@@ -38,7 +38,6 @@ export async function GET() {
       const productId = String(item.source_product_id || "") || extractSourceProductId(item.product_url) || "";
       const sourcing = (item.sourcing_inventory_id ? sourcingById.get(String(item.sourcing_inventory_id)) : null) || (productId ? sourcingByProductId.get(productId) : null);
       const ledger:any = ledgerByItemId.get(String(item.id));
-      // 매입 수량은 박스 수량 그대로 관리한다. 박스당 구성 수는 가격 계산에만 사용한다.
       const boxQuantity = Math.max(0, Number(item.received_quantity ?? item.quantity ?? 0));
       const pricing = pricingFromSourcing(sourcing);
 
@@ -46,7 +45,9 @@ export async function GET() {
         id:item.id, order_id:order.id, order_number:order.order_number, ordered_at:order.ordered_at, shop_name:order.shop_name,
         product_name:item.product_name, display_name:item.display_name_ko || sourcing?.item_name || item.product_name,
         option_text:item.option_text, product_url:item.product_url, purchase_quantity:boxQuantity, unit_price:item.unit_price,
-        image_url:item.image_url || sourcing?.image_url || null, lineup_image_url:sourcing?.lineup_image_url || null,
+        sourcing_inventory_id:sourcing?.id || null,
+        image_url:item.image_url || sourcing?.image_url || null,
+        lineup_image_url:sourcing?.lineup_image_url || null,
         series_name:sourcing?.series_name || null, item_type:sourcing?.item_type || null, memo:sourcing?.memo || null,
         sourcing_currency:sourcing?.currency || null,
         sourcing_purchase_price:Number(sourcing?.purchase_price || 0),
@@ -74,6 +75,15 @@ export async function PATCH(req:Request) {
     const body=await req.json();
     if(!body.purchase_item_id) return NextResponse.json({ok:false,message:"상품 ID가 없습니다."},{status:400});
     const sb=createServiceRoleClient();
+
+    if (body.sourcing_inventory_id && Object.prototype.hasOwnProperty.call(body, "image_url")) {
+      const { error: imageError } = await sb
+        .from("inventory_items")
+        .update({ image_url: String(body.image_url || "").trim() || null })
+        .eq("id", body.sourcing_inventory_id);
+      if (imageError) throw imageError;
+    }
+
     const remaining=Math.max(0,Math.trunc(Number(body.remaining_quantity ?? 0)));
     const sold=Math.max(0,Math.trunc(Number(body.sold_quantity ?? 0)));
     const status=body.stock_status === "soldout" || remaining === 0 ? "soldout" : "active";
@@ -88,7 +98,7 @@ export async function PATCH(req:Request) {
     };
     const {data,error}=await sb.from("purchase_sale_inventory").upsert(payload,{onConflict:"purchase_item_id"}).select().single();
     if(error) throw error;
-    return NextResponse.json({ok:true,item:data});
+    return NextResponse.json({ok:true,item:{...data,image_url:String(body.image_url || "").trim() || null}});
   } catch(e) {
     return NextResponse.json({ok:false,message:e instanceof Error?e.message:"판매재고 저장 실패"},{status:500});
   }
