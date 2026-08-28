@@ -4,13 +4,6 @@ import { extractSourceProductId } from "@/lib/purchases/product-id";
 
 export const runtime = "nodejs";
 
-/**
- * 매입 목록 조회
- * GET /api/purchases
- *
- * 상품 URL의 product id를 기준으로 sourcing inventory와 매칭해서
- * 한국어 상품명/이미지/시리즈/타입을 화면용으로 함께 내려준다.
- */
 export async function GET() {
   try {
     const sb = createServiceRoleClient();
@@ -74,45 +67,42 @@ export async function GET() {
       }),
     }));
 
-    return NextResponse.json({
-      ok: true,
-      orders,
-    });
+    return NextResponse.json({ ok: true, orders });
   } catch (e) {
     return NextResponse.json(
       {
         ok: false,
-        message:
-          e instanceof Error
-            ? e.message
-            : "매입 목록을 불러오지 못했습니다.",
+        message: e instanceof Error ? e.message : "매입 목록을 불러오지 못했습니다.",
       },
       { status: 500 }
     );
   }
 }
 
-/**
- * 매입 주문 / 상품 수정
- * PATCH /api/purchases
- */
 export async function PATCH(req: Request) {
   try {
     const body = await req.json();
     const sb = createServiceRoleClient();
 
-    // 상품 단위 저장
+    // 상품 단위 수정. 원 중국어 상품명과 가격은 수정하지 않는다.
     if (body.item_id) {
       const updateData: Record<string, unknown> = {};
 
       if (body.display_name_ko !== undefined) {
         updateData.display_name_ko = String(body.display_name_ko || "").trim() || null;
       }
-
+      if (body.option_text !== undefined) {
+        updateData.option_text = String(body.option_text || "").trim() || null;
+      }
+      if (body.quantity !== undefined) {
+        updateData.quantity = Math.max(1, Number(body.quantity || 1));
+      }
+      if (body.product_url !== undefined) {
+        updateData.product_url = String(body.product_url || "").trim() || null;
+      }
       if (body.sourcing_inventory_id !== undefined) {
         updateData.sourcing_inventory_id = body.sourcing_inventory_id || null;
       }
-
       if (body.source_product_id !== undefined) {
         updateData.source_product_id = body.source_product_id || null;
       }
@@ -125,30 +115,23 @@ export async function PATCH(req: Request) {
         .single();
 
       if (itemError) throw itemError;
-
       return NextResponse.json({ ok: true, item });
     }
 
-    // 주문 단위 저장
     if (!body.id) {
       return NextResponse.json(
-        {
-          ok: false,
-          message: "매입 주문 ID가 없습니다.",
-        },
+        { ok: false, message: "매입 주문 ID가 없습니다." },
         { status: 400 }
       );
     }
 
+    // 주문일/판매자/가격은 원본 유지. 그 외 관리 필드는 수정 가능.
     const updateData: Record<string, unknown> = {};
-
-    if (body.order_status !== undefined) {
-      updateData.order_status = body.order_status;
-    }
-
-    if (body.memo !== undefined) {
-      updateData.memo = body.memo;
-    }
+    if (body.order_number !== undefined) updateData.order_number = String(body.order_number || "").trim();
+    if (body.order_status !== undefined) updateData.order_status = body.order_status;
+    if (body.tracking_company !== undefined) updateData.tracking_company = String(body.tracking_company || "").trim() || null;
+    if (body.tracking_number !== undefined) updateData.tracking_number = String(body.tracking_number || "").trim() || null;
+    if (body.memo !== undefined) updateData.memo = String(body.memo || "").trim() || null;
 
     const { data: order, error } = await sb
       .from("purchase_orders")
@@ -158,19 +141,12 @@ export async function PATCH(req: Request) {
       .single();
 
     if (error) throw error;
-
-    return NextResponse.json({
-      ok: true,
-      order,
-    });
+    return NextResponse.json({ ok: true, order });
   } catch (e) {
     return NextResponse.json(
       {
         ok: false,
-        message:
-          e instanceof Error
-            ? e.message
-            : "매입 정보를 수정하지 못했습니다.",
+        message: e instanceof Error ? e.message : "매입 정보를 수정하지 못했습니다.",
       },
       { status: 500 }
     );
