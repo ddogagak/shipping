@@ -1,5 +1,5 @@
 -- Backfill stable management SKUs for existing sourcing inventory.
--- Rule: blank option_seq means the source product is not duplicated, so treat it as option 01.
+-- Rule: blank option_seq means the source product is not duplicated, so treat it as option 00.
 -- For duplicated source products, the manually entered option_seq is preserved.
 
 with parsed as (
@@ -50,7 +50,7 @@ with parsed as (
       substring(source_url from '(?i)/item/([0-9]+)(?:\\.html)?'),
       substring(source_url from '(?i)/([0-9]{6,})(?:\\.html)?(?:[?#]|$)')
     ) as product_id,
-    coalesce(option_seq, 1) as resolved_option_seq
+    coalesce(option_seq, 0) as resolved_option_seq
   from public.inventory_items
 ), ready as (
   select
@@ -62,7 +62,7 @@ with parsed as (
     site_code || '-' || series_code || '-' || regexp_replace(product_id, '[^A-Za-z0-9]', '', 'g') || '-' || lpad(resolved_option_seq::text, 2, '0') as sku
   from parsed
   where product_id is not null
-    and resolved_option_seq > 0
+    and resolved_option_seq >= 0
 )
 update public.inventory_items i
 set
