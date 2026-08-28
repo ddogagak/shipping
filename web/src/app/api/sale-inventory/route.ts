@@ -10,11 +10,7 @@ function pricingFromPurchase(unitPrice: number, currency: string, componentCount
   const rate = EXCHANGE_RATE[currency] ?? EXCHANGE_RATE.CNY;
   const purchase = Math.max(0, Number(unitPrice || 0));
   const componentCount = Math.max(0, Math.trunc(Number(componentCountRaw || 0)));
-
-  // 실제 매입 상품의 박스 1개 단가를 기준으로 기존 인벤토리 계산식을 적용한다.
-  // 판매원가 = 실제 매입가 × 환율 × 1.2 + 5,000원
   const boxCost = purchase > 0 ? Math.round(purchase * rate * 1.2 + 5000) : 0;
-  // 최소마진가격 = 판매원가 × 1.1 × 1.07 + 10,000원
   const minimumMarginPrice = boxCost > 0 ? Math.round(boxCost * 1.1 * 1.07 + 10000) : 0;
   const unitCostPrice = componentCount > 0 ? Math.ceil(boxCost / componentCount) : 0;
   const unitSalePrice = componentCount > 0 ? Math.ceil(minimumMarginPrice / componentCount) : 0;
@@ -90,12 +86,32 @@ export async function PATCH(req:Request) {
     if(!body.purchase_item_id) return NextResponse.json({ok:false,message:"상품 ID가 없습니다."},{status:400});
     const sb=createServiceRoleClient();
 
-    if (body.sourcing_inventory_id && Object.prototype.hasOwnProperty.call(body, "image_url")) {
-      const { error: imageError } = await sb
-        .from("inventory_items")
-        .update({ image_url: String(body.image_url || "").trim() || null })
-        .eq("id", body.sourcing_inventory_id);
-      if (imageError) throw imageError;
+    const hasImage = Object.prototype.hasOwnProperty.call(body, "image_url");
+    const imageUrl = hasImage ? (String(body.image_url || "").trim() || null) : undefined;
+
+    if (hasImage) {
+      // 판매재고에서 바꾼 대표이미지는 현재 상품만이 아니라
+      // 원본 상품명 + 옵션명이 같은 모든 매입 상품에 동일하게 반영한다.
+      // GET에서 purchase_items.image_url을 sourcing 이미지보다 우선하므로
+      // 이 값을 함께 갱신해야 새로고침 후 예전 이미지로 원복되지 않는다.
+      const productName = String(body.product_name || "").trim();
+      const optionText = String(body.option_text || "").trim();
+
+      if (productName) {
+        let matchingQuery = sb.from("purchase_items").update({ image_url: imageUrl }).eq("product_name", productName);
+        matchingQuery = optionText ? matchingQuery.eq("option_text", optionText) : matchingQuery.or("option_text.is.null,option_text.eq.");
+        const { error: matchingImageError } = await matchingQuery;
+        if (matchingImageError) throw matchingImageError;
+      } else {
+        const { error: currentImageError } = await sb.from("purchase_items").update({ image_url: imageUrl }).eq("id", body.purchase_item_id);
+        if (currentImageError) throw currentImageError;
+      }
+
+      // 연결된 소싱 인벤토리의 대표이미지도 같이 갱신한다.
+      if (body.sourcing_inventory_id) {
+        const { error: sourcingImageError } = await sb.from("inventory_items").update({ image_url: imageUrl }).eq("id", body.sourcing_inventory_id);
+        if (sourcingImageError) throw sourcingImageError;
+      }
     }
 
     const remaining=Math.max(0,Math.trunc(Number(body.remaining_quantity ?? 0)));
@@ -112,7 +128,7 @@ export async function PATCH(req:Request) {
     };
     const {data,error}=await sb.from("purchase_sale_inventory").upsert(payload,{onConflict:"purchase_item_id"}).select().single();
     if(error) throw error;
-    return NextResponse.json({ok:true,item:{...data,image_url:String(body.image_url || "").trim() || null}});
+    return NextResponse.json({ok:true,item:{...data,...(hasImage?{image_url:imageUrl}:{})}});
   } catch(e) {
     return NextResponse.json({ok:false,message:e instanceof Error?e.message:"판매재고 저장 실패"},{status:500});
   }
