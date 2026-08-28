@@ -4,12 +4,21 @@ import { extractSourceProductId } from "@/lib/purchases/product-id";
 
 export const runtime = "nodejs";
 
+function pricingFromSourcing(sourcing: any) {
+  const boxCost = Math.max(0, Number(sourcing?.total_price || 0));
+  const componentCount = Math.max(0, Math.trunc(Number(sourcing?.component_count || 0)));
+  const minimumMarginPrice = boxCost > 0 ? Math.round(boxCost * 1.1 * 1.07 + 10000) : 0;
+  const unitCostPrice = componentCount > 0 ? Math.ceil(boxCost / componentCount) : 0;
+  const unitSalePrice = Number(sourcing?.unit_sale_price || 0) || (componentCount > 0 ? Math.ceil(minimumMarginPrice / componentCount) : 0);
+  return { boxCost, componentCount, minimumMarginPrice, unitCostPrice, unitSalePrice };
+}
+
 export async function GET() {
   try {
     const sb = createServiceRoleClient();
     const [{ data: orders, error }, { data: sourcingRows, error: sourcingError }, { data: ledgers, error: ledgerError }] = await Promise.all([
       sb.from("purchase_orders").select("id,order_number,ordered_at,shop_name,purchase_items(*)").eq("order_status", "입고완료").order("ordered_at", { ascending: false }),
-      sb.from("inventory_items").select("id,item_name,item_type,series_name,image_url,lineup_image_url,source_url,memo"),
+      sb.from("inventory_items").select("id,item_name,item_type,series_name,image_url,lineup_image_url,source_url,memo,currency,purchase_price,total_price,component_count,unit_sale_price"),
       sb.from("purchase_sale_inventory").select("*"),
     ]);
     if (error) throw error;
@@ -29,15 +38,26 @@ export async function GET() {
       const productId = String(item.source_product_id || "") || extractSourceProductId(item.product_url) || "";
       const sourcing = (item.sourcing_inventory_id ? sourcingById.get(String(item.sourcing_inventory_id)) : null) || (productId ? sourcingByProductId.get(productId) : null);
       const ledger:any = ledgerByItemId.get(String(item.id));
-      const originalQty = Number(item.received_quantity ?? item.quantity ?? 0);
+      const boxQuantity = Math.max(0, Number(item.received_quantity ?? item.quantity ?? 0));
+      const pricing = pricingFromSourcing(sourcing);
+      const initialPieceQuantity = pricing.componentCount > 0 ? boxQuantity * pricing.componentCount : boxQuantity;
+
       return {
         id:item.id, order_id:order.id, order_number:order.order_number, ordered_at:order.ordered_at, shop_name:order.shop_name,
         product_name:item.product_name, display_name:item.display_name_ko || sourcing?.item_name || item.product_name,
-        option_text:item.option_text, product_url:item.product_url, purchase_quantity:originalQty, unit_price:item.unit_price,
+        option_text:item.option_text, product_url:item.product_url, purchase_quantity:boxQuantity, unit_price:item.unit_price,
         image_url:item.image_url || sourcing?.image_url || null, lineup_image_url:sourcing?.lineup_image_url || null,
         series_name:sourcing?.series_name || null, item_type:sourcing?.item_type || null, memo:sourcing?.memo || null,
+        sourcing_currency:sourcing?.currency || null,
+        sourcing_purchase_price:Number(sourcing?.purchase_price || 0),
+        component_count:pricing.componentCount,
+        total_piece_quantity:initialPieceQuantity,
+        box_cost_price:pricing.boxCost,
+        minimum_margin_price:pricing.minimumMarginPrice,
+        unit_cost_price:pricing.unitCostPrice,
+        recommended_unit_sale_price:pricing.unitSalePrice,
         sale_price:ledger?.sale_price ?? null,
-        remaining_quantity:ledger ? Number(ledger.remaining_quantity || 0) : originalQty,
+        remaining_quantity:ledger ? Number(ledger.remaining_quantity || 0) : initialPieceQuantity,
         sold_quantity:ledger ? Number(ledger.sold_quantity || 0) : 0,
         stock_status:ledger?.stock_status || "active",
         sale_memo:ledger?.sale_memo || "",
