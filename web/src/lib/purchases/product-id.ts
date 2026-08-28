@@ -4,7 +4,7 @@ export function extractSourceProductId(rawUrl: string | null | undefined): strin
 
   try {
     const url = new URL(raw);
-    const queryKeys = ["id", "itemId", "item_id", "offerId", "offer_id", "goodsId", "goods_id"];
+    const queryKeys = ["gcode", "scode", "id", "itemId", "item_id", "offerId", "offer_id", "goodsId", "goods_id"];
     for (const key of queryKeys) {
       const value = url.searchParams.get(key)?.trim();
       if (value && /^[A-Za-z0-9_-]+$/.test(value)) return value;
@@ -20,7 +20,7 @@ export function extractSourceProductId(rawUrl: string | null | undefined): strin
       if (match?.[1]) return match[1];
     }
   } catch {
-    const match = raw.match(/[?&](?:id|itemId|item_id|offerId|offer_id|goodsId|goods_id)=([A-Za-z0-9_-]+)/i)
+    const match = raw.match(/[?&](?:gcode|scode|id|itemId|item_id|offerId|offer_id|goodsId|goods_id)=([A-Za-z0-9_-]+)/i)
       ?? raw.match(/\/offer\/(\d+)\.html/i)
       ?? raw.match(/\/(\d{6,})(?:\.html)?(?:[?#]|$)/i);
     if (match?.[1]) return match[1];
