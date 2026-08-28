@@ -15,6 +15,18 @@ export function getSeriesCode(seriesName: unknown) {
   return SERIES_CODE[String(seriesName || "기타")] || "ETC";
 }
 
+function fallbackSiteCode(urlRaw: unknown) {
+  try {
+    const hostname = new URL(String(urlRaw || "")).hostname
+      .toLowerCase()
+      .replace(/^www\./, "");
+    const name = hostname.split(".")[0].replace(/[^a-z0-9]/g, "");
+    return (name.slice(0, 2) || "ET").toUpperCase();
+  } catch {
+    return "ET";
+  }
+}
+
 export function getSourceSiteCode(urlRaw: unknown) {
   const raw = String(urlRaw || "").toLowerCase();
   if (raw.includes("taobao.com")) return "TB";
@@ -26,16 +38,17 @@ export function getSourceSiteCode(urlRaw: unknown) {
   if (raw.includes("jumpcs") || raw.includes("jumpcs.shueisha")) return "JC";
   if (raw.includes("ensky")) return "ES";
   if (raw.includes("amnibus")) return "AM";
+  if (raw.includes("superdelivery")) return "SD";
+  if (raw.includes("hobbystock")) return "HS";
   if (raw.includes("maxlimited")) return "ML";
   if (raw.includes("pochimart")) return "PM";
-  if (raw.includes("hobbystock")) return "HS";
   if (raw.includes("metal-box")) return "MB";
   if (raw.includes("colleize")) return "CL";
   if (raw.includes("syokugan-ohkoku")) return "SO";
   if (raw.includes("mile-stone")) return "MS";
   if (raw.includes("mercari")) return "MC";
   if (raw.includes("amazon.co.jp")) return "AZ";
-  return "ETC";
+  return fallbackSiteCode(urlRaw);
 }
 
 export function getSourceProductKey(urlRaw: unknown) {
@@ -57,9 +70,9 @@ export function buildInternalSku(args: {
   productId: string;
   optionSeq: number;
 }) {
-  const site = String(args.sourceSiteCode || "ETC").toUpperCase();
+  const site = String(args.sourceSiteCode || "ET").toUpperCase();
   const series = String(args.seriesCode || "ETC").toUpperCase();
   const product = String(args.productId || "UNKNOWN").replace(/[^a-zA-Z0-9]/g, "");
-  const option = Math.max(1, Math.trunc(Number(args.optionSeq || 1))).toString().padStart(2, "0");
+  const option = Math.max(0, Math.trunc(Number(args.optionSeq ?? 0))).toString().padStart(2, "0");
   return `${site}-${series}-${product}-${option}`;
 }
