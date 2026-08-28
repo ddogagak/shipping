@@ -88,15 +88,14 @@ export async function PATCH(req:Request) {
 
     const hasImage = Object.prototype.hasOwnProperty.call(body, "image_url");
     const imageUrl = hasImage ? (String(body.image_url || "").trim() || null) : undefined;
+    const hasDisplayName = Object.prototype.hasOwnProperty.call(body, "display_name");
+    const displayName = hasDisplayName ? (String(body.display_name || "").trim() || null) : undefined;
+    const hasComponentCount = Object.prototype.hasOwnProperty.call(body, "component_count");
+    const componentCount = hasComponentCount ? Math.max(0, Math.trunc(Number(body.component_count || 0))) : undefined;
 
     if (hasImage) {
-      // 판매재고에서 바꾼 대표이미지는 현재 상품만이 아니라
-      // 원본 상품명 + 옵션명이 같은 모든 매입 상품에 동일하게 반영한다.
-      // GET에서 purchase_items.image_url을 sourcing 이미지보다 우선하므로
-      // 이 값을 함께 갱신해야 새로고침 후 예전 이미지로 원복되지 않는다.
       const productName = String(body.product_name || "").trim();
       const optionText = String(body.option_text || "").trim();
-
       if (productName) {
         let matchingQuery = sb.from("purchase_items").update({ image_url: imageUrl }).eq("product_name", productName);
         matchingQuery = optionText ? matchingQuery.eq("option_text", optionText) : matchingQuery.or("option_text.is.null,option_text.eq.");
@@ -106,12 +105,20 @@ export async function PATCH(req:Request) {
         const { error: currentImageError } = await sb.from("purchase_items").update({ image_url: imageUrl }).eq("id", body.purchase_item_id);
         if (currentImageError) throw currentImageError;
       }
+    }
 
-      // 연결된 소싱 인벤토리의 대표이미지도 같이 갱신한다.
-      if (body.sourcing_inventory_id) {
-        const { error: sourcingImageError } = await sb.from("inventory_items").update({ image_url: imageUrl }).eq("id", body.sourcing_inventory_id);
-        if (sourcingImageError) throw sourcingImageError;
-      }
+    if (hasDisplayName) {
+      const { error: titleError } = await sb.from("purchase_items").update({ display_name_ko: displayName }).eq("id", body.purchase_item_id);
+      if (titleError) throw titleError;
+    }
+
+    if (body.sourcing_inventory_id && (hasImage || hasDisplayName || hasComponentCount)) {
+      const sourcingUpdate:any = {};
+      if (hasImage) sourcingUpdate.image_url = imageUrl;
+      if (hasDisplayName) sourcingUpdate.item_name = displayName;
+      if (hasComponentCount) sourcingUpdate.component_count = componentCount || null;
+      const { error: sourcingError } = await sb.from("inventory_items").update(sourcingUpdate).eq("id", body.sourcing_inventory_id);
+      if (sourcingError) throw sourcingError;
     }
 
     const remaining=Math.max(0,Math.trunc(Number(body.remaining_quantity ?? 0)));
@@ -128,7 +135,9 @@ export async function PATCH(req:Request) {
     };
     const {data,error}=await sb.from("purchase_sale_inventory").upsert(payload,{onConflict:"purchase_item_id"}).select().single();
     if(error) throw error;
-    return NextResponse.json({ok:true,item:{...data,...(hasImage?{image_url:imageUrl}:{})}});
+
+    const pricing = pricingFromPurchase(Number(body.actual_purchase_unit_price || 0), String(body.actual_purchase_currency || "CNY"), componentCount ?? body.component_count);
+    return NextResponse.json({ok:true,item:{...data,...(hasImage?{image_url:imageUrl}:{}),...(hasDisplayName?{display_name:displayName}:{}),...(hasComponentCount?{component_count:pricing.componentCount,box_cost_price:pricing.boxCost,minimum_margin_price:pricing.minimumMarginPrice,unit_cost_price:pricing.unitCostPrice,recommended_unit_sale_price:pricing.unitSalePrice}:{})}});
   } catch(e) {
     return NextResponse.json({ok:false,message:e instanceof Error?e.message:"판매재고 저장 실패"},{status:500});
   }
