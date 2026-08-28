@@ -1,0 +1,4 @@
+import { NextResponse } from "next/server";
+import { createServiceRoleClient } from "@/lib/supabase/server";
+export async function GET(){ const sb=createServiceRoleClient(); const {data,error}=await sb.from("purchase_orders").select("*, purchase_items(*), purchase_costs(*), purchase_files(*)").order("ordered_at",{ascending:false}); return NextResponse.json(error?{ok:false,message:error.message}:{ok:true,orders:data??[]},{status:error?500:200}); }
+export async function PATCH(req:Request){ try{const b=await req.json(); const sb=createServiceRoleClient(); const {error}=await sb.from("purchase_orders").update({order_status:b.order_status,memo:b.memo}).eq("id",b.id); if(error)throw error; return NextResponse.json({ok:true});}catch(e){return NextResponse.json({ok:false,message:e instanceof Error?e.message:"수정 실패"},{status:500})}}
