@@ -4,26 +4,65 @@ import { extractSourceProductId } from "@/lib/purchases/product-id";
 
 export const runtime = "nodejs";
 
+function normalizedUrl(raw: unknown) {
+  const value = String(raw || "").trim();
+  if (!value) return "";
+  try {
+    const url = new URL(value);
+    return `${url.hostname.toLowerCase().replace(/^www\./, "")}${url.pathname.replace(/\/$/, "")}`;
+  } catch {
+    return value.toLowerCase().replace(/[?#].*$/, "").replace(/\/$/, "");
+  }
+}
+
+function sourcingPrice(row: any) {
+  const values = [row?.purchase_price, row?.total_price];
+  for (const value of values) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return null;
+}
+
+function chooseCandidate(candidates: any[], purchaseUnitPrice: unknown) {
+  if (!candidates.length) return null;
+  if (candidates.length === 1) return candidates[0];
+  const target = Number(purchaseUnitPrice);
+  const ordered = [...candidates].sort((a, b) => Number(a.option_seq ?? 0) - Number(b.option_seq ?? 0));
+  if (!Number.isFinite(target) || target <= 0) return ordered[0];
+  let best: any = null;
+  let bestDiff = Number.POSITIVE_INFINITY;
+  for (const row of ordered) {
+    const price = sourcingPrice(row);
+    if (price == null) continue;
+    const diff = Math.abs(price - target);
+    if (diff < bestDiff) {
+      best = row;
+      bestDiff = diff;
+    }
+  }
+  return best || ordered[0];
+}
+
 export async function GET() {
   try {
     const sb = createServiceRoleClient();
     const [{ data, error }, { data: sourcingRows, error: sourcingError }] = await Promise.all([
       sb.from("purchase_orders").select(`*,purchase_items(*),purchase_costs(*),purchase_files(*)`).order("ordered_at", { ascending: false }),
-      sb.from("inventory_items").select("id,item_name,item_type,series_name,image_url,lineup_image_url,source_url,memo,internal_sku,source_product_id"),
+      sb.from("inventory_items").select("id,item_name,item_type,series_name,image_url,lineup_image_url,source_url,memo,internal_sku,source_product_id,option_seq,purchase_price,total_price"),
     ]);
     if (error) throw error;
     if (sourcingError) throw sourcingError;
 
-    const sourcingByProductId = new Map<string, any>();
-    const duplicateProductIds = new Set<string>();
     const sourcingById = new Map<string, any>();
+    const byProductId = new Map<string, any[]>();
+    const byUrl = new Map<string, any[]>();
     for (const row of sourcingRows ?? []) {
       sourcingById.set(String(row.id), row);
       const productId = String(row.source_product_id || "").trim() || extractSourceProductId(row.source_url) || "";
-      if (productId) {
-        if (sourcingByProductId.has(productId)) duplicateProductIds.add(productId);
-        else sourcingByProductId.set(productId, row);
-      }
+      if (productId) byProductId.set(productId, [...(byProductId.get(productId) || []), row]);
+      const url = normalizedUrl(row.source_url);
+      if (url) byUrl.set(url, [...(byUrl.get(url) || []), row]);
     }
 
     const linkUpdates: PromiseLike<unknown>[] = [];
@@ -31,12 +70,15 @@ export async function GET() {
       ...order,
       purchase_items: (order.purchase_items ?? []).map((item: any) => {
         const productId = String(item.source_product_id || "").trim() || extractSourceProductId(item.product_url) || "";
-        const sourcing = (item.sourcing_inventory_id ? sourcingById.get(String(item.sourcing_inventory_id)) : null) ||
-          (productId && !duplicateProductIds.has(productId) ? sourcingByProductId.get(productId) : null) || null;
+        const current = item.sourcing_inventory_id ? sourcingById.get(String(item.sourcing_inventory_id)) : null;
+        const urlCandidates = byUrl.get(normalizedUrl(item.product_url)) || [];
+        const productCandidates = productId ? (byProductId.get(productId) || []) : [];
+        const candidates = urlCandidates.length ? urlCandidates : productCandidates;
+        const sourcing = current || chooseCandidate(candidates, item.unit_price);
 
-        const resolvedSourceProductId = item.source_product_id || productId || null;
-        const resolvedSourcingId = item.sourcing_inventory_id || sourcing?.id || null;
-        const resolvedInternalSku = item.internal_sku || sourcing?.internal_sku || null;
+        const resolvedSourceProductId = item.source_product_id || productId || (sourcing ? (String(sourcing.source_product_id || "").trim() || extractSourceProductId(sourcing.source_url) || null) : null);
+        const resolvedSourcingId = sourcing?.id || item.sourcing_inventory_id || null;
+        const resolvedInternalSku = sourcing?.internal_sku || item.internal_sku || null;
 
         if (sourcing && (
           String(item.sourcing_inventory_id || "") !== String(sourcing.id || "") ||
