@@ -119,6 +119,19 @@ export default async function HomePage() {
           </Link>
         </div>
 
+        <h2 style={sectionTitleMarginStyle}>Purchase</h2>
+
+        <div style={gridStyle}>
+          <Link href="/purchases" style={cardStyle()}>
+            <div style={titleStyle}>매입관리</div>
+            <p style={descStyle}>실제 구매 · 증빙 · 배송 · 입고 관리</p>
+          </Link>
+          <Link href="/purchases/import" style={cardStyle()}>
+            <div style={titleStyle}>매입 엑셀 등록</div>
+            <p style={descStyle}>Taobao 주문 엑셀을 매입 DB로 등록</p>
+          </Link>
+        </div>
+
         <h2 style={sectionTitleMarginStyle}>STOCK</h2>
 
         <div style={gridStyle}>
