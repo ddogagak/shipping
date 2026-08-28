@@ -19,7 +19,20 @@ const currencyList=["JPY","CNY"];
 
 function normalizedLink(value?: string|null){
   const raw=String(value||"").trim(); if(!raw) return "";
-  try { const u=new URL(raw); const id=u.searchParams.get("id")||u.searchParams.get("itemId")||u.searchParams.get("offerId"); return id?`${u.hostname}:${id}`:`${u.hostname}${u.pathname}`; } catch { return raw; }
+  try {
+    const u=new URL(raw);
+    const productKey=
+      u.searchParams.get("gcode") ||
+      u.searchParams.get("scode") ||
+      u.searchParams.get("id") ||
+      u.searchParams.get("itemId") ||
+      u.searchParams.get("item_id") ||
+      u.searchParams.get("offerId") ||
+      u.searchParams.get("offer_id") ||
+      u.searchParams.get("goodsId") ||
+      u.searchParams.get("goods_id");
+    return productKey ? `${u.hostname}:${productKey.toUpperCase()}` : `${u.hostname}${u.pathname}`;
+  } catch { return raw; }
 }
 
 export default function InventoryClient({initialItems}:{initialItems:InventoryItem[]}){
