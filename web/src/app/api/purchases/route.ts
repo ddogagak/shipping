@@ -4,17 +4,6 @@ import { extractSourceProductId } from "@/lib/purchases/product-id";
 
 export const runtime = "nodejs";
 
-function normalizedUrl(raw: unknown) {
-  const value = String(raw || "").trim();
-  if (!value) return "";
-  try {
-    const url = new URL(value);
-    return `${url.hostname.toLowerCase().replace(/^www\./, "")}${url.pathname.replace(/\/$/, "")}`;
-  } catch {
-    return value.toLowerCase().replace(/[?#].*$/, "").replace(/\/$/, "");
-  }
-}
-
 function sourcingPrice(row: any) {
   const values = [row?.purchase_price, row?.total_price];
   for (const value of values) {
@@ -56,38 +45,38 @@ export async function GET() {
 
     const sourcingById = new Map<string, any>();
     const byProductId = new Map<string, any[]>();
-    const byUrl = new Map<string, any[]>();
     for (const row of sourcingRows ?? []) {
       sourcingById.set(String(row.id), row);
       const productId = String(row.source_product_id || "").trim() || extractSourceProductId(row.source_url) || "";
       if (productId) byProductId.set(productId, [...(byProductId.get(productId) || []), row]);
-      const url = normalizedUrl(row.source_url);
-      if (url) byUrl.set(url, [...(byUrl.get(url) || []), row]);
     }
 
     const linkUpdates: PromiseLike<unknown>[] = [];
     const orders = (data ?? []).map((order: any) => ({
       ...order,
       purchase_items: (order.purchase_items ?? []).map((item: any) => {
-        const productId = String(item.source_product_id || "").trim() || extractSourceProductId(item.product_url) || "";
+        // Product ID is the hard boundary. Price is used ONLY to choose an option
+        // among sourcing rows that belong to this exact same product ID.
+        const productId = extractSourceProductId(item.product_url) || String(item.source_product_id || "").trim() || "";
         const current = item.sourcing_inventory_id ? sourcingById.get(String(item.sourcing_inventory_id)) : null;
-        const urlCandidates = byUrl.get(normalizedUrl(item.product_url)) || [];
-        const productCandidates = productId ? (byProductId.get(productId) || []) : [];
-        const candidates = urlCandidates.length ? urlCandidates : productCandidates;
-        const sourcing = current || chooseCandidate(candidates, item.unit_price);
+        const currentProductId = current ? (String(current.source_product_id || "").trim() || extractSourceProductId(current.source_url) || "") : "";
+        const currentIsSameProduct = Boolean(current && productId && currentProductId === productId);
+        const sameProductCandidates = productId ? (byProductId.get(productId) || []) : [];
+        const sourcing = currentIsSameProduct ? current : chooseCandidate(sameProductCandidates, item.unit_price);
 
-        const resolvedSourceProductId = item.source_product_id || productId || (sourcing ? (String(sourcing.source_product_id || "").trim() || extractSourceProductId(sourcing.source_url) || null) : null);
-        const resolvedSourcingId = sourcing?.id || item.sourcing_inventory_id || null;
-        const resolvedInternalSku = sourcing?.internal_sku || item.internal_sku || null;
+        const resolvedSourceProductId = productId || null;
+        const resolvedSourcingId = sourcing?.id || null;
+        const resolvedInternalSku = sourcing?.internal_sku || null;
 
-        if (sourcing && (
-          String(item.sourcing_inventory_id || "") !== String(sourcing.id || "") ||
+        const linkChanged =
+          String(item.sourcing_inventory_id || "") !== String(resolvedSourcingId || "") ||
           String(item.source_product_id || "") !== String(resolvedSourceProductId || "") ||
-          String(item.internal_sku || "") !== String(resolvedInternalSku || "")
-        )) {
+          String(item.internal_sku || "") !== String(resolvedInternalSku || "");
+
+        if (linkChanged) {
           linkUpdates.push(
             sb.from("purchase_items").update({
-              sourcing_inventory_id: sourcing.id,
+              sourcing_inventory_id: resolvedSourcingId,
               source_product_id: resolvedSourceProductId,
               internal_sku: resolvedInternalSku,
             }).eq("id", item.id).then(({ error: updateError }) => {
