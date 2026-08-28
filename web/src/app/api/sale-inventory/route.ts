@@ -28,7 +28,7 @@ export async function GET() {
     const sb = createServiceRoleClient();
     const [{ data: orders, error }, { data: sourcingRows, error: sourcingError }, { data: ledgers, error: ledgerError }] = await Promise.all([
       sb.from("purchase_orders").select("id,order_number,ordered_at,shop_name,currency,paid_amount,local_shipping,purchase_items(*)").eq("order_status", "입고완료").order("ordered_at", { ascending: false }),
-      sb.from("inventory_items").select("id,item_name,item_type,series_name,image_url,lineup_image_url,source_url,memo,currency,purchase_price,total_price,component_count,unit_sale_price"),
+      sb.from("inventory_items").select("id,item_name,item_type,series_name,image_url,lineup_image_url,source_url,memo,currency,purchase_price,total_price,component_count,unit_sale_price,internal_sku"),
       sb.from("purchase_sale_inventory").select("*"),
     ]);
     if (error) throw error;
@@ -56,6 +56,7 @@ export async function GET() {
       return {
         id:item.id, order_id:order.id, order_number:order.order_number, ordered_at:order.ordered_at, shop_name:order.shop_name,
         product_name:item.product_name, display_name:item.display_name_ko || sourcing?.item_name || item.product_name,
+        internal_sku:item.internal_sku || sourcing?.internal_sku || null,
         option_text:item.option_text, product_url:item.product_url, purchase_quantity:boxQuantity,
         actual_purchase_unit_price:actualPurchaseUnitPrice, actual_purchase_currency:purchaseCurrency,
         order_paid_amount:Number(order.paid_amount || 0), order_local_shipping:Number(order.local_shipping || 0),
@@ -89,8 +90,6 @@ export async function PATCH(req:Request) {
     const hasComponentCount=Object.prototype.hasOwnProperty.call(body,"component_count");
     const componentCount=hasComponentCount?Math.max(0,Math.trunc(Number(body.component_count||0))):undefined;
 
-    // 제목은 매입상품의 방송/표시용 한글명으로 저장한다.
-    // 소싱 원본 item_name까지 덮어쓰지 않아 제목 수정 때문에 다른 저장이 실패하지 않게 한다.
     if(hasDisplayName){
       const {error:titleError}=await sb.from("purchase_items").update({display_name_ko:displayName}).eq("id",body.purchase_item_id);
       if(titleError) throw titleError;
@@ -115,8 +114,6 @@ export async function PATCH(req:Request) {
       }
     }
 
-    // 박스당 구성은 인벤토리 상품정보에만 저장한다.
-    // 구성 변경 시 기존 인벤토리의 권장 개당판매가도 같은 계산식으로 함께 갱신한다.
     if(hasComponentCount){
       if(!body.sourcing_inventory_id) throw new Error("연결된 인벤토리가 없어 박스당 구성을 저장할 수 없습니다.");
       const pricing=pricingFromPurchase(Number(body.actual_purchase_unit_price||0),String(body.actual_purchase_currency||"CNY"),componentCount);
