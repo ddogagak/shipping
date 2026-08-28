@@ -26,17 +26,39 @@ export async function GET() {
       }
     }
 
+    const linkUpdates: PromiseLike<unknown>[] = [];
     const orders = (data ?? []).map((order: any) => ({
       ...order,
       purchase_items: (order.purchase_items ?? []).map((item: any) => {
         const productId = String(item.source_product_id || "").trim() || extractSourceProductId(item.product_url) || "";
         const sourcing = (item.sourcing_inventory_id ? sourcingById.get(String(item.sourcing_inventory_id)) : null) ||
           (productId && !duplicateProductIds.has(productId) ? sourcingByProductId.get(productId) : null) || null;
+
+        const resolvedSourceProductId = item.source_product_id || productId || null;
+        const resolvedSourcingId = item.sourcing_inventory_id || sourcing?.id || null;
+        const resolvedInternalSku = item.internal_sku || sourcing?.internal_sku || null;
+
+        if (sourcing && (
+          String(item.sourcing_inventory_id || "") !== String(sourcing.id || "") ||
+          String(item.source_product_id || "") !== String(resolvedSourceProductId || "") ||
+          String(item.internal_sku || "") !== String(resolvedInternalSku || "")
+        )) {
+          linkUpdates.push(
+            sb.from("purchase_items").update({
+              sourcing_inventory_id: sourcing.id,
+              source_product_id: resolvedSourceProductId,
+              internal_sku: resolvedInternalSku,
+            }).eq("id", item.id).then(({ error: updateError }) => {
+              if (updateError) console.error("purchase sourcing link persist failed", item.id, updateError);
+            })
+          );
+        }
+
         return {
           ...item,
-          source_product_id: item.source_product_id || productId || null,
-          sourcing_inventory_id: item.sourcing_inventory_id || sourcing?.id || null,
-          internal_sku: item.internal_sku || sourcing?.internal_sku || null,
+          source_product_id: resolvedSourceProductId,
+          sourcing_inventory_id: resolvedSourcingId,
+          internal_sku: resolvedInternalSku,
           matched_name_ko: sourcing?.item_name || null,
           display_name_ko: item.display_name_ko || sourcing?.item_name || null,
           matched_image_url: sourcing?.image_url || null,
@@ -47,6 +69,8 @@ export async function GET() {
         };
       }),
     }));
+
+    if (linkUpdates.length) await Promise.all(linkUpdates);
     return NextResponse.json({ ok: true, orders });
   } catch (e) {
     return NextResponse.json({ ok: false, message: e instanceof Error ? e.message : "매입 목록을 불러오지 못했습니다." }, { status: 500 });
