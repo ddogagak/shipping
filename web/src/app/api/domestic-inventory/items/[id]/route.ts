@@ -11,9 +11,7 @@ export async function PATCH(
     const supabase = createServiceRoleClient();
 
     const currency = String(body.currency ?? "JPY").toUpperCase();
-    const purchasePrice = Number(
-      body.purchase_price ?? body.total_price ?? body.yen_price ?? 0
-    );
+    const purchasePrice = Number(body.purchase_price ?? body.total_price ?? body.yen_price ?? 0);
 
     const { data, error } = await supabase
       .from("inventory_items")
@@ -38,21 +36,16 @@ export async function PATCH(
         memo: body.memo ?? "",
         component_count: body.component_count ? Number(body.component_count) : null,
         unit_sale_price: body.unit_sale_price ? Number(body.unit_sale_price) : null,
+        option_seq: body.option_seq === "" || body.option_seq == null ? null : Number(body.option_seq),
       })
       .eq("id", id)
       .select()
       .single();
 
-    if (error) {
-      return NextResponse.json({ ok: false, message: error.message }, { status: 500 });
-    }
-
+    if (error) return NextResponse.json({ ok: false, message: error.message }, { status: 500 });
     return NextResponse.json({ ok: true, data });
   } catch (error) {
-    return NextResponse.json(
-      { ok: false, message: error instanceof Error ? error.message : "수정 실패" },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, message: error instanceof Error ? error.message : "수정 실패" }, { status: 500 });
   }
 }
 
@@ -63,33 +56,11 @@ export async function DELETE(
   try {
     const { id } = await params;
     const supabase = createServiceRoleClient();
-
-    const { data, error } = await supabase
-      .from("inventory_items")
-      .delete()
-      .eq("id", id)
-      .select("id")
-      .maybeSingle();
-
-    if (error) {
-      return NextResponse.json(
-        { ok: false, message: error.message },
-        { status: 500 }
-      );
-    }
-
-    if (!data) {
-      return NextResponse.json(
-        { ok: false, message: "삭제할 재고를 찾을 수 없습니다." },
-        { status: 404 }
-      );
-    }
-
+    const { data, error } = await supabase.from("inventory_items").delete().eq("id", id).select("id").maybeSingle();
+    if (error) return NextResponse.json({ ok: false, message: error.message }, { status: 500 });
+    if (!data) return NextResponse.json({ ok: false, message: "삭제할 재고를 찾을 수 없습니다." }, { status: 404 });
     return NextResponse.json({ ok: true, id: data.id });
   } catch (error) {
-    return NextResponse.json(
-      { ok: false, message: error instanceof Error ? error.message : "삭제 실패" },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, message: error instanceof Error ? error.message : "삭제 실패" }, { status: 500 });
   }
 }
