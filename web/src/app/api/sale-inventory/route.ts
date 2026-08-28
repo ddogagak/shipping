@@ -4,12 +4,20 @@ import { extractSourceProductId } from "@/lib/purchases/product-id";
 
 export const runtime = "nodejs";
 
-function pricingFromSourcing(sourcing: any) {
-  const boxCost = Math.max(0, Number(sourcing?.total_price || 0));
-  const componentCount = Math.max(0, Math.trunc(Number(sourcing?.component_count || 0)));
+const EXCHANGE_RATE: Record<string, number> = { JPY: 10, CNY: 230 };
+
+function pricingFromPurchase(unitPrice: number, currency: string, componentCountRaw: unknown) {
+  const rate = EXCHANGE_RATE[currency] ?? EXCHANGE_RATE.CNY;
+  const purchase = Math.max(0, Number(unitPrice || 0));
+  const componentCount = Math.max(0, Math.trunc(Number(componentCountRaw || 0)));
+
+  // 실제 매입 상품의 박스 1개 단가를 기준으로 기존 인벤토리 계산식을 적용한다.
+  // 판매원가 = 실제 매입가 × 환율 × 1.2 + 5,000원
+  const boxCost = purchase > 0 ? Math.round(purchase * rate * 1.2 + 5000) : 0;
+  // 최소마진가격 = 판매원가 × 1.1 × 1.07 + 10,000원
   const minimumMarginPrice = boxCost > 0 ? Math.round(boxCost * 1.1 * 1.07 + 10000) : 0;
   const unitCostPrice = componentCount > 0 ? Math.ceil(boxCost / componentCount) : 0;
-  const unitSalePrice = Number(sourcing?.unit_sale_price || 0) || (componentCount > 0 ? Math.ceil(minimumMarginPrice / componentCount) : 0);
+  const unitSalePrice = componentCount > 0 ? Math.ceil(minimumMarginPrice / componentCount) : 0;
   return { boxCost, componentCount, minimumMarginPrice, unitCostPrice, unitSalePrice };
 }
 
@@ -17,7 +25,7 @@ export async function GET() {
   try {
     const sb = createServiceRoleClient();
     const [{ data: orders, error }, { data: sourcingRows, error: sourcingError }, { data: ledgers, error: ledgerError }] = await Promise.all([
-      sb.from("purchase_orders").select("id,order_number,ordered_at,shop_name,purchase_items(*)").eq("order_status", "입고완료").order("ordered_at", { ascending: false }),
+      sb.from("purchase_orders").select("id,order_number,ordered_at,shop_name,currency,paid_amount,local_shipping,purchase_items(*)").eq("order_status", "입고완료").order("ordered_at", { ascending: false }),
       sb.from("inventory_items").select("id,item_name,item_type,series_name,image_url,lineup_image_url,source_url,memo,currency,purchase_price,total_price,component_count,unit_sale_price"),
       sb.from("purchase_sale_inventory").select("*"),
     ]);
@@ -39,12 +47,18 @@ export async function GET() {
       const sourcing = (item.sourcing_inventory_id ? sourcingById.get(String(item.sourcing_inventory_id)) : null) || (productId ? sourcingByProductId.get(productId) : null);
       const ledger:any = ledgerByItemId.get(String(item.id));
       const boxQuantity = Math.max(0, Number(item.received_quantity ?? item.quantity ?? 0));
-      const pricing = pricingFromSourcing(sourcing);
+      const purchaseCurrency = String(order.currency || "CNY").toUpperCase();
+      const actualPurchaseUnitPrice = Number(item.unit_price || 0);
+      const pricing = pricingFromPurchase(actualPurchaseUnitPrice, purchaseCurrency, sourcing?.component_count);
 
       return {
         id:item.id, order_id:order.id, order_number:order.order_number, ordered_at:order.ordered_at, shop_name:order.shop_name,
         product_name:item.product_name, display_name:item.display_name_ko || sourcing?.item_name || item.product_name,
-        option_text:item.option_text, product_url:item.product_url, purchase_quantity:boxQuantity, unit_price:item.unit_price,
+        option_text:item.option_text, product_url:item.product_url, purchase_quantity:boxQuantity,
+        actual_purchase_unit_price:actualPurchaseUnitPrice,
+        actual_purchase_currency:purchaseCurrency,
+        order_paid_amount:Number(order.paid_amount || 0),
+        order_local_shipping:Number(order.local_shipping || 0),
         sourcing_inventory_id:sourcing?.id || null,
         image_url:item.image_url || sourcing?.image_url || null,
         lineup_image_url:sourcing?.lineup_image_url || null,
