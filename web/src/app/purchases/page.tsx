@@ -206,7 +206,7 @@ export default function PurchasesPage() {
                                     <b>{item.display_name_ko || item.product_name || "상품명 없음"}</b>
                                     {item.option_text ? <div style={mutedStyle}>{item.option_text}</div> : null}
                                   </div>
-                                  <div style={{ whiteSpace: "nowrap" }}>¥{money(item.unit_price)} × {item.quantity}</div>
+                                  <div style={{ whiteSpace: "nowrap" }}>{money(item.unit_price)}위안 × {item.quantity}개</div>
                                 </div>
                               ))}
                             </div>
@@ -214,10 +214,10 @@ export default function PurchasesPage() {
                         ) : null}
                       </td>
                       <td style={tdStyle}>{totalQty}</td>
-                      <td style={tdStyle}>¥{money(itemTotal)}</td>
+                      <td style={tdStyle}>{money(itemTotal)}위안</td>
                       <td style={tdStyle}>
-                        <b>¥{money(order.paid_amount)}</b>
-                        <div style={mutedStyle}>배송 ¥{money(order.local_shipping)}</div>
+                        <b>{money(order.paid_amount)}위안</b>
+                        <div style={mutedStyle}>배송 {money(order.local_shipping)}위안</div>
                       </td>
                       <td style={tdStyle}>
                         <div>{order.tracking_number || "-"}</div>
