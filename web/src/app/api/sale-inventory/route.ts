@@ -38,9 +38,9 @@ export async function GET() {
       const productId = String(item.source_product_id || "") || extractSourceProductId(item.product_url) || "";
       const sourcing = (item.sourcing_inventory_id ? sourcingById.get(String(item.sourcing_inventory_id)) : null) || (productId ? sourcingByProductId.get(productId) : null);
       const ledger:any = ledgerByItemId.get(String(item.id));
+      // 매입 수량은 박스 수량 그대로 관리한다. 박스당 구성 수는 가격 계산에만 사용한다.
       const boxQuantity = Math.max(0, Number(item.received_quantity ?? item.quantity ?? 0));
       const pricing = pricingFromSourcing(sourcing);
-      const initialPieceQuantity = pricing.componentCount > 0 ? boxQuantity * pricing.componentCount : boxQuantity;
 
       return {
         id:item.id, order_id:order.id, order_number:order.order_number, ordered_at:order.ordered_at, shop_name:order.shop_name,
@@ -51,13 +51,12 @@ export async function GET() {
         sourcing_currency:sourcing?.currency || null,
         sourcing_purchase_price:Number(sourcing?.purchase_price || 0),
         component_count:pricing.componentCount,
-        total_piece_quantity:initialPieceQuantity,
         box_cost_price:pricing.boxCost,
         minimum_margin_price:pricing.minimumMarginPrice,
         unit_cost_price:pricing.unitCostPrice,
         recommended_unit_sale_price:pricing.unitSalePrice,
         sale_price:ledger?.sale_price ?? null,
-        remaining_quantity:ledger ? Number(ledger.remaining_quantity || 0) : initialPieceQuantity,
+        remaining_quantity:ledger ? Number(ledger.remaining_quantity || 0) : boxQuantity,
         sold_quantity:ledger ? Number(ledger.sold_quantity || 0) : 0,
         stock_status:ledger?.stock_status || "active",
         sale_memo:ledger?.sale_memo || "",
