@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
-import { extractProductId } from "@/lib/purchases/product-id";
+import { extractSourceProductId } from "@/lib/purchases/product-id";
 import * as XLSX from "xlsx";
 import fs from "fs";
 import path from "path";
@@ -134,7 +134,7 @@ export async function POST(req: Request) {
     for (const row of sourcingRows ?? []) {
       sourcingById.set(String(row.id), row);
 
-      const productId = extractProductId(row.source_url);
+      const productId = extractSourceProductId(row.source_url);
       if (productId && !sourcingByProductId.has(productId)) {
         sourcingByProductId.set(productId, row);
       }
@@ -172,7 +172,7 @@ export async function POST(req: Request) {
 
         const productId =
           String(item.source_product_id || "") ||
-          extractProductId(item.product_url);
+          extractSourceProductId(item.product_url);
 
         const sourcing =
           (item.sourcing_inventory_id
@@ -204,38 +204,38 @@ export async function POST(req: Request) {
          */
 
         const values: Array<string | number> = [
-          customs.name,                           // A 상품명(영문)
-          customs.code,                           // B 품목분류코드
-          "",                                     // C 색상(중국어)
-          "",                                     // D 사이즈(중국어)
-          String(order.order_number || ""),       // E 주문번호
-          Number(item.unit_price || 0),           // F 단가
-          Number(item.quantity || 1),             // G 수량
-          String(order.order_number || ""),       // H 관리코드
-          String(item.product_name || ""),        // I 상품코드
-          1,                                      // J 포장박스수량
-          String(item.product_url || ""),         // K 상품URL
-          imageUrl,                               // L 이미지URL
-          10,                                     // M 쇼핑몰명: 직접입력
-          String(order.shop_name || "Taobao"),    // N 쇼핑몰명(기타)
-          "",                                     // O 쇼핑몰관리번호
-          String(body.request_message || ""),     // P 요청메시지
-          "",                                     // Q 원산지작업
-          "",                                     // R 포장보완
-          "",                                     // S 정밀검수
-          String(body.recipient_name || ""),      // T 수취인명
-          String(body.recipient_english_name || ""), // U 수취인영문이름
-          String(body.phone || ""),               // V 휴대폰번호
-          String(body.customs_id || ""),          // W 통관고유부호/사업자번호
-          String(body.postal_code || ""),         // X 우편번호
-          String(body.address || ""),             // Y 주소
-          String(body.address_detail || ""),      // Z 상세주소
-          String(body.delivery_note || ""),       // AA 택배사 요청사항
-          body.auto_delivery ? "Y" : "",           // AB 자동배송요청
-          body.auto_payment ? "Y" : "",            // AC 팀머니 자동결제
-          String(body.business_alert || ""),      // AD 사업자 출고 알림톡
-          Number(body.inspection ?? 1),           // AE 검수
-          Number(body.packing ?? 1),              // AF 포장
+          customs.name,
+          customs.code,
+          "",
+          "",
+          String(order.order_number || ""),
+          Number(item.unit_price || 0),
+          Number(item.quantity || 1),
+          String(order.order_number || ""),
+          String(item.product_name || ""),
+          1,
+          String(item.product_url || ""),
+          imageUrl,
+          10,
+          String(order.shop_name || "Taobao"),
+          "",
+          String(body.request_message || ""),
+          "",
+          "",
+          "",
+          String(body.recipient_name || ""),
+          String(body.recipient_english_name || ""),
+          String(body.phone || ""),
+          String(body.customs_id || ""),
+          String(body.postal_code || ""),
+          String(body.address || ""),
+          String(body.address_detail || ""),
+          String(body.delivery_note || ""),
+          body.auto_delivery ? "Y" : "",
+          body.auto_payment ? "Y" : "",
+          String(body.business_alert || ""),
+          Number(body.inspection ?? 1),
+          Number(body.packing ?? 1),
         ];
 
         values.forEach((value, columnIndex) => {
