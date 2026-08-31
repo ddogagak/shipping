@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
+import { buildInventorySku } from "@/lib/inventorySku";
 
 export async function PATCH(
   req: Request,
@@ -12,6 +13,34 @@ export async function PATCH(
 
     const currency = String(body.currency ?? "JPY").toUpperCase();
     const purchasePrice = Number(body.purchase_price ?? body.total_price ?? body.yen_price ?? 0);
+    const sku = buildInventorySku(
+      String(body.source_url ?? ""),
+      String(body.series_name ?? "기타"),
+      body.option_seq === "" || body.option_seq == null ? 0 : body.option_seq
+    );
+
+    if (sku) {
+      const { data: duplicate, error: duplicateError } = await supabase
+        .from("inventory_items")
+        .select("id, internal_sku, item_name")
+        .eq("internal_sku", sku.internalSku)
+        .neq("id", id)
+        .maybeSingle();
+
+      if (duplicateError) {
+        return NextResponse.json({ ok: false, message: duplicateError.message }, { status: 500 });
+      }
+      if (duplicate) {
+        return NextResponse.json(
+          {
+            ok: false,
+            code: "DUPLICATE_INTERNAL_SKU",
+            message: `관리번호 ${sku.internalSku}가 이미 존재해. 옵션번호를 다른 번호로 지정해줘.`,
+          },
+          { status: 409 }
+        );
+      }
+    }
 
     const { data, error } = await supabase
       .from("inventory_items")
@@ -36,13 +65,26 @@ export async function PATCH(
         memo: body.memo ?? "",
         component_count: body.component_count ? Number(body.component_count) : null,
         unit_sale_price: body.unit_sale_price ? Number(body.unit_sale_price) : null,
-        option_seq: body.option_seq === "" || body.option_seq == null ? null : Number(body.option_seq),
+        source_site_code: sku?.sourceSiteCode ?? null,
+        source_product_id: sku?.sourceProductId ?? null,
+        option_seq: sku?.optionSeq ?? 0,
+        internal_sku: sku?.internalSku ?? null,
       })
       .eq("id", id)
       .select()
       .single();
 
-    if (error) return NextResponse.json({ ok: false, message: error.message }, { status: 500 });
+    if (error) {
+      const duplicate = error.code === "23505" || /duplicate|unique/i.test(error.message);
+      return NextResponse.json(
+        {
+          ok: false,
+          code: duplicate ? "DUPLICATE_INTERNAL_SKU" : undefined,
+          message: duplicate ? "같은 관리번호가 이미 존재해. 옵션번호를 다른 번호로 지정해줘." : error.message,
+        },
+        { status: duplicate ? 409 : 500 }
+      );
+    }
     return NextResponse.json({ ok: true, data });
   } catch (error) {
     return NextResponse.json({ ok: false, message: error instanceof Error ? error.message : "수정 실패" }, { status: 500 });
