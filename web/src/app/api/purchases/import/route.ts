@@ -5,6 +5,10 @@ import { extractSourceProductId } from "@/lib/purchases/product-id";
 
 export const runtime="nodejs";
 
+function isClosedOrder(sourceStatus:unknown){
+  return String(sourceStatus||"").trim()==="交易关闭";
+}
+
 export async function POST(req:Request){
   try{
     const form=await req.formData();
@@ -12,8 +16,10 @@ export async function POST(req:Request){
     const mode=String(form.get("mode")||"preview");
     if(!(file instanceof File))return NextResponse.json({ok:false,message:"엑셀 파일이 없어."},{status:400});
 
-    const orders=parseTaobaoWorkbook(await file.arrayBuffer());
-    if(mode==="preview")return NextResponse.json({ok:true,orders});
+    const parsedOrders=parseTaobaoWorkbook(await file.arrayBuffer());
+    const skippedClosed=parsedOrders.filter(o=>isClosedOrder(o.source_status)).length;
+    const orders=parsedOrders.filter(o=>!isClosedOrder(o.source_status));
+    if(mode==="preview")return NextResponse.json({ok:true,orders,skippedClosed});
 
     const sb=createServiceRoleClient();
     const{data:sourcingRows,error:sourcingError}=await sb.from("inventory_items").select("id,source_url,source_product_id,internal_sku");
@@ -44,10 +50,7 @@ export async function POST(req:Request){
       if(existingOrder){
         const{error:updateError}=await sb
           .from("purchase_orders")
-          .update({
-            tracking_company:o.tracking_company,
-            tracking_number:o.tracking_number,
-          })
+          .update({tracking_company:o.tracking_company,tracking_number:o.tracking_number})
           .eq("id",existingOrder.id);
         if(updateError)throw updateError;
         updated++;
@@ -56,17 +59,9 @@ export async function POST(req:Request){
       }
 
       const{data:order,error}=await sb.from("purchase_orders").insert({
-        country:"CN",
-        source_site:o.source_site,
-        order_number:o.order_number,
-        ordered_at:o.ordered_at,
-        shop_name:o.shop_name,
-        paid_amount:o.paid_amount,
-        local_shipping:o.local_shipping,
-        currency:"CNY",
-        tracking_company:o.tracking_company,
-        tracking_number:o.tracking_number,
-        raw_data:{source_status:o.source_status},
+        country:"CN",source_site:o.source_site,order_number:o.order_number,ordered_at:o.ordered_at,
+        shop_name:o.shop_name,paid_amount:o.paid_amount,local_shipping:o.local_shipping,currency:"CNY",
+        tracking_company:o.tracking_company,tracking_number:o.tracking_number,raw_data:{source_status:o.source_status},
       }).select("id").single();
       if(error)throw error;
 
@@ -75,23 +70,16 @@ export async function POST(req:Request){
           const productId=extractSourceProductId(i.product_url)||"";
           const candidates=productId?byProductId.get(productId)||[]:[];
           const sourcing=candidates.length===1?candidates[0]:null;
-          return{
-            ...i,
-            purchase_order_id:order.id,
-            source_product_id:productId||null,
-            sourcing_inventory_id:sourcing?.id||null,
-            internal_sku:sourcing?.internal_sku||null,
-          };
+          return{...i,purchase_order_id:order.id,source_product_id:productId||null,sourcing_inventory_id:sourcing?.id||null,internal_sku:sourcing?.internal_sku||null};
         });
         const{error:itemError}=await sb.from("purchase_items").insert(rows);
         if(itemError)throw itemError;
       }
-
       created++;
       saved++;
     }
 
-    return NextResponse.json({ok:true,saved,created,updated});
+    return NextResponse.json({ok:true,saved,created,updated,skippedClosed});
   }catch(e){
     return NextResponse.json({ok:false,message:e instanceof Error?e.message:"저장 실패"},{status:500});
   }
