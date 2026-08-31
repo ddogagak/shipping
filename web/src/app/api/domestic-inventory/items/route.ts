@@ -11,11 +11,12 @@ export async function POST(req: Request) {
     const purchasePrice = Number(
       body.purchase_price ?? body.total_price ?? body.yen_price ?? 0
     );
-    const sku = buildInventorySku(
+    let sku = buildInventorySku(
       String(body.source_url ?? ""),
       String(body.series_name ?? "기타"),
       body.option_seq ?? 0
     );
+    let autoDuplicate = false;
 
     if (sku) {
       const { data: duplicate, error: duplicateError } = await supabase
@@ -27,15 +28,41 @@ export async function POST(req: Request) {
       if (duplicateError) {
         return NextResponse.json({ ok: false, message: duplicateError.message }, { status: 500 });
       }
+
       if (duplicate) {
-        return NextResponse.json(
-          {
-            ok: false,
-            code: "DUPLICATE_INTERNAL_SKU",
-            message: `관리번호 ${sku.internalSku}가 이미 존재해. 옵션번호를 확인해줘.`,
-          },
-          { status: 409 }
+        const duplicateSku = buildInventorySku(
+          String(body.source_url ?? ""),
+          String(body.series_name ?? "기타"),
+          99
         );
+
+        if (!duplicateSku) {
+          return NextResponse.json({ ok: false, message: "중복 관리번호를 생성하지 못했어." }, { status: 500 });
+        }
+
+        const { data: duplicate99, error: duplicate99Error } = await supabase
+          .from("inventory_items")
+          .select("id, internal_sku, item_name")
+          .eq("internal_sku", duplicateSku.internalSku)
+          .maybeSingle();
+
+        if (duplicate99Error) {
+          return NextResponse.json({ ok: false, message: duplicate99Error.message }, { status: 500 });
+        }
+
+        if (duplicate99) {
+          return NextResponse.json(
+            {
+              ok: false,
+              code: "DUPLICATE_OPTION_99",
+              message: `중복용 관리번호 ${duplicateSku.internalSku}도 이미 존재해. 옵션번호를 직접 지정해줘.`,
+            },
+            { status: 409 }
+          );
+        }
+
+        sku = duplicateSku;
+        autoDuplicate = true;
       }
     }
 
@@ -83,7 +110,14 @@ export async function POST(req: Request) {
       );
     }
 
-    return NextResponse.json({ ok: true, data });
+    return NextResponse.json({
+      ok: true,
+      data,
+      duplicate: autoDuplicate,
+      message: autoDuplicate
+        ? `중복 상품이라 옵션번호 99로 추가했어. (${sku?.internalSku ?? ""})`
+        : undefined,
+    });
   } catch (error) {
     return NextResponse.json(
       { ok: false, message: error instanceof Error ? error.message : "저장 실패" },
