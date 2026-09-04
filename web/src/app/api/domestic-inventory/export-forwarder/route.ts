@@ -35,7 +35,7 @@ export async function POST(req:Request){
     if(body.country!=="JP")return NextResponse.json({ok:false,message:"중국 배대지 양식은 아직 등록되지 않았어."},{status:400});
 
     const supabase=createServiceRoleClient();
-    const{data,error}=await supabase.from("inventory_items").select("id,series_name,item_type,source_url,image_url,purchase_price,total_price,yen_price,created_at").in("id",ids);
+    const{data,error}=await supabase.from("inventory_items").select("id,series_name,item_type,source_url,image_url,purchase_price,total_price,yen_price,quantity,created_at").in("id",ids);
     if(error)throw error;
     const byId=new Map((data??[]).map(item=>[String(item.id),item]));
     const items=ids.map(id=>byId.get(id)).filter(Boolean) as NonNullable<typeof data>;
@@ -53,7 +53,8 @@ export async function POST(req:Request){
 
     items.forEach((item,index)=>{
       const purchasePrice=Number(item.purchase_price??item.total_price??item.yen_price??0);
-      const values:Array<string|number>=[600,1,englishProductName(item.series_name,item.item_type),"","",String(item.source_url||""),String(item.image_url||""),"","",111,Number.isFinite(purchasePrice)?purchasePrice:0,"","",""];
+      const inventoryQuantity=Number(item.quantity??1);
+      const values:Array<string|number>=[600,2,englishProductName(item.series_name,item.item_type),"","",String(item.source_url||""),String(item.image_url||""),1,"",111,Number.isFinite(purchasePrice)?purchasePrice:0,Number.isFinite(inventoryQuantity)?inventoryQuantity:1,"",""];
       values.forEach((value,column)=>setCell(worksheet,index+2,column,value,templateCells[column]));
     });
     worksheet["!ref"]=`A1:X${Math.max(2,items.length+1)}`;
