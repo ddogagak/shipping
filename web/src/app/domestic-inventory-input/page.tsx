@@ -17,8 +17,7 @@ type PreviewItem = {
   item_name: string;
   item_type: string;
   series_name: string;
-  order_number: string;
-  order_date: string;
+  option_seq: number;
   yen_price: number;
   shipping_fee: number;
   domestic_shipping_fee: number;
@@ -90,8 +89,7 @@ const initialManualForm = {
   item_name: "",
   item_type: "기타",
   series_name: "기타",
-  order_number: "",
-  order_date: "",
+  option_seq: 0,
   currency: "JPY",
   purchase_price: 0,
   domestic_shipping_fee: 0,
@@ -138,6 +136,7 @@ export default function DomesticInventoryInputPage() {
         field === "purchase_price" ||
         field === "component_count" ||
         field === "domestic_shipping_fee" ||
+        field === "option_seq" ||
         field === "quantity"
           ? Number(value)
           : value,
@@ -164,8 +163,7 @@ export default function DomesticInventoryInputPage() {
       item_name: manualForm.item_name,
       item_type: manualForm.item_type,
       series_name: manualForm.series_name,
-      order_number: manualForm.order_number,
-      order_date: manualForm.order_date,
+      option_seq: manualForm.option_seq,
       currency: manualForm.currency,
       purchase_price: manualForm.purchase_price,
       yen_price: manualForm.currency === "JPY" ? manualForm.purchase_price : 0,
@@ -201,6 +199,7 @@ export default function DomesticInventoryInputPage() {
 
         if (
           field === "quantity" ||
+          field === "option_seq" ||
           field === "purchase_price" ||
           field === "component_count" ||
           field === "unit_sale_price" ||
@@ -375,8 +374,7 @@ export default function DomesticInventoryInputPage() {
               <ManualField label={`구매가 (${manualForm.currency})`} type="number" value={String(manualForm.purchase_price)} onChange={(v) => updateManualForm("purchase_price", v)} />
               <ManualField label="박스당 팩 수" type="number" value={String(manualForm.component_count)} onChange={(v) => updateManualForm("component_count", v)} />
               <ManualField label="일본/중국내 배송비" type="number" value={String(manualForm.domestic_shipping_fee)} onChange={(v) => updateManualForm("domestic_shipping_fee", v)} />
-              <ManualField label="주문번호" value={manualForm.order_number} onChange={(v) => updateManualForm("order_number", v)} />
-              <ManualField label="주문일" value={manualForm.order_date} onChange={(v) => updateManualForm("order_date", v)} />
+              <ManualField label="옵션번호" type="number" value={String(manualForm.option_seq)} onChange={(v) => updateManualForm("option_seq", v)} />
               <ManualField label="운송장" value={manualForm.tracking_number} onChange={(v) => updateManualForm("tracking_number", v)} />
               <ManualField label="대표 이미지 URL" value={manualForm.image_url} onChange={(v) => updateManualForm("image_url", v)} />
               <ManualField label="라인업 이미지 URL" value={manualForm.lineup_image_url} onChange={(v) => updateManualForm("lineup_image_url", v)} />
@@ -525,8 +523,7 @@ MEMO:`}
                 </div>
 
                 <div style={grid4Style}>
-                  <EditableField label="주문일" value={item.order_date} onChange={(v) => updateItem(item.local_id, "order_date", v)} />
-                  <EditableField label="주문번호" value={item.order_number} onChange={(v) => updateItem(item.local_id, "order_number", v)} />
+                  <EditableField label="옵션번호" value={String(item.option_seq)} type="number" onChange={(v) => updateItem(item.local_id, "option_seq", v)} />
                   <EditableSelect label="통화" value={item.currency} options={currencyList} onChange={(v) => updateItem(item.local_id, "currency", v)} />
                   <EditableField label={`구매가 (${item.currency})`} value={String(item.purchase_price)} type="number" onChange={(v) => updateItem(item.local_id, "purchase_price", v)} />
                 </div>
@@ -581,8 +578,6 @@ function parseFixedInventoryText(rawText: string): PreviewItem[] {
   const hasOrderBlock = rawText.includes("=== ORDER ===");
   const orderBlock = hasOrderBlock ? rawText.split("=== ITEM ===")[0] : "";
 
-  const orderNo = getField(orderBlock, "ORDER_NO");
-  const orderDate = getField(orderBlock, "ORDER_DATE");
   const orderSeries = getField(orderBlock, "SERIES");
   const orderDomesticShipping = toNumber(getField(orderBlock, "DOMESTIC_SHIPPING"));
   const orderTracking = getField(orderBlock, "TRACKING");
@@ -615,13 +610,12 @@ function parseFixedInventoryText(rawText: string): PreviewItem[] {
     const pricing = calculatePricing(currency, price, boxCount || null);
 
     return {
-      local_id: `${getField(block, "ORDER_NO") || orderNo || "item"}-${index}-${Date.now()}`,
+      local_id: `item-${index}-${Date.now()}`,
       checked: true,
       item_name: itemName,
       item_type: itemType,
       series_name: itemSeries,
-      order_number: getField(block, "ORDER_NO") || orderNo,
-      order_date: getField(block, "ORDER_DATE") || orderDate,
+      option_seq: toNumber(getField(block, "OPTION_NO") || getField(block, "OPTION_SEQ")),
       currency,
       purchase_price: price,
       yen_price: currency === "JPY" ? price : 0,
