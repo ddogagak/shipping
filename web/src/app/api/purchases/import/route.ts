@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { parseTaobaoWorkbook } from "@/lib/purchases/taobao";
 import { extractSourceProductId } from "@/lib/purchases/product-id";
+import { parseDomesticPurchaseText } from "@/lib/purchases/domestic-text";
 
 export const runtime="nodejs";
 
@@ -11,6 +12,27 @@ function isClosedOrder(sourceStatus:unknown){
 
 export async function POST(req:Request){
   try{
+    if((req.headers.get("content-type")||"").includes("application/json")){
+      const body=await req.json();
+      const purchase=parseDomesticPurchaseText(String(body.text||""));
+      if(String(body.mode||"preview")==="preview")return NextResponse.json({ok:true,purchase});
+
+      const sb=createServiceRoleClient();
+      const orderNumber=purchase.invoice_number||`DOM-${purchase.purchased_at.replace(/-/g,"")}-${Date.now().toString().slice(-6)}`;
+      const{data:existing,error:existingError}=await sb.from("purchase_orders").select("id").eq("source_site","Domestic").eq("order_number",orderNumber).maybeSingle();
+      if(existingError)throw existingError;
+      if(existing)return NextResponse.json({ok:false,message:`이미 등록된 국내 매입번호야: ${orderNumber}`},{status:409});
+
+      const domesticItems=purchase.items.map(item=>({product_name:item.product_name,option_text:item.option_text,series_name:item.series_name,item_type:item.item_type,lineup_image_url:item.lineup_image_url,memo:item.memo}));
+      const paidAmount=purchase.items.reduce((sum,item)=>sum+item.line_total,0)+purchase.local_shipping;
+      const{data:order,error}=await sb.from("purchase_orders").insert({country:"KR",source_site:"Domestic",order_number:orderNumber,ordered_at:purchase.purchased_at,shop_name:purchase.supplier,paid_amount:paidAmount,local_shipping:purchase.local_shipping,currency:"KRW",order_status:"입고완료",memo:purchase.memo||null,raw_data:{source_status:"입고완료",domestic_items:domesticItems}}).select("id").single();
+      if(error)throw error;
+      const rows=purchase.items.map(item=>({purchase_order_id:order.id,product_name:item.product_name,display_name_ko:item.display_name_ko,option_text:item.option_text||null,product_url:item.product_url||null,image_url:item.image_url||null,quantity:item.quantity,received_quantity:item.quantity,unit_price:item.unit_price,line_total:item.line_total,component_count:item.component_count}));
+      const{error:itemError}=await sb.from("purchase_items").insert(rows);
+      if(itemError){await sb.from("purchase_orders").delete().eq("id",order.id);throw itemError;}
+      return NextResponse.json({ok:true,saved:1,itemCount:rows.length,orderNumber});
+    }
+
     const form=await req.formData();
     const file=form.get("file");
     const mode=String(form.get("mode")||"preview");
