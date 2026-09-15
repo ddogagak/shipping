@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { calculatePricing, loadPricingSettings, type PricingSettings, DEFAULT_PRICING_SETTINGS } from "@/lib/pricing";
 
 type InventoryStatus =
   | "입고전"
@@ -37,7 +38,7 @@ type PreviewItem = {
   saved?: boolean;
 };
 
-type InputMode = "manual" | "text" | "amazonHtml";
+type InputMode = "manual" | "text";
 
 const statusList: InventoryStatus[] = [
   "입고전",
@@ -63,27 +64,6 @@ const seriesList = [
 
 const currencyList = ["JPY", "CNY"];
 
-const EXCHANGE_RATE: Record<string, number> = {
-  JPY: 10,
-  CNY: 230,
-};
-
-function calculatePricing(currency: string, purchasePrice: number, boxCount: number | null) {
-  const rate = EXCHANGE_RATE[currency] ?? EXCHANGE_RATE.JPY;
-  const purchase = Number(purchasePrice) || 0;
-  const packs = Number(boxCount) || 0;
-
-  // 1) 원가 = 구매가 × 환율 × 1.2 + 5,000원
-  const costPrice = Math.round(purchase * rate * 1.2 + 5000);
-
-  // 2) 최소마진가격 = 원가 × 1.1 × 1.07 + 10,000원
-  const minimumMarginPrice = Math.round(costPrice * 1.1 * 1.07 + 10000);
-
-  // 3) 개당판매가 = 최소마진가격 ÷ 박스당 팩 수
-  const unitSalePrice = packs > 0 ? Math.ceil(minimumMarginPrice / packs) : 0;
-
-  return { costPrice, minimumMarginPrice, unitSalePrice };
-}
 
 const initialManualForm = {
   item_name: "",
@@ -106,17 +86,20 @@ const initialManualForm = {
 export default function DomesticInventoryInputPage() {
   const [inputMode, setInputMode] = useState<InputMode>("manual");
   const [rawText, setRawText] = useState("");
-  const [amazonHtmlText, setAmazonHtmlText] = useState("");
   const [manualForm, setManualForm] = useState(initialManualForm);
   const [items, setItems] = useState<PreviewItem[]>([]);
   const [saveMessage, setSaveMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [pricingSettings, setPricingSettings] = useState<PricingSettings>(DEFAULT_PRICING_SETTINGS);
+
+  useEffect(() => {
+    setPricingSettings(loadPricingSettings());
+  }, []);
 
   const parsedItems = useMemo(() => {
-    if (inputMode === "amazonHtml") return parseAmazonHtml(amazonHtmlText);
-    if (inputMode === "text") return parseInventoryText(rawText);
+    if (inputMode === "text") return parseInventoryText(rawText, pricingSettings);
     return [];
-  }, [inputMode, rawText, amazonHtmlText]);
+  }, [inputMode, rawText, pricingSettings]);
 
   useEffect(() => {
     if (inputMode !== "manual") {
@@ -154,7 +137,8 @@ export default function DomesticInventoryInputPage() {
     const pricing = calculatePricing(
       manualForm.currency,
       manualForm.purchase_price,
-      manualForm.component_count || null
+      manualForm.component_count || null,
+      pricingSettings
     );
 
     const item: PreviewItem = {
@@ -213,7 +197,8 @@ export default function DomesticInventoryInputPage() {
             const pricing = calculatePricing(
               nextItem.currency,
               nextItem.purchase_price,
-              nextItem.component_count
+              nextItem.component_count,
+              pricingSettings
             );
             return {
               ...nextItem,
@@ -229,7 +214,8 @@ export default function DomesticInventoryInputPage() {
           const pricing = calculatePricing(
             nextItem.currency,
             nextItem.purchase_price,
-            nextItem.component_count
+            nextItem.component_count,
+            pricingSettings
           );
           return {
             ...nextItem,
@@ -248,12 +234,6 @@ export default function DomesticInventoryInputPage() {
     setItems((prev) => prev.map((item) => ({ ...item, checked })));
   };
 
-  const handleAmazonHtmlFile = async (file?: File) => {
-    if (!file) return;
-    const text = await file.text();
-    setInputMode("amazonHtml");
-    setAmazonHtmlText(text);
-  };
 
   const saveSelected = async () => {
     setSaveMessage("");
@@ -271,7 +251,8 @@ export default function DomesticInventoryInputPage() {
         const pricing = calculatePricing(
           item.currency,
           item.purchase_price,
-          item.component_count
+          item.component_count,
+          pricingSettings
         );
 
         const payload = {
@@ -322,7 +303,7 @@ export default function DomesticInventoryInputPage() {
         <div>
           <h1 style={titleStyle}>국내 재고 입력</h1>
           <p style={subTextStyle}>
-            직접 입력 / 텍스트 붙여넣기 / Amazon HTML 업로드로 재고를 등록합니다.
+            직접 입력 / GPT 정리 텍스트 붙여넣기로 재고를 등록합니다.
           </p>
         </div>
 
@@ -330,6 +311,7 @@ export default function DomesticInventoryInputPage() {
           <Link href="/" style={linkButtonStyle}>메인</Link>
           <Link href="/domestic-inventory-cards" style={linkButtonStyle}>카드형 보기</Link>
           <Link href="/domestic-inventory" style={linkButtonStyle}>인벤토리</Link>
+          <Link href="/pricing-settings" style={linkButtonStyle}>가격 설정</Link>
         </div>
       </div>
 
@@ -349,14 +331,6 @@ export default function DomesticInventoryInputPage() {
             style={inputMode === "text" ? activeModeButtonStyle : modeButtonStyle}
           >
             텍스트 붙여넣기
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setInputMode("amazonHtml")}
-            style={inputMode === "amazonHtml" ? activeModeButtonStyle : modeButtonStyle}
-          >
-            Amazon HTML 업로드
           </button>
         </div>
 
@@ -386,7 +360,8 @@ export default function DomesticInventoryInputPage() {
               const pricing = calculatePricing(
                 manualForm.currency,
                 manualForm.purchase_price,
-                manualForm.component_count || null
+                manualForm.component_count || null,
+                pricingSettings
               );
               return (
                 <div style={pricingBoxStyle}>
@@ -427,23 +402,7 @@ MEMO:`}
               style={rawTextareaStyle}
             />
           </>
-        ) : (
-          <>
-            <h2 style={panelTitleStyle}>Amazon 주문 HTML 업로드</h2>
-            <input
-              type="file"
-              accept=".html,.htm,text/html"
-              onChange={(e) => handleAmazonHtmlFile(e.target.files?.[0])}
-              style={fileInputStyle}
-            />
-            <textarea
-              value={amazonHtmlText}
-              onChange={(e) => setAmazonHtmlText(e.target.value)}
-              placeholder="또는 Amazon 주문 HTML 내용을 직접 붙여넣기"
-              style={rawTextareaStyle}
-            />
-          </>
-        )}
+        ) : null}
 
         <div style={controlBarStyle}>
           <div style={summaryBoxStyle}>
@@ -529,7 +488,7 @@ MEMO:`}
                 </div>
 
                 {(() => {
-                  const pricing = calculatePricing(item.currency, item.purchase_price, item.component_count);
+                  const pricing = calculatePricing(item.currency, item.purchase_price, item.component_count, pricingSettings);
                   return (
                     <div style={pricingBoxStyle}>
                       <span>원가 <strong>{pricing.costPrice.toLocaleString()}원</strong></span>
@@ -559,22 +518,18 @@ MEMO:`}
   );
 }
 
-function parseAmazonHtml(htmlText: string): PreviewItem[] {
-  if (!htmlText.trim()) return [];
-  return [];
-}
 
-function parseInventoryText(rawText: string): PreviewItem[] {
+function parseInventoryText(rawText: string, pricingSettings: PricingSettings): PreviewItem[] {
   if (!rawText.trim()) return [];
 
   if (rawText.includes("=== ITEM ===")) {
-    return parseFixedInventoryText(rawText);
+    return parseFixedInventoryText(rawText, pricingSettings);
   }
 
   return [];
 }
 
-function parseFixedInventoryText(rawText: string): PreviewItem[] {
+function parseFixedInventoryText(rawText: string, pricingSettings: PricingSettings): PreviewItem[] {
   const hasOrderBlock = rawText.includes("=== ORDER ===");
   const orderBlock = hasOrderBlock ? rawText.split("=== ITEM ===")[0] : "";
 
@@ -607,7 +562,7 @@ function parseFixedInventoryText(rawText: string): PreviewItem[] {
     const qty = toNumber(getField(block, "QTY")) || 1;
     const currency = (getField(block, "CURRENCY") || "JPY").toUpperCase();
     const boxCount = toNumber(getField(block, "BOX_COUNT"));
-    const pricing = calculatePricing(currency, price, boxCount || null);
+    const pricing = calculatePricing(currency, price, boxCount || null, pricingSettings);
 
     return {
       local_id: `item-${index}-${Date.now()}`,
