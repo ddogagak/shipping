@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { calculatePricing, loadPricingSettings, type PricingSettings, DEFAULT_PRICING_SETTINGS } from "@/lib/pricing";
 
 type InventoryStatus =
   | "입고전"
@@ -64,6 +63,29 @@ const seriesList = [
 
 const currencyList = ["JPY", "CNY"];
 
+const EXCHANGE_RATE: Record<string, number> = {
+  JPY: 10,
+  CNY: 230,
+};
+
+function calculatePricing(currency: string, purchasePrice: number, boxCount: number | null) {
+  const rate = EXCHANGE_RATE[currency] ?? EXCHANGE_RATE.JPY;
+  const purchase = Number(purchasePrice) || 0;
+  const packs = Number(boxCount) || 0;
+
+  // 1) 원가 = 구매가 × 환율 × 1.2 + 5,000원
+  const costPrice = Math.round(purchase * rate * 1.2 + 5000);
+
+  // 2) 목표이익 = max(10,000원, 원가의 8%)
+  //    최소마진가격 = (원가 + 목표이익) ÷ 0.84
+  const targetProfit = Math.max(10000, costPrice * 0.08);
+  const minimumMarginPrice = Math.ceil((costPrice + targetProfit) / 0.84);
+
+  // 3) 개당판매가 = 최소마진가격 ÷ 박스당 팩 수
+  const unitSalePrice = packs > 0 ? Math.ceil(minimumMarginPrice / packs) : 0;
+
+  return { costPrice, minimumMarginPrice, unitSalePrice };
+}
 
 const initialManualForm = {
   item_name: "",
@@ -90,16 +112,11 @@ export default function DomesticInventoryInputPage() {
   const [items, setItems] = useState<PreviewItem[]>([]);
   const [saveMessage, setSaveMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  const [pricingSettings, setPricingSettings] = useState<PricingSettings>(DEFAULT_PRICING_SETTINGS);
-
-  useEffect(() => {
-    setPricingSettings(loadPricingSettings());
-  }, []);
 
   const parsedItems = useMemo(() => {
-    if (inputMode === "text") return parseInventoryText(rawText, pricingSettings);
+    if (inputMode === "text") return parseInventoryText(rawText);
     return [];
-  }, [inputMode, rawText, pricingSettings]);
+  }, [inputMode, rawText]);
 
   useEffect(() => {
     if (inputMode !== "manual") {
@@ -137,8 +154,7 @@ export default function DomesticInventoryInputPage() {
     const pricing = calculatePricing(
       manualForm.currency,
       manualForm.purchase_price,
-      manualForm.component_count || null,
-      pricingSettings
+      manualForm.component_count || null
     );
 
     const item: PreviewItem = {
@@ -197,8 +213,7 @@ export default function DomesticInventoryInputPage() {
             const pricing = calculatePricing(
               nextItem.currency,
               nextItem.purchase_price,
-              nextItem.component_count,
-              pricingSettings
+              nextItem.component_count
             );
             return {
               ...nextItem,
@@ -214,8 +229,7 @@ export default function DomesticInventoryInputPage() {
           const pricing = calculatePricing(
             nextItem.currency,
             nextItem.purchase_price,
-            nextItem.component_count,
-            pricingSettings
+            nextItem.component_count
           );
           return {
             ...nextItem,
@@ -251,8 +265,7 @@ export default function DomesticInventoryInputPage() {
         const pricing = calculatePricing(
           item.currency,
           item.purchase_price,
-          item.component_count,
-          pricingSettings
+          item.component_count
         );
 
         const payload = {
@@ -311,7 +324,6 @@ export default function DomesticInventoryInputPage() {
           <Link href="/" style={linkButtonStyle}>메인</Link>
           <Link href="/domestic-inventory-cards" style={linkButtonStyle}>카드형 보기</Link>
           <Link href="/domestic-inventory" style={linkButtonStyle}>인벤토리</Link>
-          <Link href="/pricing-settings" style={linkButtonStyle}>가격 설정</Link>
         </div>
       </div>
 
@@ -360,8 +372,7 @@ export default function DomesticInventoryInputPage() {
               const pricing = calculatePricing(
                 manualForm.currency,
                 manualForm.purchase_price,
-                manualForm.component_count || null,
-                pricingSettings
+                manualForm.component_count || null
               );
               return (
                 <div style={pricingBoxStyle}>
@@ -488,7 +499,7 @@ MEMO:`}
                 </div>
 
                 {(() => {
-                  const pricing = calculatePricing(item.currency, item.purchase_price, item.component_count, pricingSettings);
+                  const pricing = calculatePricing(item.currency, item.purchase_price, item.component_count);
                   return (
                     <div style={pricingBoxStyle}>
                       <span>원가 <strong>{pricing.costPrice.toLocaleString()}원</strong></span>
@@ -519,17 +530,17 @@ MEMO:`}
 }
 
 
-function parseInventoryText(rawText: string, pricingSettings: PricingSettings): PreviewItem[] {
+function parseInventoryText(rawText: string): PreviewItem[] {
   if (!rawText.trim()) return [];
 
   if (rawText.includes("=== ITEM ===")) {
-    return parseFixedInventoryText(rawText, pricingSettings);
+    return parseFixedInventoryText(rawText);
   }
 
   return [];
 }
 
-function parseFixedInventoryText(rawText: string, pricingSettings: PricingSettings): PreviewItem[] {
+function parseFixedInventoryText(rawText: string): PreviewItem[] {
   const hasOrderBlock = rawText.includes("=== ORDER ===");
   const orderBlock = hasOrderBlock ? rawText.split("=== ITEM ===")[0] : "";
 
@@ -562,7 +573,7 @@ function parseFixedInventoryText(rawText: string, pricingSettings: PricingSettin
     const qty = toNumber(getField(block, "QTY")) || 1;
     const currency = (getField(block, "CURRENCY") || "JPY").toUpperCase();
     const boxCount = toNumber(getField(block, "BOX_COUNT"));
-    const pricing = calculatePricing(currency, price, boxCount || null, pricingSettings);
+    const pricing = calculatePricing(currency, price, boxCount || null);
 
     return {
       local_id: `item-${index}-${Date.now()}`,
