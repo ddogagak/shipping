@@ -619,7 +619,9 @@ export async function POST(req: Request) {
       first_order_date: row.firstOrderDate || null,
       nickname: cleanNickname(row.nickname) || null, // [닉네임 정리] DB 저장 직전 "(이전" 이후 제거
       recipient_name: row.recipientName || null,
-      phone: removeApostrophe(row.phone) || null,
+      phone: /\d/.test(removeApostrophe(row.phone))
+        ? removeApostrophe(row.phone)
+        : null,
       postal_code: removeApostrophe(row.postalCode) || null,
       address: row.address || null,
       order_count: Number(row.orderCount) || 1,
