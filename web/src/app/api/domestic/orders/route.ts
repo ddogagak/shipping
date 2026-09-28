@@ -243,6 +243,10 @@ export async function PATCH(req: Request) {
         source_order_dates,
         first_order_date,
         nickname,
+        recipient_name,
+        phone,
+        postal_code,
+        address,
         order_count,
         item_summary,
         item_total_price,
@@ -293,6 +297,28 @@ export async function PATCH(req: Request) {
 
     const base = sorted[0];
 
+    const latest = sorted[sorted.length - 1];
+
+    // 이름 / 우편번호 / 주소는 가장 최근 주문 기준
+    const latestRecipientName =
+      String(latest.recipient_name || "").trim() || null;
+    
+    const latestPostalCode =
+      String(latest.postal_code || "").trim() || null;
+    
+    const latestAddress =
+      String(latest.address || "").trim() || null;
+    
+    // 전화번호는 최신 주문부터 역순으로 찾아서
+    // 숫자가 하나라도 들어있는 가장 최근 전화번호 사용
+    const latestValidPhone =
+      [...sorted]
+        .reverse()
+        .map((order: any) => String(order.phone || "").trim())
+        .find((phone: string) => /\d/.test(phone)) || null;
+
+
+    
     // [합배송 최초주문일 규칙]
     // 1) 직배킵 + 일반 주문이 섞이면: 일반 주문 중 가장 오래된 날짜
     // 2) 전부 직배킵이면: 완료되지 않은 전체 주문 중 가장 오래된 날짜
@@ -388,7 +414,18 @@ export async function PATCH(req: Request) {
     const { error: updateError } = await supabase
       .from("domestic_order")
       .update({
+      .from("domestic_order")
+      .update({
         customer_order_no: finalCustomerOrderNo,
+      
+        // 합배송 배송정보:
+        // 주소/수령인은 최신 주문 기준,
+        // 전화번호는 최신 유효 전화번호 기준
+        recipient_name: latestRecipientName,
+        postal_code: latestPostalCode,
+        address: latestAddress,
+        phone: latestValidPhone,
+      
         source_order_dates: combinedDates,
         // [합배송 최초주문일 변경]
         // 직배킵 날짜는 무시하고, 직배킵이 아닌 주문 중 가장 빠른 날짜를 사용
