@@ -414,8 +414,6 @@ export async function PATCH(req: Request) {
     const { error: updateError } = await supabase
       .from("domestic_order")
       .update({
-      .from("domestic_order")
-      .update({
         customer_order_no: finalCustomerOrderNo,
       
         // 합배송 배송정보:
