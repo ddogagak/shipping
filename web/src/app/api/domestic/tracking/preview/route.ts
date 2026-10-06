@@ -94,15 +94,23 @@ function addCandidate(
   map.set(key, list);
 }
 
-function pickSingle(candidates: DomesticOrderMatchRow[]) {
+function pickSingle(candidates: DomesticOrderMatchRow[], trackingNumber?: string) {
   if (candidates.length === 1) return candidates[0];
 
-  const active = candidates.filter((order) => {
-    const s = shipping(order);
-    return order.order_status !== "done" && s?.shipping_status !== "done";
-  });
+  const tracking = cleanTrackingNumber(trackingNumber);
+  if (tracking) {
+    const sameTracking = candidates.filter(
+      (order) => cleanTrackingNumber(shipping(order)?.tracking_number) === tracking
+    );
+    if (sameTracking.length === 1) return sameTracking[0];
+  }
 
-  return active.length === 1 ? active[0] : undefined;
+  const notShippingDone = candidates.filter(
+    (order) => shipping(order)?.shipping_status !== "done"
+  );
+  if (notShippingDone.length === 1) return notShippingDone[0];
+
+  return undefined;
 }
 
 export async function POST(req: Request) {
@@ -181,10 +189,10 @@ export async function POST(req: Request) {
         ? nicknamePrefixMap.get(row.nickname_prefix) || []
         : [];
 
-      const matchedByNicknamePrefix = pickSingle(nicknameCandidates);
+      const matchedByNicknamePrefix = pickSingle(nicknameCandidates, row.tracking_number);
       const matchedByRecipient = matchedByNicknamePrefix
         ? undefined
-        : pickSingle(recipientCandidates);
+        : pickSingle(recipientCandidates, row.tracking_number);
       const matched = matchedByNicknamePrefix || matchedByRecipient;
 
       const currentShipping = shipping(matched);
