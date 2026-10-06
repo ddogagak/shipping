@@ -9,6 +9,7 @@ type ShippingInfo = {
   shipping_type: string | null;
   tracking_number: string | null;
   shipping_status: string | null;
+  tracking_registered: boolean | null;
   excel_exported_at: string | null;
 };
 
@@ -135,6 +136,7 @@ function defaultShipping(): ShippingInfo {
     shipping_type: "일반택배",
     tracking_number: null,
     shipping_status: "start",
+    tracking_registered: false,
     excel_exported_at: null,
   };
 }
@@ -1005,8 +1007,14 @@ export default function DomesticOrdersPage() {
     setSavingRowId(row.order_id);
 
     try {
-      const nextRow = makeRowWithPatch(row, {}, { shipping_status: "registered" });
-      updateShippingValue(row.order_id, { shipping_status: "registered" });
+      const nextRow = makeRowWithPatch(row, {}, {
+        shipping_status: "registered",
+        tracking_registered: true,
+      });
+      updateShippingValue(row.order_id, {
+        shipping_status: "registered",
+        tracking_registered: true,
+      });
 
       await saveRow(nextRow);
 
@@ -1723,20 +1731,20 @@ export default function DomesticOrdersPage() {
                           }}
                           style={{
                             ...registrationToggleStyle,
-                            ...(s.shipping_status === "registered" || s.shipping_status === "done"
+                            ...(Boolean(s.tracking_registered)
                               ? registrationToggleYesStyle
                               : registrationToggleNoStyle),
                           }}
                           disabled={savingRowId === row.order_id}
                           title={
-                            s.shipping_status === "registered" || s.shipping_status === "done"
+                            Boolean(s.tracking_registered)
                               ? "운송장 등록됨"
                               : "Y로 변경하면 운송장등록 + 운송장번호 복사"
                           }
                         >
-                          <span style={s.shipping_status === "registered" || s.shipping_status === "done" ? registrationToggleDimStyle : registrationToggleActiveStyle}>N</span>
+                          <span style={Boolean(s.tracking_registered) ? registrationToggleDimStyle : registrationToggleActiveStyle}>N</span>
                           <span style={registrationToggleSlashStyle}>/</span>
-                          <span style={s.shipping_status === "registered" || s.shipping_status === "done" ? registrationToggleActiveStyle : registrationToggleDimStyle}>
+                          <span style={Boolean(s.tracking_registered) ? registrationToggleActiveStyle : registrationToggleDimStyle}>
                             {savingRowId === row.order_id ? "…" : "Y"}
                           </span>
                         </button>
@@ -2193,7 +2201,7 @@ const registrationToggleStyle: CSSProperties = {
   gap: 4,
   minWidth: 58,
   justifyContent: "center",
-  border: "1px solid #d1d5db",
+  border: 0,
   borderRadius: 999,
   padding: "6px 9px",
   fontWeight: 900,
@@ -2206,7 +2214,7 @@ const registrationToggleNoStyle: CSSProperties = {
 };
 
 const registrationToggleYesStyle: CSSProperties = {
-  background: "#111827",
+  background: "#6b7280",
   color: "#fff",
 };
 
