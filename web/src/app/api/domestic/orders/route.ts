@@ -176,6 +176,52 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ ok: true, order: updatedOrder });
   }
 
+  if (action === "register_tracking") {
+    const orderId = String(body.order_id || "").trim();
+
+    if (!orderId) {
+      return NextResponse.json({ error: "order_id가 없습니다." }, { status: 400 });
+    }
+
+    const { data: currentShipping, error: currentError } = await supabase
+      .from("domestic_shipping")
+      .select("shipping_status")
+      .eq("order_id", orderId)
+      .single();
+
+    if (currentError) {
+      return NextResponse.json(
+        { error: "배송상태 조회 실패", detail: currentError.message },
+        { status: 500 }
+      );
+    }
+
+    const currentStatus = currentShipping?.shipping_status || "start";
+    const nextStatus = currentStatus === "done" ? "done" : "registered";
+
+    const { error } = await supabase
+      .from("domestic_shipping")
+      .update({
+        tracking_registered: true,
+        shipping_status: nextStatus,
+        updated_at: now,
+      })
+      .eq("order_id", orderId);
+
+    if (error) {
+      return NextResponse.json(
+        { error: "운송장 등록 처리 실패", detail: error.message },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      tracking_registered: true,
+      shipping_status: nextStatus,
+    });
+  }
+
   if (action === "update_row") {
     const orderId = String(body.order_id || "").trim();
 
