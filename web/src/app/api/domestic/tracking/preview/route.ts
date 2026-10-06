@@ -12,6 +12,7 @@ type IncomingRow = {
   product_name?: string;
   tracking_number?: string;
   final_product_status?: string;
+  pickup_status?: string;
 };
 
 type ShippingRow = {
@@ -67,13 +68,9 @@ function nicknamePrefix(value: unknown) {
   return Array.from(normalizeNickname(value)).slice(0, 4).join("");
 }
 
-function isCompleteStatus(value: unknown) {
-  const status = normalizeStatus(value);
-  return (
-    status.includes("배송출발") ||
-    status.includes("배송완료") ||
-    status.includes("집화처리")
-  );
+function isPickedUp(value: unknown) {
+  const status = normalizeStatus(value).toUpperCase();
+  return status === "○" || status === "O" || status === "Y" || status === "YES";
 }
 
 function shipping(order?: DomesticOrderMatchRow) {
@@ -127,6 +124,7 @@ export async function POST(req: Request) {
       nickname_prefix: nicknamePrefix(row.product_name),
       tracking_number: cleanTrackingNumber(row.tracking_number),
       final_product_status: safeText(row.final_product_status),
+      pickup_status: safeText(row.pickup_status),
     }));
 
     const supabase = createServiceRoleClient();
@@ -183,33 +181,36 @@ export async function POST(req: Request) {
         ? nicknamePrefixMap.get(row.nickname_prefix) || []
         : [];
 
-      const matchedByRecipient = pickSingle(recipientCandidates);
-      const matchedByNicknamePrefix = matchedByRecipient
+      const matchedByNicknamePrefix = pickSingle(nicknameCandidates);
+      const matchedByRecipient = matchedByNicknamePrefix
         ? undefined
-        : pickSingle(nicknameCandidates);
-      const matched = matchedByRecipient || matchedByNicknamePrefix;
+        : pickSingle(recipientCandidates);
+      const matched = matchedByNicknamePrefix || matchedByRecipient;
 
       const currentShipping = shipping(matched);
-      const completeFromFile = isCompleteStatus(row.final_product_status);
+      const completeFromFile = isPickedUp(row.pickup_status);
       const currentOrderStatus = matched?.order_status || "";
       const currentShippingStatus = currentShipping?.shipping_status || "start";
       const existingTrackingNumber = cleanTrackingNumber(
         currentShipping?.tracking_number
       );
-      const alreadyDone =
-        currentOrderStatus === "done" || currentShippingStatus === "done";
+      const shippingAlreadyDone = currentShippingStatus === "done";
+      const orderAlreadyDone = currentOrderStatus === "done";
+      const sameTracking =
+        Boolean(existingTrackingNumber) &&
+        existingTrackingNumber === row.tracking_number;
+      // 주문은 완료됐지만 배송상태가 uploaded인 과거 건은,
+      // 파일 운송장이 DB 운송장과 같고 집하 완료라면 배송완료로 복구 가능.
+      const canFinishCompletedOrder =
+        orderAlreadyDone &&
+        !shippingAlreadyDone &&
+        sameTracking &&
+        completeFromFile;
+      const alreadyDone = shippingAlreadyDone || (orderAlreadyDone && !canFinishCompletedOrder);
 
       let matchStatus = "not_found";
       if (!row.tracking_number) {
         matchStatus = "missing_tracking";
-      } else if (
-        row.normalized_recipient_name &&
-        recipientCandidates.length > 1 &&
-        !matchedByRecipient
-      ) {
-        matchStatus = "duplicate_recipient_name";
-      } else if (matchedByRecipient) {
-        matchStatus = "matched_by_recipient_name";
       } else if (
         row.nickname_prefix &&
         nicknameCandidates.length > 1 &&
@@ -218,6 +219,14 @@ export async function POST(req: Request) {
         matchStatus = "duplicate_nickname_prefix";
       } else if (matchedByNicknamePrefix) {
         matchStatus = "matched_by_nickname_prefix";
+      } else if (
+        row.normalized_recipient_name &&
+        recipientCandidates.length > 1 &&
+        !matchedByRecipient
+      ) {
+        matchStatus = "duplicate_recipient_name";
+      } else if (matchedByRecipient) {
+        matchStatus = "matched_by_recipient_name";
       }
 
       const trackingComparison = !matched
@@ -228,7 +237,7 @@ export async function POST(req: Request) {
             ? "same"
             : "changed";
 
-      const nextShippingStatus = alreadyDone
+      const nextShippingStatus = shippingAlreadyDone
         ? "done"
         : completeFromFile
           ? "done"
@@ -237,7 +246,11 @@ export async function POST(req: Request) {
         ? "done"
         : currentOrderStatus;
 
-      const canSave = Boolean(matched && row.tracking_number && !alreadyDone);
+      const canSave = Boolean(
+        matched &&
+        row.tracking_number &&
+        (!alreadyDone || canFinishCompletedOrder)
+      );
 
       return {
         ...row,
