@@ -1369,20 +1369,12 @@ export default function DomesticOrdersPage() {
           <div style={{ fontWeight: 800 }}>선택 {selectedIds.length}건</div>
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button type="button" onClick={() => buildCombineDraft(selectedRows)} style={purpleButtonStyle}>
-              선택 합배송
-            </button>
-
             <button type="button" onClick={exportExcel} style={blackButtonStyle}>
               선택 {selectedIds.length}건 엑셀 추출
             </button>
 
             <button type="button" onClick={exportHanjinExcel} style={blueButtonStyle}>
               선택 {selectedIds.length}건 한진 엑셀
-            </button>
-
-            <button type="button" onClick={exportTrackingExcel} style={blueButtonStyle}>
-              운송장다운로드
             </button>
 
             <button type="button" onClick={deleteSelected} style={redButtonStyle}>
