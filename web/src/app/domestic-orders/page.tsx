@@ -1783,9 +1783,9 @@ export default function DomesticOrdersPage() {
                               : "빵집 · 로젠 배송"
                           }
                         >
-                          <span style={s.shipping_type === "한진" ? inventoryLocationDimStyle : inventoryLocationActiveStyle}>🍞🏠</span>
+                          <span style={s.shipping_type === "한진" ? inventoryLocationDimStyle : inventoryLocationActiveStyle}>🥐</span>
                           <span style={inventoryLocationSlashStyle}>/</span>
-                          <span style={s.shipping_type === "한진" ? inventoryLocationActiveStyle : inventoryLocationDimStyle}>🏭</span>
+                          <span style={s.shipping_type === "한진" ? inventoryLocationActiveStyle : inventoryLocationDimStyle}>📦</span>
                         </button>
                       </td>
 
@@ -2238,51 +2238,60 @@ const inventoryLocationToggleStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  gap: 4,
-  minWidth: 74,
-  border: 0,
-  borderRadius: 999,
-  padding: "6px 9px",
-  background: "#f3f4f6",
+  gap: 3,
+  minWidth: 50,
+  border: "1px solid #e5e7eb",
+  borderRadius: 7,
+  padding: "3px 6px",
+  background: "#fff",
+  boxShadow: "0 1px 2px rgba(17, 24, 39, 0.05)",
   cursor: "pointer",
+  lineHeight: 1,
 };
 
 const inventoryLocationActiveStyle: CSSProperties = {
   opacity: 1,
-  fontSize: 16,
+  fontSize: 13,
+  filter: "saturate(1.08)",
 };
 
 const inventoryLocationDimStyle: CSSProperties = {
-  opacity: 0.3,
-  fontSize: 16,
+  opacity: 0.22,
+  fontSize: 12,
+  filter: "grayscale(0.25)",
 };
 
 const inventoryLocationSlashStyle: CSSProperties = {
-  color: "#9ca3af",
-  fontWeight: 700,
+  color: "#d1d5db",
+  fontWeight: 600,
+  fontSize: 10,
 };
 
 const registrationToggleStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
-  gap: 4,
-  minWidth: 58,
+  gap: 3,
+  minWidth: 45,
   justifyContent: "center",
-  border: 0,
-  borderRadius: 999,
-  padding: "6px 9px",
+  border: "1px solid #e5e7eb",
+  borderRadius: 7,
+  padding: "3px 6px",
+  fontSize: 11,
   fontWeight: 900,
+  lineHeight: 1.2,
   cursor: "pointer",
+  boxShadow: "0 1px 2px rgba(17, 24, 39, 0.05)",
 };
 
 const registrationToggleNoStyle: CSSProperties = {
-  background: "#f3f4f6",
-  color: "#111827",
+  background: "#fff",
+  color: "#374151",
 };
 
 const registrationToggleYesStyle: CSSProperties = {
-  background: "#6b7280",
-  color: "#fff",
+  background: "#f3f4f6",
+  color: "#111827",
+  borderColor: "#d1d5db",
 };
 
 const registrationToggleActiveStyle: CSSProperties = {
@@ -2292,11 +2301,13 @@ const registrationToggleActiveStyle: CSSProperties = {
 
 const registrationToggleDimStyle: CSSProperties = {
   fontWeight: 700,
-  opacity: 0.35,
+  opacity: 0.22,
 };
 
 const registrationToggleSlashStyle: CSSProperties = {
-  opacity: 0.45,
+  color: "#d1d5db",
+  opacity: 1,
+  fontWeight: 600,
 };
 
 const smallSaveButtonStyle: CSSProperties = {
