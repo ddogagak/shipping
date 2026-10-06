@@ -924,6 +924,7 @@ export default function DomesticOrdersPage() {
         shipping_status: s.shipping_status || "start",
         shipping_type: s.shipping_type || "일반택배",
         tracking_number: s.tracking_number || "",
+        tracking_registered: Boolean(s.tracking_registered),
       }),
     });
 
