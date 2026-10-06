@@ -204,8 +204,7 @@ export async function POST(req: Request) {
       const canFinishCompletedOrder =
         orderAlreadyDone &&
         !shippingAlreadyDone &&
-        sameTracking &&
-        completeFromFile;
+        sameTracking;
       const alreadyDone = shippingAlreadyDone || (orderAlreadyDone && !canFinishCompletedOrder);
 
       let matchStatus = "not_found";
@@ -237,7 +236,7 @@ export async function POST(req: Request) {
             ? "same"
             : "changed";
 
-      const nextShippingStatus = shippingAlreadyDone
+      const nextShippingStatus = shippingAlreadyDone || canFinishCompletedOrder
         ? "done"
         : completeFromFile
           ? "done"
