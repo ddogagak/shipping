@@ -196,8 +196,7 @@ export async function PATCH(req: Request) {
       );
     }
 
-    const currentStatus = currentShipping?.shipping_status || "start";
-    const nextStatus = currentStatus === "done" ? "done" : "registered";
+    const nextStatus = "registered";
 
     const { error } = await supabase
       .from("domestic_shipping")
@@ -290,7 +289,10 @@ export async function PATCH(req: Request) {
         shipping_status: nextShippingStatus,
         shipping_type: body.shipping_type || "일반택배",
         tracking_number: trackingNumber,
-        tracking_registered: Boolean(body.tracking_registered),
+        tracking_registered:
+          nextOrderStatus === "done" || nextOrderStatus === "kept"
+            ? true
+            : Boolean(body.tracking_registered),
         updated_at: now,
       })
       .eq("order_id", orderId);
