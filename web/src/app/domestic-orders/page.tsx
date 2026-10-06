@@ -143,6 +143,36 @@ function label(options: { value: string; label: string }[], value?: string | nul
   return options.find((option) => option.value === value)?.label || value || "-";
 }
 
+function parseOrderDate(value?: string | null) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+
+  const match = raw.match(/^(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+  if (!match) return null;
+
+  const [, y, m, d, hh = "0", mm = "0", ss = "0"] = match;
+  const parsed = new Date(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss));
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function orderAgeDays(value?: string | null) {
+  const date = parseOrderDate(value);
+  if (!date) return null;
+
+  const diff = Date.now() - date.getTime();
+  return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
+}
+
+function shortOrderDate(value?: string | null) {
+  const date = parseOrderDate(value);
+  if (!date) return String(value || "");
+
+  const yy = String(date.getFullYear()).slice(-2);
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yy}.${mm}.${dd}`;
+}
+
 function formatWon(value?: number | null) {
   return `${Number(value || 0).toLocaleString("ko-KR")}원`;
 }
@@ -1605,7 +1635,28 @@ export default function DomesticOrdersPage() {
                       </td>
 
                       <td style={tdStyle}>{row.nickname || ""}</td>
-                      <td style={tdStyle}>{row.first_order_date || ""}</td>
+                      <td style={{ ...tdStyle, textAlign: "center" }}>
+                        {(() => {
+                          const days = orderAgeDays(row.first_order_date);
+                          return (
+                            <div style={orderDateCellStyle}>
+                              {days !== null ? (
+                                <span
+                                  style={{
+                                    ...orderAgeBadgeStyle,
+                                    ...(days >= 12 ? orderAgeWarningStyle : {}),
+                                  }}
+                                >
+                                  📦 +{days}일
+                                </span>
+                              ) : null}
+                              <span style={orderDateShortStyle}>
+                                {shortOrderDate(row.first_order_date)}
+                              </span>
+                            </div>
+                          );
+                        })()}
+                      </td>
 
                       <td
                         style={{ ...tdStyle, cursor: "pointer" }}
@@ -2267,4 +2318,37 @@ const itemTooltipStyle: CSSProperties = {
   boxShadow: "0 12px 32px rgba(0,0,0,.16)",
   fontSize: 13,
   lineHeight: 1.55,
+};
+
+const orderDateCellStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  gap: 5,
+  whiteSpace: "nowrap",
+};
+
+const orderAgeBadgeStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "3px 7px",
+  borderRadius: 7,
+  background: "#f3f4f6",
+  color: "#374151",
+  fontSize: 12,
+  fontWeight: 900,
+  lineHeight: 1.2,
+};
+
+const orderAgeWarningStyle: CSSProperties = {
+  background: "#fef3c7",
+  color: "#92400e",
+  border: "1px solid #fcd34d",
+};
+
+const orderDateShortStyle: CSSProperties = {
+  fontSize: 11,
+  color: "#6b7280",
+  lineHeight: 1.2,
 };
