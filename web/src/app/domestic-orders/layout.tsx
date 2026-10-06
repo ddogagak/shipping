@@ -15,7 +15,10 @@ type Order = {
 export default function DomesticOrdersLayout({ children }: { children: ReactNode }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [selected, setSelected] = useState<Order | null>(null);
-  const [copied, setCopied] = useState("");
+  const [recipientName, setRecipientName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     void fetch("/api/domestic/orders", { cache: "no-store" })
@@ -44,8 +47,10 @@ export default function DomesticOrdersLayout({ children }: { children: ReactNode
         ) || orders.find((order) => (order.nickname || "").trim() === nickname);
 
       if (matched) {
-        setCopied("");
         setSelected(matched);
+        setRecipientName(matched.recipient_name || "");
+        setPhone(matched.phone || "");
+        setAddress(matched.address || "");
       }
     }
 
@@ -62,21 +67,39 @@ export default function DomesticOrdersLayout({ children }: { children: ReactNode
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [selected]);
 
-  async function copy(label: string, value: string) {
-    await navigator.clipboard.writeText(value || "");
-    setCopied(label);
-    window.setTimeout(() => setCopied(""), 1200);
+  async function saveDeliveryInfo() {
+    if (!selected) return;
+
+    setSaving(true);
+    try {
+      const res = await fetch("/api/domestic/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update_delivery_info",
+          order_id: selected.order_id,
+          recipient_name: recipientName,
+          phone,
+          address,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok) {
+        alert(json.detail || json.error || "배송정보 저장 실패");
+        return;
+      }
+
+      const updated = { ...selected, ...json.order };
+      setSelected(updated);
+      setOrders((prev) =>
+        prev.map((order) => (order.order_id === selected.order_id ? { ...order, ...json.order } : order))
+      );
+      setSelected(null);
+    } finally {
+      setSaving(false);
+    }
   }
-
-  const fullAddress = selected
-    ? [selected.postal_code ? `(${selected.postal_code})` : "", selected.address || ""]
-        .filter(Boolean)
-        .join(" ")
-    : "";
-
-  const copyAll = selected
-    ? [`이름: ${selected.recipient_name || ""}`, `폰번: ${selected.phone || ""}`, `주소: ${fullAddress}`].join("\n")
-    : "";
 
   return (
     <>
@@ -95,14 +118,20 @@ export default function DomesticOrdersLayout({ children }: { children: ReactNode
               </button>
             </div>
 
-            <InfoRow label="이름" value={selected.recipient_name || ""} onCopy={() => copy("이름", selected.recipient_name || "")} copied={copied === "이름"} />
-            <InfoRow label="폰번" value={selected.phone || ""} onCopy={() => copy("폰번", selected.phone || "")} copied={copied === "폰번"} />
-            <InfoRow label="주소" value={fullAddress} onCopy={() => copy("주소", fullAddress)} copied={copied === "주소"} multiline />
+            <EditRow label="이름">
+              <input value={recipientName} onChange={(event) => setRecipientName(event.target.value)} style={inputStyle} />
+            </EditRow>
+            <EditRow label="폰번">
+              <input value={phone} onChange={(event) => setPhone(event.target.value)} style={inputStyle} />
+            </EditRow>
+            <EditRow label="주소">
+              <textarea value={address} onChange={(event) => setAddress(event.target.value)} style={textareaStyle} />
+            </EditRow>
 
-            <button type="button" onClick={() => copy("전체", copyAll)} style={copyAllButtonStyle}>
-              {copied === "전체" ? "전체 복사됨 ✓" : "이름 · 폰번 · 주소 전체 복사"}
+            <button type="button" onClick={() => void saveDeliveryInfo()} style={saveButtonStyle} disabled={saving}>
+              {saving ? "저장 중..." : "저장"}
             </button>
-            <div style={hintStyle}>닉네임을 더블클릭하면 이 창이 열립니다. ESC 또는 바깥 클릭으로 닫을 수 있어요.</div>
+            <div style={hintStyle}>닉네임을 더블클릭하면 배송정보를 수정할 수 있습니다. ESC 또는 바깥 클릭으로 닫을 수 있어요.</div>
           </div>
         </div>
       ) : null}
@@ -110,26 +139,11 @@ export default function DomesticOrdersLayout({ children }: { children: ReactNode
   );
 }
 
-function InfoRow({
-  label,
-  value,
-  onCopy,
-  copied,
-  multiline = false,
-}: {
-  label: string;
-  value: string;
-  onCopy: () => void;
-  copied: boolean;
-  multiline?: boolean;
-}) {
+function EditRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div style={rowStyle}>
       <div style={labelStyle}>{label}</div>
-      <div style={{ ...valueStyle, whiteSpace: multiline ? "pre-wrap" : "nowrap" }}>{value || "-"}</div>
-      <button type="button" onClick={onCopy} style={copyButtonStyle} disabled={!value}>
-        {copied ? "복사됨 ✓" : "복사"}
-      </button>
+      {children}
     </div>
   );
 }
@@ -176,7 +190,7 @@ const closeButtonStyle: CSSProperties = {
 
 const rowStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "56px minmax(0, 1fr) 64px",
+  gridTemplateColumns: "56px minmax(0, 1fr)",
   alignItems: "center",
   gap: 10,
   padding: "12px 0",
@@ -184,18 +198,23 @@ const rowStyle: CSSProperties = {
 };
 
 const labelStyle: CSSProperties = { fontSize: 13, fontWeight: 900, color: "#374151" };
-const valueStyle: CSSProperties = { minWidth: 0, fontSize: 15, color: "#111827", overflowWrap: "anywhere" };
-
-const copyButtonStyle: CSSProperties = {
+const inputStyle: CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
   border: "1px solid #d1d5db",
   borderRadius: 8,
-  padding: "7px 8px",
-  background: "#fff",
-  fontWeight: 800,
-  cursor: "pointer",
+  padding: "9px 10px",
+  fontSize: 15,
 };
 
-const copyAllButtonStyle: CSSProperties = {
+const textareaStyle: CSSProperties = {
+  ...inputStyle,
+  minHeight: 90,
+  resize: "vertical",
+  fontFamily: "inherit",
+};
+
+const saveButtonStyle: CSSProperties = {
   width: "100%",
   marginTop: 14,
   border: 0,
