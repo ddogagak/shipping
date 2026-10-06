@@ -1007,24 +1007,44 @@ export default function DomesticOrdersPage() {
 
     setSavingRowId(row.order_id);
 
+    // 클릭 직후 복사를 먼저 시도해야 브라우저의 사용자 제스처 권한을 안정적으로 유지할 수 있습니다.
+    let copied = false;
     try {
-      const nextRow = makeRowWithPatch(row, {}, {
-        shipping_status: "registered",
-        tracking_registered: true,
-      });
-      updateShippingValue(row.order_id, {
-        shipping_status: "registered",
-        tracking_registered: true,
+      await navigator.clipboard.writeText(trackingNumber);
+      copied = true;
+    } catch {
+      copied = false;
+    }
+
+    try {
+      const res = await fetch("/api/domestic/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "register_tracking",
+          order_id: row.order_id,
+        }),
       });
 
-      await saveRow(nextRow);
+      const json = await res.json();
 
-      try {
-        await navigator.clipboard.writeText(trackingNumber);
-        setMessage(`운송장등록 완료 · ${trackingNumber} 복사됨`);
-      } catch {
-        setMessage("운송장등록 완료 · 클립보드 복사는 브라우저 권한을 확인해줘.");
+      if (!res.ok) {
+        alert(json.detail || json.error || "운송장 등록 실패");
+        await load();
+        return;
       }
+
+      updateShippingValue(row.order_id, {
+        shipping_status: json.shipping_status || "registered",
+        tracking_registered: true,
+      });
+
+      setMessage(
+        copied
+          ? `운송장등록 완료 · ${trackingNumber} 복사됨`
+          : "운송장등록 완료 · 클립보드 복사는 브라우저 권한을 확인해줘."
+      );
+      await load();
     } finally {
       setSavingRowId(null);
     }
@@ -1726,7 +1746,7 @@ export default function DomesticOrdersPage() {
                         <button
                           type="button"
                           onClick={() => {
-                            if (s.shipping_status !== "registered" && s.shipping_status !== "done") {
+                            if (!s.tracking_registered) {
                               void registerTracking(row);
                             }
                           }}
