@@ -27,14 +27,9 @@ function normalizeOrderKey(value: unknown) {
     .replace(/-C\d+$/i, "");
 }
 
-function isCompleteStatus(value: unknown) {
-  const status = normalizeStatus(value);
-
-  return (
-    status.includes("배송출발") ||
-    status.includes("배송완료") ||
-    status.includes("집화처리")
-  );
+function isPickedUp(value: unknown) {
+  const status = normalizeStatus(value).toUpperCase();
+  return status === "○" || status === "O" || status === "Y" || status === "YES";
 }
 
 function unique(values: string[]) {
@@ -165,6 +160,7 @@ export async function PATCH(req: Request) {
         raw: row,
         tracking_number: cleanTrackingNumber(row.tracking_number),
         final_product_status: safeText(row.final_product_status),
+        pickup_status: safeText(row.pickup_status),
       }))
       .filter((row) => row.tracking_number);
 
@@ -198,7 +194,7 @@ export async function PATCH(req: Request) {
         );
       }
 
-      const complete = isCompleteStatus(row.final_product_status);
+      const complete = isPickedUp(row.pickup_status);
       const shippingStatus = complete ? "done" : "uploaded";
 
       const { data: updatedShippingRows, error: shippingError } = await supabase
