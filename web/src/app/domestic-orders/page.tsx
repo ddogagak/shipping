@@ -60,6 +60,8 @@ type SortKey =
   | "order_count"
   | "first_order_date"
   | "memo"
+  | "tracking_registered"
+  | "inventory_location"
   | "order_status"
   // [요청상태 추가] 요청상태 정렬 지원
   | "request_status"
@@ -341,6 +343,8 @@ function sortValue(row: Row, key: SortKey): string | number {
     case "order_count": return Number(row.order_count || 0);
     case "first_order_date": return row.first_order_date || "";
     case "memo": return row.memo || "";
+    case "tracking_registered": return s?.tracking_registered ? 1 : 0;
+    case "inventory_location": return s?.shipping_type === "한진" ? 1 : 0;
     case "order_status": return row.order_status || "";
     // [요청상태 추가]
     case "request_status": return row.request_status || "none";
@@ -1663,8 +1667,8 @@ export default function DomesticOrdersPage() {
                   <SortableTh label="닉네임" sortKeyValue="nickname" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   <SortableTh label="최초주문일" sortKeyValue="first_order_date" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   <SortableTh label="메모" sortKeyValue="memo" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
-                  <th style={thStyle}>등록</th>
-                  <th style={thStyle}>재고위치</th>
+                  <SortableTh label="등록" sortKeyValue="tracking_registered" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
+                  <SortableTh label="재고위치" sortKeyValue="inventory_location" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   <SortableTh label="주문상태" sortKeyValue="order_status" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   {/* [요청상태 추가] */}
                   <SortableTh label="요청상태" sortKeyValue="request_status" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
@@ -2240,7 +2244,7 @@ const inventoryLocationToggleStyle: CSSProperties = {
   justifyContent: "center",
   gap: 3,
   minWidth: 50,
-  border: "1px solid #e5e7eb",
+  border: "1px solid #111827",
   borderRadius: 7,
   padding: "3px 6px",
   background: "#fff",
@@ -2273,7 +2277,7 @@ const registrationToggleStyle: CSSProperties = {
   gap: 3,
   minWidth: 45,
   justifyContent: "center",
-  border: "1px solid #e5e7eb",
+  border: "1px solid #111827",
   borderRadius: 7,
   padding: "3px 6px",
   fontSize: 11,
@@ -2291,7 +2295,7 @@ const registrationToggleNoStyle: CSSProperties = {
 const registrationToggleYesStyle: CSSProperties = {
   background: "#f3f4f6",
   color: "#111827",
-  borderColor: "#d1d5db",
+  borderColor: "#111827",
 };
 
 const registrationToggleActiveStyle: CSSProperties = {
@@ -2578,9 +2582,9 @@ const orderAgeWarningStyle: CSSProperties = {
 };
 
 const orderAgeApproachingStyle: CSSProperties = {
-  background: "rgba(255, 245, 79, 0.7)",
+  background: "rgba(255, 245, 79, 0.3)",
   color: "#111827",
-  border: "1px solid rgba(17, 24, 39, 0.7)",
+  border: "1px solid rgba(17, 24, 39, 0.3)",
 };
 
 const orderDateShortStyle: CSSProperties = {
