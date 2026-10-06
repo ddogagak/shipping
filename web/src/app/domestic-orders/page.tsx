@@ -329,6 +329,9 @@ export default function DomesticOrdersPage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [savingRowId, setSavingRowId] = useState<string | null>(null);
+  const [memoModalRow, setMemoModalRow] = useState<Row | null>(null);
+  const [memoModalValue, setMemoModalValue] = useState("");
+  const [memoModalSaving, setMemoModalSaving] = useState(false);
 
   const [platforms, setPlatforms] = useState<string[]>([]);
   const [orderStatuses, setOrderStatuses] = useState<string[]>(["accepted", "checked","packaged"]);
@@ -825,6 +828,41 @@ export default function DomesticOrdersPage() {
     }
 
     await load();
+  }
+
+  function openMemoModal(row: Row) {
+    setMemoModalRow(row);
+    setMemoModalValue(row.memo || "");
+  }
+
+  async function saveMemoModal() {
+    if (!memoModalRow) return;
+
+    setMemoModalSaving(true);
+    try {
+      const res = await fetch("/api/domestic/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update_memo",
+          order_id: memoModalRow.order_id,
+          memo: memoModalValue,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok) {
+        alert(json.detail || json.error || "메모 저장 실패");
+        return;
+      }
+
+      updateRowValue(memoModalRow.order_id, { memo: memoModalValue });
+      setMessage("메모 저장 완료");
+      setMemoModalRow(null);
+      await load();
+    } finally {
+      setMemoModalSaving(false);
+    }
   }
 
   async function saveRow(row: Row) {
@@ -1568,10 +1606,18 @@ export default function DomesticOrdersPage() {
                       <td style={tdStyle}>{row.nickname || ""}</td>
                       <td style={tdStyle}>{row.first_order_date || ""}</td>
 
-                      <td style={tdStyle}>
+                      <td
+                        style={{ ...tdStyle, cursor: "pointer" }}
+                        onDoubleClick={() => openMemoModal(row)}
+                        title="더블클릭해서 메모 크게 보기/수정"
+                      >
                         <input
                           value={row.memo || ""}
                           onChange={(event) => updateRowValue(row.order_id, { memo: event.target.value })}
+                          onDoubleClick={(event) => {
+                            event.stopPropagation();
+                            openMemoModal(row);
+                          }}
                           style={memoInputStyle}
                         />
                       </td>
@@ -1689,7 +1735,44 @@ export default function DomesticOrdersPage() {
           </div>
         )}
       </section>
-    </main>
+          {memoModalRow ? (
+        <div style={memoBackdropStyle} onMouseDown={() => setMemoModalRow(null)}>
+          <div style={memoModalStyle} onMouseDown={(event) => event.stopPropagation()}>
+            <div style={memoModalHeaderStyle}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 800, color: "#6b7280" }}>메모 수정</div>
+                <h2 style={{ margin: "3px 0 0", fontSize: 21 }}>
+                  {memoModalRow.nickname || displayOrderNo(memoModalRow)}
+                </h2>
+              </div>
+              <button type="button" onClick={() => setMemoModalRow(null)} style={memoCloseButtonStyle}>×</button>
+            </div>
+
+            <textarea
+              value={memoModalValue}
+              onChange={(event) => setMemoModalValue(event.target.value)}
+              autoFocus
+              rows={12}
+              style={memoTextareaStyle}
+              placeholder="메모를 입력해줘."
+            />
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+              <button type="button" onClick={() => setMemoModalRow(null)} style={memoCancelButtonStyle}>
+                취소
+              </button>
+              <button type="button" onClick={() => void saveMemoModal()} disabled={memoModalSaving} style={memoSaveButtonStyle}>
+                {memoModalSaving ? "저장중..." : "메모 저장"}
+              </button>
+            </div>
+            <div style={{ marginTop: 10, color: "#9ca3af", fontSize: 11 }}>
+              메모 칸을 더블클릭하면 이 창이 열립니다.
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+</main>
   );
 }
 
@@ -2072,4 +2155,74 @@ const tdStyle: CSSProperties = {
   borderBottom: "1px solid #f3f4f6",
   padding: "10px 8px",
   verticalAlign: "top",
+};
+
+const memoBackdropStyle: CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 10000,
+  display: "grid",
+  placeItems: "center",
+  padding: 20,
+  background: "rgba(17, 24, 39, 0.42)",
+};
+
+const memoModalStyle: CSSProperties = {
+  width: "min(720px, 100%)",
+  borderRadius: 18,
+  padding: 20,
+  background: "#fff",
+  boxShadow: "0 24px 70px rgba(0,0,0,.24)",
+  border: "1px solid #e5e7eb",
+};
+
+const memoModalHeaderStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+  gap: 12,
+  marginBottom: 14,
+};
+
+const memoCloseButtonStyle: CSSProperties = {
+  width: 34,
+  height: 34,
+  border: 0,
+  borderRadius: 9,
+  background: "#f3f4f6",
+  fontSize: 24,
+  lineHeight: 1,
+  cursor: "pointer",
+};
+
+const memoTextareaStyle: CSSProperties = {
+  width: "100%",
+  minHeight: 280,
+  boxSizing: "border-box",
+  resize: "vertical",
+  border: "1px solid #d1d5db",
+  borderRadius: 12,
+  padding: 14,
+  fontSize: 15,
+  lineHeight: 1.6,
+  fontFamily: "inherit",
+};
+
+const memoCancelButtonStyle: CSSProperties = {
+  border: "1px solid #d1d5db",
+  borderRadius: 10,
+  padding: "10px 14px",
+  background: "#fff",
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
+const memoSaveButtonStyle: CSSProperties = {
+  border: 0,
+  borderRadius: 10,
+  padding: "10px 16px",
+  background: "#111827",
+  color: "#fff",
+  fontWeight: 900,
+  cursor: "pointer",
 };
