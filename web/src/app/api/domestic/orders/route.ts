@@ -143,6 +143,38 @@ export async function PATCH(req: Request) {
     });
   }
 
+  if (action === "update_memo") {
+    const orderId = String(body.order_id || "").trim();
+
+    if (!orderId) {
+      return NextResponse.json({ error: "order_id가 없습니다." }, { status: 400 });
+    }
+
+    const memo =
+      body.memo === undefined || body.memo === null
+        ? null
+        : String(body.memo);
+
+    const { data: updatedOrder, error } = await supabase
+      .from("domestic_order")
+      .update({
+        memo,
+        updated_at: now,
+      })
+      .eq("order_id", orderId)
+      .select("order_id, memo")
+      .single();
+
+    if (error) {
+      return NextResponse.json(
+        { error: "메모 저장 실패", detail: error.message },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ ok: true, order: updatedOrder });
+  }
+
   if (action === "update_row") {
     const orderId = String(body.order_id || "").trim();
 
