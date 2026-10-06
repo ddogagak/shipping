@@ -113,20 +113,14 @@ const SHIPPING_TYPE_OPTIONS = [
 ];
 
 const HEADERS = [
-  "받는분성명",
-  "받는분우편번호",
-  "받는분전화번호",
-  "받는분주소(전체, 분할)",
-  "고객주문번호",
-  "품목명",
-  "내품명",
-  "박스수량",
-  "박스타입",
-  "기본운임",
-  "주문건수",
-  "최초주문일",
-  "아이템",
-  "상품금액합계",
+  "물품명",
+  "수하인명",
+  "수하인주소1",
+  "수하인주소2",
+  "수하인휴대폰",
+  "내품수량",
+  "물품금액",
+  "주문번호",
 ];
 
 function shipping(row: DomesticOrder): ShippingInfo | null {
@@ -252,21 +246,19 @@ function uniqueStrings(values: Array<string | null | undefined>) {
 }
 
 function toExcelRow(row: DomesticOrder) {
+  const { mainAddress, detailAddress } = splitHanjinAddress(row.address);
+  const itemPrice = Math.max(0, Number(row.item_total_price || 0));
+  const roundedItemPrice = Math.min(500000, Math.max(100000, Math.ceil(itemPrice / 100000) * 100000));
+
   return {
-    받는분성명: row.recipient_name || "",
-    받는분우편번호: withApostrophe(row.postal_code),
-    받는분전화번호: withApostrophe(row.phone),
-    "받는분주소(전체, 분할)": row.address || "",
-    고객주문번호: displayOrderNo(row),
-    품목명: "피규어",
-    내품명: contentName(row),
-    박스수량: "1",
-    박스타입: "1",
-    기본운임: "",
-    주문건수: String(row.order_count || 1),
-    최초주문일: row.first_order_date || "",
-    아이템: row.item_summary || "",
-    상품금액합계: formatWon(row.item_total_price),
+    물품명: `${row.nickname || ""} 피규어`.trim(),
+    수하인명: row.recipient_name || "",
+    수하인주소1: mainAddress,
+    수하인주소2: detailAddress,
+    수하인휴대폰: formatHanjinPhone(row.phone),
+    내품수량: Number(row.order_count || 1),
+    물품금액: roundedItemPrice,
+    주문번호: row.customer_order_no || "",
   };
 }
 
@@ -1095,24 +1087,26 @@ export default function DomesticOrdersPage() {
     const worksheet = XLSX.utils.json_to_sheet(data, { header: HEADERS });
 
     worksheet["!cols"] = [
+      { wch: 24 },
       { wch: 14 },
-      { wch: 16 },
+      { wch: 42 },
+      { wch: 30 },
       { wch: 18 },
-      { wch: 48 },
-      { wch: 18 },
+      { wch: 10 },
       { wch: 14 },
-      { wch: 28 },
-      { wch: 10 },
-      { wch: 10 },
-      { wch: 12 },
-      { wch: 10 },
-      { wch: 20 },
-      { wch: 80 },
-      { wch: 16 },
+      { wch: 24 },
     ];
 
+    for (let rowIndex = 2; rowIndex <= data.length + 1; rowIndex += 1) {
+      const phoneCell = worksheet[`E${rowIndex}`];
+      const orderNoCell = worksheet[`H${rowIndex}`];
+
+      if (phoneCell) phoneCell.t = "s";
+      if (orderNoCell) orderNoCell.t = "s";
+    }
+
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "국내배송");
+    XLSX.utils.book_append_sheet(workbook, worksheet, "로젠택배");
 
     const now = new Date();
     const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(
@@ -1123,7 +1117,7 @@ export default function DomesticOrdersPage() {
       "0"
     )}${String(now.getMinutes()).padStart(2, "0")}`;
 
-    XLSX.writeFile(workbook, `domestic_shipping_${stamp}.xlsx`);
+    XLSX.writeFile(workbook, `logen_shipping_${stamp}.xlsx`);
     await patch("excel_exported");
   }
 
@@ -1379,7 +1373,7 @@ export default function DomesticOrdersPage() {
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button type="button" onClick={exportExcel} style={blackButtonStyle}>
-              선택 {selectedIds.length}건 엑셀 추출
+              선택 {selectedIds.length}건 로젠엑셀
             </button>
 
             <button type="button" onClick={exportHanjinExcel} style={blueButtonStyle}>
