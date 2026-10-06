@@ -173,6 +173,13 @@ function shortOrderDate(value?: string | null) {
   return `${yy}.${mm}.${dd}`;
 }
 
+function itemSummaryCount(value?: string | null) {
+  return String(value || "")
+    .split(/\s*\/\s*/)
+    .map((item) => item.trim())
+    .filter(Boolean).length;
+}
+
 function formatWon(value?: number | null) {
   return `${Number(value || 0).toLocaleString("ko-KR")}원`;
 }
@@ -1644,7 +1651,11 @@ export default function DomesticOrdersPage() {
                                 <span
                                   style={{
                                     ...orderAgeBadgeStyle,
-                                    ...(days >= 12 ? orderAgeWarningStyle : {}),
+                                    ...(days >= 12
+                                      ? orderAgeWarningStyle
+                                      : days >= 9
+                                        ? orderAgeApproachingStyle
+                                        : {}),
                                   }}
                                 >
                                   +{days}일
@@ -1762,7 +1773,16 @@ export default function DomesticOrdersPage() {
                             }}
                             aria-expanded={openItemTooltipId === row.order_id}
                           >
-                            {row.item_summary || "-"}
+                            {row.item_summary ? (
+                              <>
+                                <span style={itemCountBadgeStyle}>
+                                  {itemSummaryCount(row.item_summary)}개
+                                </span>
+                                <span style={itemPreviewTextStyle}>{row.item_summary}</span>
+                              </>
+                            ) : (
+                              "-"
+                            )}
                           </button>
                           {openItemTooltipId === row.order_id && row.item_summary ? (
                             <div
@@ -2303,7 +2323,8 @@ const itemTooltipWrapperStyle: CSSProperties = {
 };
 
 const itemPreviewStyle: CSSProperties = {
-  display: "block",
+  display: "flex",
+  alignItems: "center",
   width: "100%",
   maxWidth: 260,
   padding: 0,
@@ -2317,6 +2338,27 @@ const itemPreviewStyle: CSSProperties = {
   whiteSpace: "nowrap",
   cursor: "pointer",
   outline: "none",
+};
+
+const itemCountBadgeStyle: CSSProperties = {
+  flex: "0 0 auto",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  marginRight: 7,
+  padding: "2px 6px",
+  borderRadius: 6,
+  background: "#111827",
+  color: "#fff",
+  fontSize: 11,
+  fontWeight: 900,
+  lineHeight: 1.3,
+};
+
+const itemPreviewTextStyle: CSSProperties = {
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
 };
 
 const itemTooltipStyle: CSSProperties = {
@@ -2364,6 +2406,12 @@ const orderAgeWarningStyle: CSSProperties = {
   background: "#FFF54F",
   color: "#111827",
   border: "1px solid #111827",
+};
+
+const orderAgeApproachingStyle: CSSProperties = {
+  background: "rgba(255, 245, 79, 0.7)",
+  color: "#111827",
+  border: "1px solid rgba(17, 24, 39, 0.7)",
 };
 
 const orderDateShortStyle: CSSProperties = {
