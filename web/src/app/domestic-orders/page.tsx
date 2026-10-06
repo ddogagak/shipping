@@ -1647,7 +1647,7 @@ export default function DomesticOrdersPage() {
                                     ...(days >= 12 ? orderAgeWarningStyle : {}),
                                   }}
                                 >
-                                  📦 +{days}일
+                                  +{days}일
                                 </span>
                               ) : null}
                               <span style={orderDateShortStyle}>
@@ -1747,22 +1747,28 @@ export default function DomesticOrdersPage() {
                         </select>
                       </td>
 
-                      <td style={{ ...tdStyle, position: "relative" }}>
+                      <td style={{ ...tdStyle, position: "relative", overflow: "visible" }}>
                         <div
-                          tabIndex={0}
-                          style={itemPreviewStyle}
+                          style={itemTooltipWrapperStyle}
                           onMouseEnter={() => setOpenItemTooltipId(row.order_id)}
                           onMouseLeave={() => setOpenItemTooltipId((current) => current === row.order_id ? null : current)}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setOpenItemTooltipId((current) => current === row.order_id ? null : row.order_id);
-                          }}
-                          onBlur={() => setOpenItemTooltipId((current) => current === row.order_id ? null : current)}
-                          aria-expanded={openItemTooltipId === row.order_id}
                         >
-                          {row.item_summary || "-"}
+                          <button
+                            type="button"
+                            style={itemPreviewStyle}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setOpenItemTooltipId((current) => current === row.order_id ? null : row.order_id);
+                            }}
+                            aria-expanded={openItemTooltipId === row.order_id}
+                          >
+                            {row.item_summary || "-"}
+                          </button>
                           {openItemTooltipId === row.order_id && row.item_summary ? (
-                            <div style={itemTooltipStyle} onMouseDown={(event) => event.preventDefault()}>
+                            <div
+                              style={itemTooltipStyle}
+                              onClick={(event) => event.stopPropagation()}
+                            >
                               {row.item_summary}
                             </div>
                           ) : null}
@@ -2290,9 +2296,22 @@ const memoSaveButtonStyle: CSSProperties = {
   cursor: "pointer",
 };
 
-const itemPreviewStyle: CSSProperties = {
+const itemTooltipWrapperStyle: CSSProperties = {
   position: "relative",
+  width: "100%",
+  overflow: "visible",
+};
+
+const itemPreviewStyle: CSSProperties = {
+  display: "block",
+  width: "100%",
   maxWidth: 260,
+  padding: 0,
+  border: 0,
+  background: "transparent",
+  color: "inherit",
+  font: "inherit",
+  textAlign: "left",
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
@@ -2342,9 +2361,9 @@ const orderAgeBadgeStyle: CSSProperties = {
 };
 
 const orderAgeWarningStyle: CSSProperties = {
-  background: "#fef3c7",
-  color: "#92400e",
-  border: "1px solid #fcd34d",
+  background: "#FFF54F",
+  color: "#111827",
+  border: "1px solid #111827",
 };
 
 const orderDateShortStyle: CSSProperties = {
