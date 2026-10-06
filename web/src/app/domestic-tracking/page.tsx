@@ -13,6 +13,7 @@ type TrackingPreviewRow = {
   product_name: string;
   tracking_number: string;
   final_product_status: string;
+  pickup_status: string;
   matched_order_id?: string;
   customer_order_no?: string;
   nickname?: string;
@@ -63,9 +64,9 @@ function cleanTrackingNumber(value: unknown) {
   return text(value).replace(/^'+/, "");
 }
 
-function isCompleteStatus(value: unknown) {
-  const normalized = text(value).replace(/\s/g, "");
-  return normalized.includes("배송출발") || normalized.includes("배송완료") || normalized.includes("집화처리");
+function isPickedUp(value: unknown) {
+  const normalized = text(value).replace(/\s/g, "").toUpperCase();
+  return normalized === "○" || normalized === "O" || normalized === "Y" || normalized === "YES";
 }
 
 function findHeaderIndex(headers: unknown[], names: string[]) {
@@ -100,7 +101,7 @@ function matchStatusLabel(status: string) {
 function statusText(row: TrackingPreviewRow) {
   if (!row.matched_order_id) return "저장불가";
   if (row.already_done) return "이미 완료";
-  if (isCompleteStatus(row.final_product_status)) return "배송완료 + 주문완료";
+  if (isPickedUp(row.pickup_status)) return "배송완료 + 주문완료";
   return `${row.current_shipping_status || "start"} → ${row.next_shipping_status || "uploaded"}`;
 }
 
@@ -146,7 +147,7 @@ export default function DomesticTrackingPage() {
 
   const selectedCount = rows.filter((row) => row.selected).length;
   const matchedCount = rows.filter((row) => row.matched_order_id).length;
-  const completeCount = rows.filter((row) => row.matched_order_id && isCompleteStatus(row.final_product_status)).length;
+  const completeCount = rows.filter((row) => row.matched_order_id && isPickedUp(row.pickup_status)).length;
 
   async function parseAndPreview(file: File) {
     setLoading(true);
@@ -201,8 +202,11 @@ export default function DomesticTrackingPage() {
         "이름",
       ]);
       const productNameIndex = findHeaderIndex(headers, ["물품명", "상품명", "닉네임"]);
+      const pickupStatusIndex = findHeaderIndex(headers, ["집하여부"]);
       const finalStatusIndex = findHeaderIndex(headers, ["최종상품상태"]);
-      const fallbackFinalStatusIndex = 17; // 엑셀 기준 R열
+      const fallbackFinalStatusIndex = 17; // 구형 양식 호환
+      const recipientNameColumnOIndex =
+        normalizeHeader(headers[14]) === "명" ? 14 : recipientNameIndex;
 
       if (trackingIndex < 0 || (recipientNameIndex < 0 && productNameIndex < 0)) {
         setMessage("운송장번호와 수취인 이름 또는 물품명 컬럼을 찾을 수 없어.");
@@ -222,10 +226,11 @@ export default function DomesticTrackingPage() {
             selected: true,
             order_key: valueAt(row, orderKeyIndex),
             phone: valueAt(row, phoneIndex),
-            file_recipient_name: valueAt(row, recipientNameIndex),
+            file_recipient_name: valueAt(row, recipientNameColumnOIndex),
             product_name: valueAt(row, productNameIndex),
             tracking_number: cleanTrackingNumber(valueAt(row, trackingIndex)),
             final_product_status: finalStatus,
+            pickup_status: valueAt(row, pickupStatusIndex),
           };
         })
         .filter((row) => row.file_recipient_name || row.product_name || row.tracking_number);
@@ -314,7 +319,7 @@ export default function DomesticTrackingPage() {
         <div>
           <h1 style={{ margin: 0 }}>Domestic Tracking Upload</h1>
           <p style={{ color: "#6b7280", margin: "6px 0 0" }}>
-            운송장 파일의 수취인 이름을 우선으로 주문과 매칭하고, 실패하면 닉네임 앞 4글자로 보조 매칭합니다.
+            물품명(닉네임)으로 우선 매칭하고, 실패하면 O열 수취인명으로 보조 매칭합니다. 집하여부 ○는 배송완료 처리합니다.
           </p>
         </div>
 
@@ -411,7 +416,7 @@ export default function DomesticTrackingPage() {
                   <th style={thStyle}>파일 수취인</th>
                   <th style={thStyle}>물품명</th>
                   <th style={thStyle}>파일 연락처</th>
-                  <th style={thStyle}>최종상품상태</th>
+                  <th style={thStyle}>집하여부</th>
                 </tr>
               </thead>
               <tbody>
@@ -473,7 +478,7 @@ export default function DomesticTrackingPage() {
                       <td style={tdStyle}>{row.file_recipient_name || "-"}</td>
                       <td style={tdStyle}>{row.product_name || "-"}</td>
                       <td style={tdStyle}>{row.phone || "-"}</td>
-                      <td style={tdStyle}>{row.final_product_status || "-"}</td>
+                      <td style={tdStyle}>{row.pickup_status || "-"}</td>
                     </tr>
                   );
                 })}
