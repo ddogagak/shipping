@@ -213,7 +213,9 @@ export async function POST(req: Request) {
         orderAlreadyDone &&
         !shippingAlreadyDone &&
         sameTracking;
-      const alreadyDone = shippingAlreadyDone || (orderAlreadyDone && !canFinishCompletedOrder);
+      // "완료 건 - 저장 제외"는 실제 배송까지 done인 경우에만 적용한다.
+      // 주문상태가 done이어도 배송이 uploaded/registered/start면 체크 가능.
+      const alreadyDone = shippingAlreadyDone;
 
       let matchStatus = "not_found";
       if (!row.tracking_number) {
@@ -256,7 +258,7 @@ export async function POST(req: Request) {
       const canSave = Boolean(
         matched &&
         row.tracking_number &&
-        (!alreadyDone || canFinishCompletedOrder)
+        !shippingAlreadyDone
       );
 
       return {
