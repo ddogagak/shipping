@@ -993,6 +993,34 @@ export default function DomesticOrdersPage() {
     await saveRow(nextRow);
   }
 
+  async function registerTracking(row: Row) {
+    const s = shipping(row) || defaultShipping();
+    const trackingNumber = String(s.tracking_number || "").trim();
+
+    if (!trackingNumber) {
+      alert("운송장번호가 없어. 운송장번호를 먼저 입력해줘.");
+      return;
+    }
+
+    setSavingRowId(row.order_id);
+
+    try {
+      const nextRow = makeRowWithPatch(row, {}, { shipping_status: "registered" });
+      updateShippingValue(row.order_id, { shipping_status: "registered" });
+
+      await saveRow(nextRow);
+
+      try {
+        await navigator.clipboard.writeText(trackingNumber);
+        setMessage(`운송장등록 완료 · ${trackingNumber} 복사됨`);
+      } catch {
+        setMessage("운송장등록 완료 · 클립보드 복사는 브라우저 권한을 확인해줘.");
+      }
+    } finally {
+      setSavingRowId(null);
+    }
+  }
+
   async function deleteSelected() {
     if (!selectedIds.length) {
       alert("삭제할 주문을 선택해줘.");
@@ -1612,7 +1640,7 @@ export default function DomesticOrdersPage() {
                   <SortableTh label="닉네임" sortKeyValue="nickname" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   <SortableTh label="최초주문일" sortKeyValue="first_order_date" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   <SortableTh label="메모" sortKeyValue="memo" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
-                  <th style={thStyle}>저장</th>
+                  <th style={thStyle}>등록</th>
                   <SortableTh label="주문상태" sortKeyValue="order_status" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   {/* [요청상태 추가] */}
                   <SortableTh label="요청상태" sortKeyValue="request_status" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
@@ -1688,11 +1716,29 @@ export default function DomesticOrdersPage() {
                       <td style={tdStyle}>
                         <button
                           type="button"
-                          onClick={() => saveRow(row)}
-                          style={smallSaveButtonStyle}
+                          onClick={() => {
+                            if (s.shipping_status !== "registered" && s.shipping_status !== "done") {
+                              void registerTracking(row);
+                            }
+                          }}
+                          style={{
+                            ...registrationToggleStyle,
+                            ...(s.shipping_status === "registered" || s.shipping_status === "done"
+                              ? registrationToggleYesStyle
+                              : registrationToggleNoStyle),
+                          }}
                           disabled={savingRowId === row.order_id}
+                          title={
+                            s.shipping_status === "registered" || s.shipping_status === "done"
+                              ? "운송장 등록됨"
+                              : "Y로 변경하면 운송장등록 + 운송장번호 복사"
+                          }
                         >
-                          {savingRowId === row.order_id ? "저장중" : "저장"}
+                          <span style={s.shipping_status === "registered" || s.shipping_status === "done" ? registrationToggleDimStyle : registrationToggleActiveStyle}>N</span>
+                          <span style={registrationToggleSlashStyle}>/</span>
+                          <span style={s.shipping_status === "registered" || s.shipping_status === "done" ? registrationToggleActiveStyle : registrationToggleDimStyle}>
+                            {savingRowId === row.order_id ? "…" : "Y"}
+                          </span>
                         </button>
                       </td>
 
@@ -2140,6 +2186,43 @@ const greenButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#059
 const redButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#dc2626" };
 const keepButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#0f766e" };
 const orangeButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#ea580c" };
+
+const registrationToggleStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 4,
+  minWidth: 58,
+  justifyContent: "center",
+  border: "1px solid #d1d5db",
+  borderRadius: 999,
+  padding: "6px 9px",
+  fontWeight: 900,
+  cursor: "pointer",
+};
+
+const registrationToggleNoStyle: CSSProperties = {
+  background: "#f3f4f6",
+  color: "#111827",
+};
+
+const registrationToggleYesStyle: CSSProperties = {
+  background: "#111827",
+  color: "#fff",
+};
+
+const registrationToggleActiveStyle: CSSProperties = {
+  fontWeight: 900,
+  opacity: 1,
+};
+
+const registrationToggleDimStyle: CSSProperties = {
+  fontWeight: 700,
+  opacity: 0.35,
+};
+
+const registrationToggleSlashStyle: CSSProperties = {
+  opacity: 0.45,
+};
 
 const smallSaveButtonStyle: CSSProperties = {
   border: 0,
