@@ -135,7 +135,7 @@ function shipping(row: DomesticOrder): ShippingInfo | null {
 function defaultShipping(): ShippingInfo {
   return {
     carrier: "우체국택배",
-    shipping_type: "일반택배",
+    shipping_type: "로젠",
     tracking_number: null,
     shipping_status: "start",
     tracking_registered: false,
@@ -1664,6 +1664,7 @@ export default function DomesticOrdersPage() {
                   <SortableTh label="최초주문일" sortKeyValue="first_order_date" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   <SortableTh label="메모" sortKeyValue="memo" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   <th style={thStyle}>등록</th>
+                  <th style={thStyle}>재고위치</th>
                   <SortableTh label="주문상태" sortKeyValue="order_status" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
                   {/* [요청상태 추가] */}
                   <SortableTh label="요청상태" sortKeyValue="request_status" sortKey={sortKey} direction={sortDirection} onSort={toggleSort} />
@@ -1762,6 +1763,29 @@ export default function DomesticOrdersPage() {
                           <span style={Boolean(s.tracking_registered) ? registrationToggleActiveStyle : registrationToggleDimStyle}>
                             {savingRowId === row.order_id ? "…" : "Y"}
                           </span>
+                        </button>
+                      </td>
+
+                      <td style={tdStyle}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const isFactory = s.shipping_type === "한진";
+                            void saveRowPatch(row, {}, {
+                              shipping_type: isFactory ? "로젠" : "한진",
+                            });
+                          }}
+                          style={inventoryLocationToggleStyle}
+                          disabled={savingRowId === row.order_id}
+                          title={
+                            s.shipping_type === "한진"
+                              ? "공장 · 한진 배송"
+                              : "빵집 · 로젠 배송"
+                          }
+                        >
+                          <span style={s.shipping_type === "한진" ? inventoryLocationDimStyle : inventoryLocationActiveStyle}>🍞🏠</span>
+                          <span style={inventoryLocationSlashStyle}>/</span>
+                          <span style={s.shipping_type === "한진" ? inventoryLocationActiveStyle : inventoryLocationDimStyle}>🏭</span>
                         </button>
                       </td>
 
@@ -2209,6 +2233,34 @@ const greenButtonStyle: CSSProperties = { ...blackButtonStyle };
 const redButtonStyle: CSSProperties = { ...blackButtonStyle };
 const keepButtonStyle: CSSProperties = { ...blackButtonStyle };
 const orangeButtonStyle: CSSProperties = { ...blackButtonStyle };
+
+const inventoryLocationToggleStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 4,
+  minWidth: 74,
+  border: 0,
+  borderRadius: 999,
+  padding: "6px 9px",
+  background: "#f3f4f6",
+  cursor: "pointer",
+};
+
+const inventoryLocationActiveStyle: CSSProperties = {
+  opacity: 1,
+  fontSize: 16,
+};
+
+const inventoryLocationDimStyle: CSSProperties = {
+  opacity: 0.3,
+  fontSize: 16,
+};
+
+const inventoryLocationSlashStyle: CSSProperties = {
+  color: "#9ca3af",
+  fontWeight: 700,
+};
 
 const registrationToggleStyle: CSSProperties = {
   display: "inline-flex",
