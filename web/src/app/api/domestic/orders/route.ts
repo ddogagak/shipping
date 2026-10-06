@@ -144,6 +144,39 @@ export async function PATCH(req: Request) {
     });
   }
 
+  if (action === "update_delivery_info") {
+    const orderId = String(body.order_id || "").trim();
+
+    if (!orderId) {
+      return NextResponse.json({ error: "order_id가 없습니다." }, { status: 400 });
+    }
+
+    const recipientName = String(body.recipient_name || "").trim() || null;
+    const phone = String(body.phone || "").trim() || null;
+    const address = String(body.address || "").trim() || null;
+
+    const { data: updatedOrder, error } = await supabase
+      .from("domestic_order")
+      .update({
+        recipient_name: recipientName,
+        phone,
+        address,
+        updated_at: now,
+      })
+      .eq("order_id", orderId)
+      .select("order_id, recipient_name, phone, postal_code, address")
+      .single();
+
+    if (error) {
+      return NextResponse.json(
+        { error: "배송정보 저장 실패", detail: error.message },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ ok: true, order: updatedOrder });
+  }
+
   if (action === "update_memo") {
     const orderId = String(body.order_id || "").trim();
 
