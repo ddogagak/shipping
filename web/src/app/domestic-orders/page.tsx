@@ -312,8 +312,14 @@ function splitHanjinAddress(value?: string | null) {
   };
 }
 
+function cleanHanjinText(value?: string | null) {
+  return String(value || "").replace(/[^0-9A-Za-z가-힣\\s]/g, "").trim();
+}
+
 function toHanjinExcelRow(row: DomesticOrder, index: number) {
   const { mainAddress, detailAddress } = splitHanjinAddress(row.address);
+  const itemPrice = Math.max(0, Number(row.item_total_price || 0));
+  const roundedPriceUnit = Math.min(50, Math.max(10, Math.ceil(itemPrice / 100000) * 10));
 
   return {
     순번: index + 1,
@@ -322,11 +328,11 @@ function toHanjinExcelRow(row: DomesticOrder, index: number) {
     연락처: "",
     우편번호: formatHanjinPostalCode(row.postal_code),
     주소: mainAddress,
-    상세주소: detailAddress,
+    상세주소: cleanHanjinText(detailAddress),
     박스타입: "A",
-    물품명: row.nickname || "",
-    제품단가: 10,
-    요청사항: "from도파민베이커리",
+    물품명: cleanHanjinText(row.nickname).slice(0, 10),
+    제품단가: roundedPriceUnit,
+    요청사항: "from도파민빵팩토리",
   };
 }
 
@@ -1097,7 +1103,7 @@ export default function DomesticOrdersPage() {
       { wch: 24 },
     ];
 
-    for (let rowIndex = 2; rowIndex <= data.length + 1; rowIndex += 1) {
+    for (let rowIndex = 3; rowIndex <= data.length + 2; rowIndex += 1) {
       const phoneCell = worksheet[`E${rowIndex}`];
       const orderNoCell = worksheet[`H${rowIndex}`];
 
@@ -1128,9 +1134,11 @@ export default function DomesticOrdersPage() {
     }
 
     const data = selectedRows.map((row, index) => toHanjinExcelRow(row, index));
-    const worksheet = XLSX.utils.json_to_sheet(data, {
-      header: HANJIN_HEADERS,
-    });
+    const worksheet = XLSX.utils.aoa_to_sheet([
+      HANJIN_HEADERS,
+      HANJIN_HEADERS,
+      ...data.map((row) => HANJIN_HEADERS.map((header) => row[header as keyof typeof row])),
+    ]);
 
     worksheet["!cols"] = [
       { wch: 8 },
