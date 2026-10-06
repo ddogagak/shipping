@@ -103,6 +103,8 @@ const SHIPPING_STATUS_OPTIONS = [
 ];
 
 const SHIPPING_TYPE_OPTIONS = [
+  { value: "한진", label: "한진" },
+  { value: "로젠", label: "로젠" },
   { value: "일반택배", label: "일반택배" },
   { value: "GS반값택배", label: "GS반값택배" },
   { value: "준등기", label: "준등기" },
@@ -2209,12 +2211,12 @@ const blackButtonStyle: CSSProperties = {
   cursor: "pointer",
 };
 
-const blueButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#2563eb" };
-const purpleButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#7c3aed" };
-const greenButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#059669" };
-const redButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#dc2626" };
-const keepButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#0f766e" };
-const orangeButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#ea580c" };
+const blueButtonStyle: CSSProperties = { ...blackButtonStyle };
+const purpleButtonStyle: CSSProperties = { ...blackButtonStyle };
+const greenButtonStyle: CSSProperties = { ...blackButtonStyle };
+const redButtonStyle: CSSProperties = { ...blackButtonStyle };
+const keepButtonStyle: CSSProperties = { ...blackButtonStyle };
+const orangeButtonStyle: CSSProperties = { ...blackButtonStyle };
 
 const registrationToggleStyle: CSSProperties = {
   display: "inline-flex",
