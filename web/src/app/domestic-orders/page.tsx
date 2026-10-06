@@ -145,6 +145,11 @@ function defaultShipping(): ShippingInfo {
   };
 }
 
+function normalizedShippingType(value?: string | null) {
+  const shippingType = String(value || "").trim();
+  return !shippingType || shippingType === "일반택배" ? "로젠" : shippingType;
+}
+
 function label(options: { value: string; label: string }[], value?: string | null) {
   return options.find((option) => option.value === value)?.label || value || "-";
 }
@@ -349,7 +354,7 @@ function sortValue(row: Row, key: SortKey): string | number {
     // [요청상태 추가]
     case "request_status": return row.request_status || "none";
     case "shipping_status": return s?.shipping_status || "start";
-    case "shipping_type": return s?.shipping_type || "일반택배";
+    case "shipping_type": return normalizedShippingType(s?.shipping_type);
     case "tracking_number": return s?.tracking_number || "";
     case "item_summary": return row.item_summary || "";
     case "item_total_price": return Number(row.item_total_price || 0);
@@ -431,7 +436,7 @@ export default function DomesticOrdersPage() {
       .filter((row) => {
         const s = shipping(row);
         const shippingStatus = s?.shipping_status || "start";
-        const shippingType = s?.shipping_type || "일반택배";
+        const shippingType = normalizedShippingType(s?.shipping_type);
 
         if (platforms.length && !platforms.includes(row.platform)) return false;
         if (orderStatuses.length && !orderStatuses.includes(row.order_status || "accepted")) return false;
@@ -1898,7 +1903,7 @@ export default function DomesticOrdersPage() {
 
                       <td style={tdStyle}>
                         <select
-                          value={s.shipping_type || "일반택배"}
+                          value={normalizedShippingType(s.shipping_type)}
                           onChange={(event) =>
                             saveRowPatch(row, {}, { shipping_type: event.target.value })
                           }
