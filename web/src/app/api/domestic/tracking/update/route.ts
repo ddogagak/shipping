@@ -194,7 +194,11 @@ export async function PATCH(req: Request) {
         );
       }
 
-      const complete = isPickedUp(row.pickup_status);
+      const recoverCompletedShipping =
+        safeText(row.raw?.current_order_status) === "done" &&
+        safeText(row.raw?.current_shipping_status) !== "done" &&
+        cleanTrackingNumber(row.raw?.existing_tracking_number) === row.tracking_number;
+      const complete = isPickedUp(row.pickup_status) || recoverCompletedShipping;
       const shippingStatus = complete ? "done" : "uploaded";
 
       const { data: updatedShippingRows, error: shippingError } = await supabase
