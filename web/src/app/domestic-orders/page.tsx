@@ -332,6 +332,7 @@ export default function DomesticOrdersPage() {
   const [memoModalRow, setMemoModalRow] = useState<Row | null>(null);
   const [memoModalValue, setMemoModalValue] = useState("");
   const [memoModalSaving, setMemoModalSaving] = useState(false);
+  const [openItemTooltipId, setOpenItemTooltipId] = useState<string | null>(null);
 
   const [platforms, setPlatforms] = useState<string[]>([]);
   const [orderStatuses, setOrderStatuses] = useState<string[]>(["accepted", "checked","packaged"]);
@@ -1695,15 +1696,26 @@ export default function DomesticOrdersPage() {
                         </select>
                       </td>
 
-                      <td style={tdStyle}>
-                        <input
-                          value={row.item_summary || ""}
-                          onChange={(event) =>
-                            updateRowValue(row.order_id, { item_summary: event.target.value })
-                          }
-                          style={itemInputStyle}
-                          title={row.item_summary || ""}
-                        />
+                      <td style={{ ...tdStyle, position: "relative" }}>
+                        <div
+                          tabIndex={0}
+                          style={itemPreviewStyle}
+                          onMouseEnter={() => setOpenItemTooltipId(row.order_id)}
+                          onMouseLeave={() => setOpenItemTooltipId((current) => current === row.order_id ? null : current)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setOpenItemTooltipId((current) => current === row.order_id ? null : row.order_id);
+                          }}
+                          onBlur={() => setOpenItemTooltipId((current) => current === row.order_id ? null : current)}
+                          aria-expanded={openItemTooltipId === row.order_id}
+                        >
+                          {row.item_summary || "-"}
+                          {openItemTooltipId === row.order_id && row.item_summary ? (
+                            <div style={itemTooltipStyle} onMouseDown={(event) => event.preventDefault()}>
+                              {row.item_summary}
+                            </div>
+                          ) : null}
+                        </div>
                       </td>
 
                       <td style={tdStyle}>{label(PLATFORM_OPTIONS, row.platform)}</td>
@@ -2225,4 +2237,34 @@ const memoSaveButtonStyle: CSSProperties = {
   color: "#fff",
   fontWeight: 900,
   cursor: "pointer",
+};
+
+const itemPreviewStyle: CSSProperties = {
+  position: "relative",
+  maxWidth: 260,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  cursor: "pointer",
+  outline: "none",
+};
+
+const itemTooltipStyle: CSSProperties = {
+  position: "absolute",
+  zIndex: 1000,
+  top: "calc(100% + 6px)",
+  left: 0,
+  width: "min(420px, 80vw)",
+  maxHeight: 260,
+  overflowY: "auto",
+  whiteSpace: "pre-wrap",
+  overflowWrap: "anywhere",
+  padding: "12px 14px",
+  border: "1px solid #d1d5db",
+  borderRadius: 10,
+  background: "#fff",
+  color: "#111827",
+  boxShadow: "0 12px 32px rgba(0,0,0,.16)",
+  fontSize: 13,
+  lineHeight: 1.55,
 };
