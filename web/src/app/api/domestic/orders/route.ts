@@ -320,7 +320,10 @@ export async function PATCH(req: Request) {
       .from("domestic_shipping")
       .update({
         shipping_status: nextShippingStatus,
-        shipping_type: body.shipping_type || "일반택배",
+        shipping_type:
+          !body.shipping_type || body.shipping_type === "일반택배"
+            ? "로젠"
+            : body.shipping_type,
         tracking_number: trackingNumber,
         tracking_registered:
           nextOrderStatus === "done" || nextOrderStatus === "kept"
@@ -506,7 +509,7 @@ export async function PATCH(req: Request) {
     const selectedShippingType =
       String(combined.shipping_type ?? "").trim() ||
       String(shippingRows.find((s: any) => s?.shipping_type)?.shipping_type || "").trim() ||
-      "일반택배";
+      "로젠";
 
     const itemSummary =
       String(combined.item_summary ?? "").trim() ||
