@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { buildInventorySku } from "@/lib/inventorySku";
 
+import { normalizeSeriesName } from "@/lib/series";
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -12,10 +13,11 @@ export async function PATCH(
     const supabase = createServiceRoleClient();
 
     const currency = String(body.currency ?? "JPY").toUpperCase();
+    const normalizedSeriesName = normalizeSeriesName(body.series_name, body.item_name, body.memo, body.raw_text);
     const purchasePrice = Number(body.purchase_price ?? body.total_price ?? body.yen_price ?? 0);
     const sku = buildInventorySku(
       String(body.source_url ?? ""),
-      String(body.series_name ?? "기타"),
+      normalizedSeriesName,
       body.option_seq === "" || body.option_seq == null ? 0 : body.option_seq
     );
 
@@ -47,7 +49,7 @@ export async function PATCH(
       .update({
         item_name: body.item_name ?? "",
         item_type: body.item_type ?? "기타",
-        series_name: body.series_name ?? "기타",
+        series_name: normalizedSeriesName,
         image_url: body.image_url ?? "",
         lineup_image_url: body.lineup_image_url ?? "",
         source_url: body.source_url ?? "",
