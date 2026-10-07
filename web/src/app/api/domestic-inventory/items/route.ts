@@ -3,12 +3,13 @@ import { createServiceRoleClient } from "@/lib/supabase/server";
 import { buildInventorySku } from "@/lib/inventorySku";
 
 import { normalizeSeriesName } from "@/lib/series";
-function normalizeSeriesName(seriesName: unknown, itemName: unknown, memo: unknown = "", rawText: unknown = "") {\n  const text = `${String(seriesName || "")} ${String(itemName || "")} ${String(memo || "")} ${String(rawText || "")}`.toLowerCase();\n  if (/(먼작귀|치이카와|chiikawa|ちいかわ|吉伊卡哇)/i.test(text)) return "치이카와";\n  return String(seriesName || "기타");\n}\n\nexport async function POST(req: Request) {
+export async function POST(req: Request) {
   try {
     const body = await req.json();
     const supabase = createServiceRoleClient();
 
-    const currency = String(body.currency ?? "JPY").toUpperCase();\n    const normalizedSeriesName = normalizeSeriesName(body.series_name, body.item_name, body.memo, body.raw_text);
+    const currency = String(body.currency ?? "JPY").toUpperCase();
+    const normalizedSeriesName = normalizeSeriesName(body.series_name, body.item_name, body.memo, body.raw_text);
     const purchasePrice = Number(
       body.purchase_price ?? body.total_price ?? body.yen_price ?? 0
     );
