@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { createServiceRoleClient } from "@/lib/supabase/server";
 
+import { normalizeSeriesName } from "@/lib/series";
 export async function PATCH(
   req: Request,
   context: { params: Promise<{ id: string }> }
@@ -11,13 +12,14 @@ export async function PATCH(
     const body = await req.json();
 
     const supabase = createServiceRoleClient();
+    const normalizedSeriesName = normalizeSeriesName(body.series_name, body.item_name, body.memo);
 
     const { data, error } = await supabase
       .from("inventory_items")
       .update({
         item_name: body.item_name ?? "",
         item_type: body.item_type ?? "기타",
-        series_name: body.series_name ?? "기타",
+        series_name: normalizedSeriesName,
         image_url: body.image_url ?? "",
         order_number: body.order_number ?? "",
         order_date: body.order_date ?? "",
