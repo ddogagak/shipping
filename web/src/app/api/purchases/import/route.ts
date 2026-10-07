@@ -3,6 +3,7 @@ import { createServiceRoleClient } from "@/lib/supabase/server";
 import { parseTaobaoWorkbook } from "@/lib/purchases/taobao";
 import { extractSourceProductId } from "@/lib/purchases/product-id";
 import { parseDomesticPurchaseText, type DomesticPurchase } from "@/lib/purchases/domestic-text";
+import { normalizeSeriesName } from "@/lib/series";
 
 export const runtime = "nodejs";
 
@@ -149,6 +150,7 @@ export async function POST(req: Request) {
           purchase_order_id: order.id,
           product_name: item.product_name,
           display_name_ko: item.product_name,
+          series_name: normalizeSeriesName(item.series_name, item.product_name, item.option_text, item.memo),
           option_text: item.option_text || null,
           product_url: item.product_url || null,
           image_url: item.image_url || null,
