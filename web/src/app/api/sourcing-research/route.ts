@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 
+import { normalizeSeriesName } from "@/lib/series";
 export const runtime = "nodejs";
 
 export async function GET() {
@@ -32,7 +33,7 @@ export async function POST(req: Request) {
       product_url: body.product_url || "",
       product_name: body.product_name || "",
       source_site: body.source_site || "",
-      series_name: body.series_name || "",
+      series_name: normalizeSeriesName(body.series_name, body.product_name, body.memo),
       item_type: body.item_type || "",
       yen_price: Number(body.yen_price || 0),
       extra_cost_yen: Number(body.extra_cost_yen || 0),
