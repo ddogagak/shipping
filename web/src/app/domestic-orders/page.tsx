@@ -405,7 +405,7 @@ export default function DomesticOrdersPage() {
   const [selectedCombineKeys, setSelectedCombineKeys] = useState<string[]>([]);
   const [checkItems, setCheckItems] = useState<CheckItem[]>([]);
   const [checkInput, setCheckInput] = useState("");
-  const [checkLoaded, setCheckLoaded] = useState(false);
+  const [checkLoading, setCheckLoading] = useState(true);
 
   async function load() {
     setLoading(true);
@@ -435,35 +435,54 @@ export default function DomesticOrdersPage() {
 
   useEffect(() => {
     void load();
-
-    try {
-      const saved = window.localStorage.getItem("domestic-orders-checklist");
-      const parsed = saved ? JSON.parse(saved) : [];
-      setCheckItems(Array.isArray(parsed) ? parsed : []);
-    } catch {
-      setCheckItems([]);
-    } finally {
-      setCheckLoaded(true);
-    }
+    void loadCheckItems();
   }, []);
 
-  useEffect(() => {
-    if (!checkLoaded) return;
-    window.localStorage.setItem("domestic-orders-checklist", JSON.stringify(checkItems));
-  }, [checkItems, checkLoaded]);
+  async function loadCheckItems() {
+    setCheckLoading(true);
+    try {
+      const res = await fetch("/api/domestic/checklist", { cache: "no-store" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.detail || json.error || "CHECK 조회 실패");
+      setCheckItems(Array.isArray(json.items) ? json.items : []);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "CHECK 조회 실패");
+    } finally {
+      setCheckLoading(false);
+    }
+  }
 
-  function addCheckItem() {
+  async function addCheckItem() {
     const text = checkInput.trim();
     if (!text) return;
 
-    setCheckItems((prev) => [
-      ...prev,
-      { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, text },
-    ]);
+    const res = await fetch("/api/domestic/checklist", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      setMessage(json.detail || json.error || "CHECK 저장 실패");
+      return;
+    }
+
     setCheckInput("");
+    await loadCheckItems();
   }
 
-  function removeCheckItem(id: string) {
+  async function removeCheckItem(id: string) {
+    const res = await fetch("/api/domestic/checklist", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      setMessage(json.detail || json.error || "CHECK 삭제 실패");
+      return;
+    }
+
     setCheckItems((prev) => prev.filter((item) => item.id !== id));
   }
 
@@ -1329,7 +1348,9 @@ export default function DomesticOrdersPage() {
               </button>
             </div>
           ))}
-          {!checkItems.length ? (
+          {checkLoading ? (
+            <div style={checkEmptyStyle}>CHECK 불러오는 중...</div>
+          ) : !checkItems.length ? (
             <div style={checkEmptyStyle}>등록된 CHECK가 없어.</div>
           ) : null}
           {checkItems.length > 3 ? (
