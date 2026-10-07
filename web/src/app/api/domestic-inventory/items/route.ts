@@ -2,18 +2,18 @@ import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { buildInventorySku } from "@/lib/inventorySku";
 
-export async function POST(req: Request) {
+function normalizeSeriesName(seriesName: unknown, itemName: unknown, memo: unknown = "", rawText: unknown = "") {\n  const text = `${String(seriesName || "")} ${String(itemName || "")} ${String(memo || "")} ${String(rawText || "")}`.toLowerCase();\n  if (/(먼작귀|치이카와|chiikawa|ちいかわ|吉伊卡哇)/i.test(text)) return "치이카와";\n  return String(seriesName || "기타");\n}\n\nexport async function POST(req: Request) {
   try {
     const body = await req.json();
     const supabase = createServiceRoleClient();
 
-    const currency = String(body.currency ?? "JPY").toUpperCase();
+    const currency = String(body.currency ?? "JPY").toUpperCase();\n    const normalizedSeriesName = normalizeSeriesName(body.series_name, body.item_name, body.memo, body.raw_text);
     const purchasePrice = Number(
       body.purchase_price ?? body.total_price ?? body.yen_price ?? 0
     );
     let sku = buildInventorySku(
       String(body.source_url ?? ""),
-      String(body.series_name ?? "기타"),
+      normalizedSeriesName,
       body.option_seq ?? 0
     );
     let autoDuplicate = false;
@@ -32,7 +32,7 @@ export async function POST(req: Request) {
       if (duplicate) {
         const duplicateSku = buildInventorySku(
           String(body.source_url ?? ""),
-          String(body.series_name ?? "기타"),
+          normalizedSeriesName,
           99
         );
 
@@ -71,7 +71,7 @@ export async function POST(req: Request) {
       .insert({
         item_name: body.item_name ?? "",
         item_type: body.item_type ?? "기타",
-        series_name: body.series_name ?? "기타",
+        series_name: normalizedSeriesName,
         image_url: body.image_url ?? "",
         lineup_image_url: body.lineup_image_url ?? "",
         source_url: body.source_url ?? "",
