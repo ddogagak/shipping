@@ -1,3 +1,4 @@
+import { normalizeSeriesName } from "@/lib/series";
 export type DomesticPurchaseItem = {
   product_name: string; display_name_ko: string; series_name: string; item_type: string;
   option_text: string; unit_price: number; quantity: number; line_total: number;
@@ -20,7 +21,7 @@ export function parseDomesticPurchaseText(text:string):DomesticPurchase{
   const items=text.split("=== ITEM ===").slice(1).map(block=>block.trim()).filter(Boolean).map(block=>{
     const name=field(block,"NAME");if(!name)throw new Error("NAME(상품명)이 없는 상품이 있어.");
     const quantity=Math.max(1,Math.trunc(number(field(block,"QTY"))||1)),unitPrice=Math.max(0,Math.round(number(field(block,"UNIT_PRICE")))),componentCount=Math.max(0,Math.trunc(number(field(block,"BOX_COUNT"))));
-    return{product_name:name,display_name_ko:name,series_name:field(block,"SERIES")||"기타",item_type:field(block,"TYPE")||"기타",option_text:field(block,"OPTION"),unit_price:unitPrice,quantity,line_total:unitPrice*quantity,component_count:componentCount||null,product_url:field(block,"PRODUCT_URL"),image_url:field(block,"IMAGE"),lineup_image_url:field(block,"LINEUP_IMAGE"),memo:field(block,"MEMO")};
+    return{product_name:name,display_name_ko:name,series_name:normalizeSeriesName(field(block,"SERIES"),name,field(block,"OPTION"),field(block,"MEMO")),item_type:field(block,"TYPE")||"기타",option_text:field(block,"OPTION"),unit_price:unitPrice,quantity,line_total:unitPrice*quantity,component_count:componentCount||null,product_url:field(block,"PRODUCT_URL"),image_url:field(block,"IMAGE"),lineup_image_url:field(block,"LINEUP_IMAGE"),memo:field(block,"MEMO")};
   });
   if(!items.length)throw new Error("저장할 상품이 없어.");
   return{supplier,purchased_at:purchasedAt||new Date().toISOString().slice(0,10),invoice_number:invoiceNumber,local_shipping:Math.max(0,Math.round(number(field(header,"LOCAL_SHIPPING")))),memo:field(header,"MEMO"),items};
