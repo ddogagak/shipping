@@ -37,6 +37,11 @@ type DomesticOrder = {
 
 type Row = DomesticOrder & { selected: boolean };
 
+type CheckItem = {
+  id: string;
+  text: string;
+};
+
 type CombineDraft = {
   orderIds: string[];
   rows: Row[];
@@ -398,6 +403,9 @@ export default function DomesticOrdersPage() {
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [combineDraft, setCombineDraft] = useState<CombineDraft | null>(null);
   const [selectedCombineKeys, setSelectedCombineKeys] = useState<string[]>([]);
+  const [checkItems, setCheckItems] = useState<CheckItem[]>([]);
+  const [checkInput, setCheckInput] = useState("");
+  const [checkLoaded, setCheckLoaded] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -427,7 +435,37 @@ export default function DomesticOrdersPage() {
 
   useEffect(() => {
     void load();
+
+    try {
+      const saved = window.localStorage.getItem("domestic-orders-checklist");
+      const parsed = saved ? JSON.parse(saved) : [];
+      setCheckItems(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      setCheckItems([]);
+    } finally {
+      setCheckLoaded(true);
+    }
   }, []);
+
+  useEffect(() => {
+    if (!checkLoaded) return;
+    window.localStorage.setItem("domestic-orders-checklist", JSON.stringify(checkItems));
+  }, [checkItems, checkLoaded]);
+
+  function addCheckItem() {
+    const text = checkInput.trim();
+    if (!text) return;
+
+    setCheckItems((prev) => [
+      ...prev,
+      { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, text },
+    ]);
+    setCheckInput("");
+  }
+
+  function removeCheckItem(id: string) {
+    setCheckItems((prev) => prev.filter((item) => item.id !== id));
+  }
 
   const filteredRows = useMemo(() => {
     return rows
@@ -1247,6 +1285,56 @@ export default function DomesticOrdersPage() {
             label="배송완료"
             value={rows.filter((row) => shipping(row)?.shipping_status === "done").length}
           />
+        </div>
+      </section>
+
+      <section style={checkBoardStyle}>
+        <div style={checkHeaderStyle}>
+          <h2 style={alarmTitleStyle}>CHECK</h2>
+          <span style={checkCountStyle}>{checkItems.length}개</span>
+        </div>
+
+        <div style={checkInputRowStyle}>
+          <input
+            value={checkInput}
+            onChange={(event) => setCheckInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") addCheckItem();
+            }}
+            placeholder="체크할 내용을 입력해줘"
+            style={checkInputStyle}
+          />
+          <button type="button" onClick={addCheckItem} style={checkSaveButtonStyle}>
+            저장
+          </button>
+        </div>
+
+        <div style={checkListStyle}>
+          {checkItems.slice(0, 3).map((item) => (
+            <div key={item.id} style={checkItemStyle}>
+              <label style={checkLabelStyle}>
+                <input
+                  type="checkbox"
+                  onChange={() => removeCheckItem(item.id)}
+                />
+                <span>{item.text}</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => removeCheckItem(item.id)}
+                style={checkDeleteButtonStyle}
+                aria-label="체크리스트 삭제"
+              >
+                삭제
+              </button>
+            </div>
+          ))}
+          {!checkItems.length ? (
+            <div style={checkEmptyStyle}>등록된 CHECK가 없어.</div>
+          ) : null}
+          {checkItems.length > 3 ? (
+            <div style={checkMoreStyle}>+ {checkItems.length - 3}개 더 있음</div>
+          ) : null}
         </div>
       </section>
 
@@ -2123,6 +2211,105 @@ const actionBarStyle: CSSProperties = {
   alignItems: "center",
   flexWrap: "wrap",
   marginBottom: 12,
+};
+
+const checkBoardStyle: CSSProperties = {
+  ...cardStyle,
+  marginTop: 16,
+  background: "#FFF54F",
+  border: "2px solid #111827",
+};
+
+const checkHeaderStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 12,
+  marginBottom: 12,
+};
+
+const checkCountStyle: CSSProperties = {
+  background: "#111827",
+  color: "#fff",
+  borderRadius: 999,
+  padding: "5px 9px",
+  fontSize: 12,
+  fontWeight: 900,
+};
+
+const checkInputRowStyle: CSSProperties = {
+  display: "flex",
+  gap: 8,
+};
+
+const checkInputStyle: CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  border: "2px solid #111827",
+  borderRadius: 9,
+  padding: "9px 11px",
+  background: "#fff",
+  fontSize: 14,
+};
+
+const checkSaveButtonStyle: CSSProperties = {
+  border: "2px solid #111827",
+  borderRadius: 9,
+  padding: "9px 15px",
+  background: "#111827",
+  color: "#fff",
+  fontWeight: 900,
+  cursor: "pointer",
+};
+
+const checkListStyle: CSSProperties = {
+  display: "grid",
+  gap: 7,
+  marginTop: 10,
+};
+
+const checkItemStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 10,
+  border: "1px solid #111827",
+  borderRadius: 9,
+  padding: "8px 10px",
+  background: "#fff",
+};
+
+const checkLabelStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 9,
+  minWidth: 0,
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
+const checkDeleteButtonStyle: CSSProperties = {
+  border: "1px solid #111827",
+  borderRadius: 7,
+  padding: "4px 8px",
+  background: "#fff",
+  color: "#111827",
+  fontSize: 11,
+  fontWeight: 900,
+  cursor: "pointer",
+};
+
+const checkEmptyStyle: CSSProperties = {
+  padding: "7px 2px",
+  fontSize: 13,
+  fontWeight: 700,
+  color: "#6b5d00",
+};
+
+const checkMoreStyle: CSSProperties = {
+  fontSize: 12,
+  fontWeight: 800,
+  color: "#4b4400",
 };
 
 const alarmBoardStyle: CSSProperties = {
