@@ -438,11 +438,23 @@ export default function DomesticOrdersPage() {
     void loadCheckItems();
   }, []);
 
+  async function readCheckResponse(res: Response) {
+    const contentType = res.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      throw new Error(
+        res.status === 404
+          ? "CHECK API가 아직 배포되지 않았어. 최신 배포가 완료되면 새로고침해줘."
+          : `CHECK API 응답 오류 (${res.status})`
+      );
+    }
+    return res.json();
+  }
+
   async function loadCheckItems() {
     setCheckLoading(true);
     try {
       const res = await fetch("/api/domestic/checklist", { cache: "no-store" });
-      const json = await res.json();
+      const json = await readCheckResponse(res);
       if (!res.ok) throw new Error(json.detail || json.error || "CHECK 조회 실패");
       setCheckItems(Array.isArray(json.items) ? json.items : []);
     } catch (error) {
@@ -456,34 +468,36 @@ export default function DomesticOrdersPage() {
     const text = checkInput.trim();
     if (!text) return;
 
-    const res = await fetch("/api/domestic/checklist", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
-    const json = await res.json();
-    if (!res.ok) {
-      setMessage(json.detail || json.error || "CHECK 저장 실패");
-      return;
-    }
+    try {
+      const res = await fetch("/api/domestic/checklist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const json = await readCheckResponse(res);
+      if (!res.ok) throw new Error(json.detail || json.error || "CHECK 저장 실패");
 
-    setCheckInput("");
-    await loadCheckItems();
+      setCheckInput("");
+      await loadCheckItems();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "CHECK 저장 실패");
+    }
   }
 
   async function removeCheckItem(id: string) {
-    const res = await fetch("/api/domestic/checklist", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id }),
-    });
-    const json = await res.json();
-    if (!res.ok) {
-      setMessage(json.detail || json.error || "CHECK 삭제 실패");
-      return;
-    }
+    try {
+      const res = await fetch("/api/domestic/checklist", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const json = await readCheckResponse(res);
+      if (!res.ok) throw new Error(json.detail || json.error || "CHECK 삭제 실패");
 
-    setCheckItems((prev) => prev.filter((item) => item.id !== id));
+      setCheckItems((prev) => prev.filter((item) => item.id !== id));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "CHECK 삭제 실패");
+    }
   }
 
   const filteredRows = useMemo(() => {
