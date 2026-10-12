@@ -43,7 +43,8 @@ export async function POST(req:Request){
    const customerNo="W"+key(nickname)+"_"+mmdd;
    const byDate=domesticKeys.get(key(nickname)+"|"+formatted)??[];
    const byNo=[...(domestic??[])].filter(d=>d.platform==="wise"&&key(asText(d.nickname))===key(nickname)&&asText(d.customer_order_no).replace(/-C\d+$/i,"").startsWith("W")&&asText(d.customer_order_no).includes("_"+mmdd)).map(d=>String(d.order_id));
-   const matched_order_ids=[...new Set([...byDate,...byNo])];
+   const exactId=(domestic??[]).filter(d=>String(d.order_id)==="WJSON_"+o.id).map(d=>String(d.order_id));
+   const matched_order_ids=[...new Set([...exactId,...byDate])];
    const existingDomestic=matched_order_ids.length>0;
    return {order:o,wise_order_id:o.id,nickname,ordered_at:date,existingDomestic,matched_order_ids,alreadyQueued:queuedIds.has(o.id),items:o.stocks?.length??0};
   });
@@ -61,7 +62,8 @@ export async function POST(req:Request){
     const mmdd=formatted.slice(5,7)+formatted.slice(8,10);
     const byDate=domesticKeys.get(key(nickname)+"|"+formatted)??[];
     const byNo=(domestic??[]).filter(d=>d.platform==="wise"&&key(asText(d.nickname))===key(nickname)&&asText(d.customer_order_no).includes("_"+mmdd)).map(d=>String(d.order_id));
-    const matches=[...new Set([...byDate,...byNo])];
+    const exactId=(domestic??[]).filter(d=>String(d.order_id)==="WJSON_"+o.id).map(d=>String(d.order_id));
+    const matches=[...new Set([...exactId,...byDate])];
     return {order:o,matched_order_ids:[...new Set(matches)]};
   });
   const updateCandidates=[...rows.filter(x=>x.existingDomestic).map(x=>({order:x.order,matched_order_ids:x.matched_order_ids})),...extraRows].flatMap(({order,matched_order_ids})=>{
@@ -71,12 +73,11 @@ export async function POST(req:Request){
     if(!ship)return [];
     const tracking=asText(ship.tracking_number),direct=asText(order.deliveryCompany).toUpperCase()==="DIRECT";
     const changes:Record<string,string|boolean>={};
-    if(ship.tracking_registered||asText(ship.shipping_status)==="registered"){
-      if(asText(ship.shipping_status)!=="registered")changes.shipping_status="registered";
-      if(!ship.tracking_registered)changes.tracking_registered=true;
+    if(ship.tracking_registered&&asText(ship.shipping_status)!=="registered"){
+      changes.shipping_status="registered";
     }
-    if(direct&&Number(order.status)===25){changes.tracking_registered=true;changes.order_status="kept";}
-    if(tracking&&[80,89].includes(Number(order.status))){changes.tracking_registered=true;changes.order_status="done";}
+    if(direct&&Number(order.status)===25){if(!ship.tracking_registered)changes.tracking_registered=true;changes.order_status="kept";}
+    if(tracking&&[80,89].includes(Number(order.status))){if(!ship.tracking_registered)changes.tracking_registered=true;changes.order_status="done";}
     if(!Object.keys(changes).length)return [];
     return [{wise_order_id:order.id,order_id,nickname:asText(order.user?.nickname),ordered_at:order.createdAt,wise_status:Number(order.status),delivery_company:order.deliveryCompany,tracking_number:tracking,changes}];
   });
