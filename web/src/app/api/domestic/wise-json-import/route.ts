@@ -16,6 +16,7 @@ export async function POST(req:Request){
   const parsed=JSON.parse(await file.text());
   if(!Array.isArray(parsed)||!parsed.every(x=>x&&Number.isSafeInteger(x.id)&&Array.isArray(x.stocks)))return NextResponse.json({error:"와이스 주문 배열 형식이 아닙니다."},{status:400});
   const orders=(parsed as RawOrder[]).filter(o=>[10,16,25].includes(Number(o.status)));
+  const updateOrders=(parsed as RawOrder[]).filter(o=>[10,16,25,80,89].includes(Number(o.status)));
   const db=createServiceRoleClient();
   const {data:domestic,error:domesticError}=await db.from("domestic_order").select("order_id,customer_order_no,nickname,platform,first_order_date,source_order_dates");
   if(domesticError) return NextResponse.json({error:"기존 주문 조회 실패",detail:domesticError.message},{status:500});
@@ -46,7 +47,55 @@ export async function POST(req:Request){
    const existingDomestic=matched_order_ids.length>0;
    return {order:o,wise_order_id:o.id,nickname,ordered_at:date,existingDomestic,matched_order_ids,alreadyQueued:queuedIds.has(o.id),items:o.stocks?.length??0};
   });
-  if(mode==="preview")return NextResponse.json({ok:true,total:rows.length,excluded_count:parsed.length-orders.length,new_orders:rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued).map(({order,...x})=>x),possible_existing:rows.filter(x=>x.existingDomestic).map(({order,...x})=>x),already_queued:rows.filter(x=>x.alreadyQueued).length,queued_orders:rows.filter(x=>x.alreadyQueued).map(({order,...x})=>x),notice:"닉네임+주문 분 단위 날짜로 기존 주문을 추정합니다. 동일 분 주문은 검토가 필요합니다."});
+  // Existing ddoga orders: offer explicit, checked status updates only.
+  const existingIds=[...new Set(rows.filter(x=>x.existingDomestic).flatMap(x=>x.matched_order_ids))];
+  const {data:shippingRows,error:shippingError}=existingIds.length
+    ?await db.from("domestic_shipping").select("order_id,tracking_number,tracking_registered,shipping_status").in("order_id",existingIds)
+    :{data:[],error:null};
+  if(shippingError)throw shippingError;
+  const shippingMap=new Map((shippingRows??[]).map(x=>[String(x.order_id),x]));
+  const extraRows=updateOrders.filter(o=>[80,89].includes(Number(o.status))&&validDate(o.createdAt)).map(o=>{
+    const nickname=asText(o.user?.nickname),formatted=kst(validDate(o.createdAt)!);
+    const matches=domesticKeys.get(key(nickname)+"|"+formatted)??[];
+    return {order:o,matched_order_ids:[...new Set(matches)]};
+  });
+  const updateCandidates=[...rows.filter(x=>x.existingDomestic).map(x=>({order:x.order,matched_order_ids:x.matched_order_ids})),...extraRows].flatMap(({order,matched_order_ids})=>{
+    // Never automatically alter ambiguous/combined matches.
+    if(matched_order_ids.length!==1)return [];
+    const order_id=matched_order_ids[0],ship=shippingMap.get(order_id);
+    if(!ship)return [];
+    const tracking=asText(ship.tracking_number),direct=asText(order.deliveryCompany).toUpperCase()==="DIRECT";
+    const changes:Record<string,string|boolean>={};
+    if(asText(ship.shipping_status)==="registered"&&!ship.tracking_registered)changes.tracking_registered=true;
+    if(direct&&Number(order.status)===25){changes.tracking_registered=true;changes.order_status="kept";}
+    if(tracking&&[80,89].includes(Number(order.status))){changes.tracking_registered=true;changes.order_status="done";}
+    if(!Object.keys(changes).length)return [];
+    return [{wise_order_id:order.id,order_id,nickname:asText(order.user?.nickname),ordered_at:order.createdAt,wise_status:Number(order.status),delivery_company:order.deliveryCompany,tracking_number:tracking,changes}];
+  });
+  const uniqueUpdates=[...new Map(updateCandidates.map(x=>[x.wise_order_id,x])).values()];
+  if(mode==="apply_updates"){
+    const raw=asText(form.get("selected_ids"));
+    const selected=JSON.parse(raw||"[]");
+    if(!Array.isArray(selected)||!selected.every(Number.isSafeInteger))return NextResponse.json({error:"선택 ID 형식 오류"},{status:400});
+    const allowed=new Set(selected);
+    const results=[];
+    for(const candidate of uniqueUpdates.filter(x=>allowed.has(x.wise_order_id))){
+      const {order_id,changes}=candidate;
+      const {order_status,...shippingChanges}=changes;
+      let failure="";
+      if(order_status){
+        const {error}=await db.from("domestic_order").update({order_status}).eq("order_id",order_id).eq("platform","wise");
+        if(error)failure=error.message;
+      }
+      if(!failure&&Object.keys(shippingChanges).length){
+        const {error}=await db.from("domestic_shipping").update(shippingChanges).eq("order_id",order_id);
+        if(error)failure=error.message;
+      }
+      results.push({wise_order_id:candidate.wise_order_id,order_id,ok:!failure,error:failure||null});
+    }
+    return NextResponse.json({ok:true,results,updated:results.filter(x=>x.ok).length,failed:results.filter(x=>!x.ok).length});
+  }
+  if(mode==="preview")return NextResponse.json({ok:true,total:rows.length,excluded_count:parsed.length-orders.length,new_orders:rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued).map(({order,...x})=>x),possible_existing:rows.filter(x=>x.existingDomestic).map(({order,...x})=>x),already_queued:rows.filter(x=>x.alreadyQueued).length,update_candidates:uniqueUpdates,queued_orders:rows.filter(x=>x.alreadyQueued).map(({order,...x})=>x),notice:"닉네임+주문 분 단위 날짜로 기존 주문을 추정합니다. 동일 분 주문은 검토가 필요합니다."});
   if(mode!=="save")return NextResponse.json({error:"Invalid mode"},{status:400});
   // Never alter existing domestic orders or shipping. Refresh WYYYES-only snapshots and item metadata.
   for(const chunk of batches(orders)){
