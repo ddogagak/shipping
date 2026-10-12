@@ -3,6 +3,10 @@ import {useState} from "react";
 type Candidate={wise_order_id:number;nickname:string;ordered_at:string;items:number;existingDomestic:boolean;alreadyQueued:boolean};
 export default function WiseJsonImport(){
  const [file,setFile]=useState<File|null>(null);
+ const [queue,setQueue]=useState<Array<{wise_order_id:number;buyer_nickname:string;ordered_at:string;item_summary:string;item_count:number;item_total_price:number}>>([]);
+ const [queueError,setQueueError]=useState("");
+ async function loadQueue(){try{const r=await fetch("/api/domestic/wise-json-queue");const d=await r.json();if(!r.ok)throw new Error(d.error);setQueue(d.orders??[]);setQueueError("");}catch(e){setQueueError(e instanceof Error?e.message:"조회 실패")}}
+ async function handleQueue(id:number,action:"approve"|"ignore"){if(!confirm(action==="approve"?"이 신규 주문을 ddoga 주문으로 등록할까요?":"이 주문을 대기열에서 제외할까요?"))return;try{const r=await fetch("/api/domestic/wise-json-queue",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({wise_order_id:id,action})});const d=await r.json();if(!r.ok)throw new Error(d.error);await loadQueue();setMessage(action==="approve"?`주문 등록 완료: ${d.order_id}`:"대기열에서 제외했습니다.");}catch(e){setMessage(e instanceof Error?e.message:"처리 실패")}}
  const [loading,setLoading]=useState(false);
  const [message,setMessage]=useState("");
  const [preview,setPreview]=useState<{total:number;new_orders:Candidate[];possible_existing:Candidate[];already_queued:number}|null>(null);
@@ -32,5 +36,15 @@ export default function WiseJsonImport(){
    <div style={{maxHeight:420,overflow:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th>와이스 주문 ID</th><th>닉네임</th><th>주문시각</th><th>상품수</th></tr></thead><tbody>{preview.new_orders.map(o=><tr key={o.wise_order_id}><td>{o.wise_order_id}</td><td>{o.nickname}</td><td>{new Date(o.ordered_at).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})}</td><td>{o.items}</td></tr>)}</tbody></table></div>
    <p style={{color:"#9a3412"}}>주의: 기존 주문 추정에 실패한 주문이 신규 후보로 표시될 수 있습니다. 신규 대기열을 실제 국내 주문으로 전환하는 기능은 아직 연결하지 않았습니다.</p>
   </>}
+  <div style={{marginTop:24,borderTop:"1px solid #ddd",paddingTop:16}}>
+   <h3>신규 주문 검토 대기열</h3>
+   <button onClick={loadQueue} style={{padding:"8px 14px"}}>대기열 조회 / 새로고침</button>
+   {queueError&&<p style={{color:"#b91c1c"}}>{queueError}</p>}
+   <div style={{maxHeight:450,overflow:"auto",marginTop:12}}><table style={{width:"100%",borderCollapse:"collapse"}}>
+    <thead><tr><th>주문 ID</th><th>닉네임</th><th>주문시각</th><th>상품</th><th>금액</th><th>처리</th></tr></thead>
+    <tbody>{queue.map(o=><tr key={o.wise_order_id}><td>{o.wise_order_id}</td><td>{o.buyer_nickname}</td><td>{new Date(o.ordered_at).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})}</td><td title={o.item_summary}>{o.item_count}개 / {o.item_summary?.slice(0,40)}</td><td>{Number(o.item_total_price).toLocaleString()}원</td><td><button onClick={()=>handleQueue(o.wise_order_id,"approve")}>ddoga 등록</button> <button onClick={()=>handleQueue(o.wise_order_id,"ignore")}>제외</button></td></tr>)}</tbody>
+   </table></div>
+   <p>주문별 등록 후 국내 주문 목록에서 수동 합배송하세요. 기존 주문과 중복이 의심되면 등록을 막습니다.</p>
+  </div>
  </section>
 }
