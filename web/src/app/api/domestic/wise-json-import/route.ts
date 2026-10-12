@@ -27,7 +27,7 @@ export async function POST(req:Request){
   for(const d of domestic??[]){
    if(d.platform!=="wise")continue;
    for(const date of [...(Array.isArray(d.source_order_dates)?d.source_order_dates:[]),d.first_order_date]){
-    const m=asText(date).match(/^(\\d{4})[.\\/-](\\d{1,2})[.\\/-](\\d{1,2})\\s+(\\d{1,2}):(\\d{1,2})/);
+    const m=asText(date).match(/^(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})\s+(\d{1,2}):(\d{1,2})/);
     if(m){const k=key(asText(d.nickname))+"|"+[m[1],m[2].padStart(2,"0"),m[3].padStart(2,"0")].join("-")+" "+m[4].padStart(2,"0")+":"+m[5];domesticKeys.set(k,[...(domesticKeys.get(k)??[]),String(d.order_id)]);}
    }
    const no=asText(d.customer_order_no);if(no)domesticOrderNos.set(no,[...(domesticOrderNos.get(no)??[]),String(d.order_id)]);
@@ -41,7 +41,7 @@ export async function POST(req:Request){
    const mmdd=formatted.slice(5,7)+formatted.slice(8,10);
    const customerNo="W"+key(nickname)+"_"+mmdd;
    const byDate=domesticKeys.get(key(nickname)+"|"+formatted)??[];
-   const byNo=[...(domestic??[])].filter(d=>d.platform==="wise"&&key(asText(d.nickname))===key(nickname)&&asText(d.customer_order_no).replace(/-C\\d+$/i,"").startsWith("W")&&asText(d.customer_order_no).includes("_"+mmdd)).map(d=>String(d.order_id));
+   const byNo=[...(domestic??[])].filter(d=>d.platform==="wise"&&key(asText(d.nickname))===key(nickname)&&asText(d.customer_order_no).replace(/-C\d+$/i,"").startsWith("W")&&asText(d.customer_order_no).includes("_"+mmdd)).map(d=>String(d.order_id));
    const matched_order_ids=[...new Set([...byDate,...byNo])];
    const existingDomestic=matched_order_ids.length>0;
    return {order:o,wise_order_id:o.id,nickname,ordered_at:date,existingDomestic,matched_order_ids,alreadyQueued:queuedIds.has(o.id),items:o.stocks?.length??0};
