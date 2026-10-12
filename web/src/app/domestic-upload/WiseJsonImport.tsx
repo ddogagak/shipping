@@ -1,5 +1,5 @@
 "use client";
-import {useState} from "react";
+import {useEffect,useState} from "react";
 const primaryButtonStyle={border:0,borderRadius:10,padding:"10px 14px",background:"#2563eb",color:"#fff",fontWeight:800,cursor:"pointer"} as const;
 const darkButtonStyle={border:0,borderRadius:10,padding:"10px 14px",background:"#111827",color:"#fff",fontWeight:800,cursor:"pointer"} as const;
 const secondaryButtonStyle={border:"1px solid #d1d5db",borderRadius:10,padding:"9px 14px",background:"#fff",color:"#374151",fontWeight:700,cursor:"pointer"} as const;
@@ -7,6 +7,28 @@ type UpdateCandidate={wise_order_id:number;order_id:string;nickname:string;order
 type Candidate={wise_order_id:number;nickname:string;ordered_at:string;items:number;existingDomestic:boolean;alreadyQueued:boolean;matched_order_ids:string[]};
 export default function WiseJsonImport(){
  const [file,setFile]=useState<File|null>(null);
+ useEffect(()=>{
+  const allowedOrigin="https://wyyyes.com";
+  function onMessage(event:MessageEvent){
+   if(event.origin!==allowedOrigin||event.source!==window.opener)return;
+   const data=event.data;
+   if(data?.type==="DDOGA_WISE_PING"){
+    (event.source as Window).postMessage({type:"DDOGA_WISE_READY"},allowedOrigin);
+    return;
+   }
+   if(data?.type!=="DDOGA_WISE_ORDERS"||!Array.isArray(data.orders))return;
+   if(data.orders.length>20000||!data.orders.every((o:unknown)=>o!==null&&typeof o==="object"&&Number.isSafeInteger((o as {id?:number}).id)&&Array.isArray((o as {stocks?:unknown}).stocks)))return;
+   const json=JSON.stringify(data.orders);
+   if(json.length>15000000){setMessage("전송된 JSON이 15MB를 초과합니다.");return;}
+   setFile(new File([json],"wyyyes-orders.json",{type:"application/json"}));
+   setPreview(null);
+   setSelectedUpdates([]);
+   setMessage("와이스 주문 "+data.orders.length+"건을 받았어. 미리보기를 눌러 확인해 줘. DB는 아직 변경하지 않았어.");
+   (event.source as Window).postMessage({type:"DDOGA_WISE_RECEIVED",count:data.orders.length},allowedOrigin);
+  }
+  window.addEventListener("message",onMessage);
+  return ()=>window.removeEventListener("message",onMessage);
+ },[]);
  const [queue,setQueue]=useState<Array<{wise_order_id:number;buyer_nickname:string;ordered_at:string;item_summary:string;item_count:number;item_total_price:number}>>([]);
  const [queueError,setQueueError]=useState("");
  async function loadQueue(){try{const r=await fetch("/api/domestic/wise-json-queue");const d=await r.json();if(!r.ok)throw new Error(d.error);setQueue(d.orders??[]);setQueueError("");}catch(e){setQueueError(e instanceof Error?e.message:"조회 실패")}}
