@@ -1,6 +1,5 @@
 "use client";
 
-import DomesticItemPhotoModal from "./DomesticItemPhotoModal";
 
 import Link from "next/link";
 import DomesticItemPhotoModal from "./DomesticItemPhotoModal";
