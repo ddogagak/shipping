@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDOGA Wise shipping bridge
 // @namespace https://www.ddoga.lol/
-// @version 0.2
+// @version 0.3
 // @match https://wyyyes.com/*
 // @grant none
 // ==/UserScript==
@@ -9,9 +9,25 @@
  const origin="https://www.ddoga.lol";
  const norm=x=>String(x||"").normalize("NFKC").replace(/\s+/g,"").toLowerCase();
  let matches=[];
+ let authHeader = "";
+ const originalFetch = window.fetch;
+ window.fetch = function(input,init) {
+   try {
+     const h = new Headers(init?.headers || (input instanceof Request ? input.headers : undefined));
+     const a = h.get("Authorization");
+     if(a) authHeader = a;
+   } catch (_) {}
+   return originalFetch.apply(this,arguments);
+ };
+ const originalSetHeader = XMLHttpRequest.prototype.setRequestHeader;
+ XMLHttpRequest.prototype.setRequestHeader = function(name,value) {
+   if(String(name).toLowerCase()==="authorization" && value) authHeader=String(value);
+   return originalSetHeader.apply(this,arguments);
+ };
  const send=(type,extra={})=>window.opener?.postMessage({type,...extra},origin);
  async function request(path,options={}){
-  const r=await fetch(path,{credentials:"include",headers:{"Content-Type":"application/json"},...options});
+  if(!authHeader) throw Error("와이스 인증 헤더를 아직 확인하지 못했어. 와이스에서 배송 목록을 다시 열어줘.");
+  const r=await originalFetch.call(window,path,{credentials:"include",headers:{"Content-Type":"application/json","Authorization":authHeader},...options});
   const j=await r.json();if(!r.ok)throw Error(j.message||"HTTP "+r.status);return j;
  }
  async function preview(orders){
