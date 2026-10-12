@@ -5,7 +5,7 @@ type RawOrder={id:number;status?:number;deliveryCompany?:string|null;deliveryCod
 function asText(v:unknown){return String(v??"").trim()}
 function validDate(v:unknown){const s=asText(v);return s&&!Number.isNaN(Date.parse(s))?s:null}
 function kst(v:string){return new Date(v).toLocaleString("sv-SE",{timeZone:"Asia/Seoul"}).slice(0,16)}
-function key(v:string){return v.normalize("NFKC").replace(/\\s+/g,"").toLowerCase()}
+function key(v:string){return v.normalize("NFKC").split("(이전")[0].replace(/\s+/g,"").toLowerCase()}
 function batches<T>(a:T[],n=200){const out:T[][]=[];for(let i=0;i<a.length;i+=n)out.push(a.slice(i,i+n));return out}
 export async function POST(req:Request){
  try{
@@ -17,23 +17,32 @@ export async function POST(req:Request){
   if(!Array.isArray(parsed)||!parsed.every(x=>x&&Number.isSafeInteger(x.id)&&Array.isArray(x.stocks)))return NextResponse.json({error:"와이스 주문 배열 형식이 아닙니다."},{status:400});
   const orders=parsed as RawOrder[];
   const db=createServiceRoleClient();
-  const {data:domestic,error:domesticError}=await db.from("domestic_order").select("order_id,nickname,platform,first_order_date,source_order_dates");
+  const {data:domestic,error:domesticError}=await db.from("domestic_order").select("order_id,customer_order_no,nickname,platform,first_order_date,source_order_dates");
   if(domesticError) return NextResponse.json({error:"기존 주문 조회 실패",detail:domesticError.message},{status:500});
   const {data:queued,error:queueError}=await db.from("domestic_wise_import_queue").select("wise_order_id");
   if(queueError) return NextResponse.json({error:"와이스 신규 주문 대기열 테이블 조회 실패",detail:queueError.message,hint:"Supabase에서 20261012_wise_json_import_queue.sql 마이그레이션을 먼저 실행해야 합니다."},{status:500});
   const queuedIds=new Set((queued??[]).map(x=>Number(x.wise_order_id)));
   const domesticKeys=new Map<string,string[]>();
+  const domesticOrderNos=new Map<string,string[]>();
   for(const d of domestic??[]){
    if(d.platform!=="wise")continue;
    for(const date of [...(Array.isArray(d.source_order_dates)?d.source_order_dates:[]),d.first_order_date]){
     const m=asText(date).match(/^(\\d{4})[.\\/-](\\d{1,2})[.\\/-](\\d{1,2})\\s+(\\d{1,2}):(\\d{1,2})/);
     if(m){const k=key(asText(d.nickname))+"|"+[m[1],m[2].padStart(2,"0"),m[3].padStart(2,"0")].join("-")+" "+m[4].padStart(2,"0")+":"+m[5];domesticKeys.set(k,[...(domesticKeys.get(k)??[]),String(d.order_id)]);}
    }
+   const no=asText(d.customer_order_no);if(no)domesticOrderNos.set(no,[...(domesticOrderNos.get(no)??[]),String(d.order_id)]);
+   for(const date of [] as string[]){
+   }
   }
   const rows=orders.filter(x=>validDate(x.createdAt)).map(o=>{
    const date=validDate(o.createdAt)!;
    const nickname=asText(o.user?.nickname);
-   const matched_order_ids=domesticKeys.get(key(nickname)+"|"+kst(date))??[];
+   const formatted=kst(date);
+   const mmdd=formatted.slice(5,7)+formatted.slice(8,10);
+   const customerNo="W"+key(nickname)+"_"+mmdd;
+   const byDate=domesticKeys.get(key(nickname)+"|"+formatted)??[];
+   const byNo=[...(domestic??[])].filter(d=>d.platform==="wise"&&key(asText(d.nickname))===key(nickname)&&asText(d.customer_order_no).replace(/-C\\d+$/i,"").startsWith("W")&&asText(d.customer_order_no).includes("_"+mmdd)).map(d=>String(d.order_id));
+   const matched_order_ids=[...new Set([...byDate,...byNo])];
    const existingDomestic=matched_order_ids.length>0;
    return {order:o,wise_order_id:o.id,nickname,ordered_at:date,existingDomestic,matched_order_ids,alreadyQueued:queuedIds.has(o.id),items:o.stocks?.length??0};
   });
