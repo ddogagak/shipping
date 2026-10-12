@@ -48,7 +48,7 @@ export async function POST(req:Request){
    return {order:o,wise_order_id:o.id,nickname,ordered_at:date,existingDomestic,matched_order_ids,alreadyQueued:queuedIds.has(o.id),items:o.stocks?.length??0};
   });
   // Existing ddoga orders: offer explicit, checked status updates only.
-  const existingIds=[...new Set(rows.filter(x=>x.existingDomestic).flatMap(x=>x.matched_order_ids))];
+  const existingIds=(domestic??[]).filter(d=>d.platform==="wise").map(d=>String(d.order_id));
   const {data:shippingRows,error:shippingError}=existingIds.length
     ?await db.from("domestic_shipping").select("order_id,tracking_number,tracking_registered,shipping_status").in("order_id",existingIds)
     :{data:[],error:null};
@@ -56,7 +56,10 @@ export async function POST(req:Request){
   const shippingMap=new Map((shippingRows??[]).map(x=>[String(x.order_id),x]));
   const extraRows=updateOrders.filter(o=>[80,89].includes(Number(o.status))&&validDate(o.createdAt)).map(o=>{
     const nickname=asText(o.user?.nickname),formatted=kst(validDate(o.createdAt)!);
-    const matches=domesticKeys.get(key(nickname)+"|"+formatted)??[];
+    const mmdd=formatted.slice(5,7)+formatted.slice(8,10);
+    const byDate=domesticKeys.get(key(nickname)+"|"+formatted)??[];
+    const byNo=(domestic??[]).filter(d=>d.platform==="wise"&&key(asText(d.nickname))===key(nickname)&&asText(d.customer_order_no).includes("_"+mmdd)).map(d=>String(d.order_id));
+    const matches=[...new Set([...byDate,...byNo])];
     return {order:o,matched_order_ids:[...new Set(matches)]};
   });
   const updateCandidates=[...rows.filter(x=>x.existingDomestic).map(x=>({order:x.order,matched_order_ids:x.matched_order_ids})),...extraRows].flatMap(({order,matched_order_ids})=>{
@@ -66,7 +69,10 @@ export async function POST(req:Request){
     if(!ship)return [];
     const tracking=asText(ship.tracking_number),direct=asText(order.deliveryCompany).toUpperCase()==="DIRECT";
     const changes:Record<string,string|boolean>={};
-    if(asText(ship.shipping_status)==="registered"&&!ship.tracking_registered)changes.tracking_registered=true;
+    if(ship.tracking_registered||asText(ship.shipping_status)==="registered"){
+      if(asText(ship.shipping_status)!=="registered")changes.shipping_status="registered";
+      if(!ship.tracking_registered)changes.tracking_registered=true;
+    }
     if(direct&&Number(order.status)===25){changes.tracking_registered=true;changes.order_status="kept";}
     if(tracking&&[80,89].includes(Number(order.status))){changes.tracking_registered=true;changes.order_status="done";}
     if(!Object.keys(changes).length)return [];
