@@ -261,8 +261,32 @@ export async function POST(req: Request) {
         !shippingAlreadyDone
       );
 
+      const candidateOrders = [...nicknameCandidates, ...recipientCandidates]
+        .filter((order, index, all) => all.findIndex((item) => item.order_id === order.order_id) === index)
+        .slice(0, 8)
+        .map((order) => ({
+          order_id: order.order_id,
+          customer_order_no: order.customer_order_no || "",
+          nickname: order.nickname || "",
+          recipient_name: order.recipient_name || "",
+          phone: order.phone || "",
+        }));
+      const matchDetail = matched
+        ? "매칭됨"
+        : !row.tracking_number
+          ? "엑셀에 운송장번호가 없음"
+          : nicknameCandidates.length > 1
+            ? `닉네임 앞 4글자 일치 주문 ${nicknameCandidates.length}건 — 한 건으로 확정 불가`
+            : recipientCandidates.length > 1
+              ? `수취인 이름 일치 주문 ${recipientCandidates.length}건 — 한 건으로 확정 불가`
+              : !row.nickname_prefix && !row.normalized_recipient_name
+                ? "엑셀에 매칭할 물품명(닉네임)과 수취인 이름이 없음"
+                : `DB에서 일치하는 주문을 찾지 못함 (닉네임 기준: ${row.nickname_prefix || "없음"} / 수취인 기준: ${row.file_recipient_name || "없음"})`;
+
       return {
         ...row,
+        match_detail: matchDetail,
+        match_candidates: matched ? [] : candidateOrders,
         selected: canSave,
         matched_order_id: matched?.order_id || "",
         customer_order_no: matched?.customer_order_no || "",
