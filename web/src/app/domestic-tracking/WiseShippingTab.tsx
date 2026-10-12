@@ -12,6 +12,11 @@ export default function WiseShippingTab(){
    const data=event.data;
    if(data?.type==="DDOGA_WISE_SHIP_READY"){setConnected(true);setMessage("와이스 연결됨. 선택한 주문의 매칭을 확인할 수 있어.");}
    if(data?.type==="DDOGA_WISE_SHIP_PREVIEW"){setMatches(Array.isArray(data.matches)?data.matches:[]);setMessage(data.error||"와이스 매칭 결과를 확인해줘.");setLoading(false);}
+   if(data?.type==="DDOGA_WISE_SHIP_SYNC"){
+    const x=data.row;
+    if(!x||!rows.some(r=>r.order_id===x.order_id&&r.tracking_number===x.tracking_number))return;
+    void fetch("/api/domestic/wise-shipping",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({order_id:x.order_id,tracking_number:x.tracking_number,wise_delivery_id:x.delivery_id,wise_success:true})}).then(async r=>{const d=await r.json();tab?.postMessage({type:"DDOGA_WISE_SHIP_SYNC_RESULT",order_id:x.order_id,ok:r.ok&&d.ok,error:d.error},"https://wyyyes.com");}).catch(e=>tab?.postMessage({type:"DDOGA_WISE_SHIP_SYNC_RESULT",order_id:x.order_id,ok:false,error:String(e)},"https://wyyyes.com"));
+   }
    if(data?.type==="DDOGA_WISE_SHIP_RESULT"){
     const result=Array.isArray(data.results)?data.results:[];
     setMessage(result.map((x:{nickname:string;ok:boolean;error?:string})=>x.nickname+": "+(x.ok?"와이스 등록 성공":x.error||"실패")).join(" / "));
@@ -20,7 +25,7 @@ export default function WiseShippingTab(){
    }
   }
   window.addEventListener("message",onMessage);return()=>window.removeEventListener("message",onMessage);
- },[tab]);
+ },[tab,rows]);
  async function load(){try{const r=await fetch("/api/domestic/wise-shipping",{cache:"no-store"});const d=await r.json();if(!r.ok)throw Error(d.error||"조회 실패");setRows(d.rows||[]);setSelected([]);}catch(e){setMessage(e instanceof Error?e.message:"조회 실패");}}
  useEffect(()=>{void load();},[]);
  function openWise(){
