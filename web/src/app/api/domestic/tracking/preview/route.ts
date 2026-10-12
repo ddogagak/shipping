@@ -105,11 +105,8 @@ function pickSingle(candidates: DomesticOrderMatchRow[], trackingNumber?: string
     if (sameTracking.length === 1) return sameTracking[0];
   }
 
-  const notShippingDone = candidates.filter(
-    (order) => shipping(order)?.shipping_status !== "done"
-  );
-  if (notShippingDone.length === 1) return notShippingDone[0];
-
+  // Only eligible (not completed) orders reach this function.
+  // Never resolve ambiguous candidates by guessing.
   return undefined;
 }
 
@@ -169,6 +166,13 @@ export async function POST(req: Request) {
     const nicknamePrefixMap = new Map<string, DomesticOrderMatchRow[]>();
 
     for (const order of orders) {
+      // Exclude completed orders BEFORE constructing either match index.
+      // Completion of the order OR delivery is enough to exclude it.
+      if (
+        normalizeStatus(order.order_status).toLowerCase() === "done" ||
+        normalizeStatus(shipping(order)?.shipping_status).toLowerCase() === "done"
+      ) continue;
+
       addCandidate(
         recipientNameMap,
         normalizePersonName(order.recipient_name),
@@ -207,15 +211,8 @@ export async function POST(req: Request) {
       const sameTracking =
         Boolean(existingTrackingNumber) &&
         existingTrackingNumber === row.tracking_number;
-      // 주문은 완료됐지만 배송상태가 uploaded인 과거 건은,
-      // 파일 운송장이 DB 운송장과 같고 집하 완료라면 배송완료로 복구 가능.
-      const canFinishCompletedOrder =
-        orderAlreadyDone &&
-        !shippingAlreadyDone &&
-        sameTracking;
-      // "완료 건 - 저장 제외"는 실제 배송까지 done인 경우에만 적용한다.
-      // 주문상태가 done이어도 배송이 uploaded/registered/start면 체크 가능.
-      const alreadyDone = shippingAlreadyDone;
+      // Completed orders are excluded from candidate indexes above.
+      const alreadyDone = shippingAlreadyDone || orderAlreadyDone;
 
       let matchStatus = "not_found";
       if (!row.tracking_number) {
@@ -246,11 +243,7 @@ export async function POST(req: Request) {
             ? "same"
             : "changed";
 
-      const nextShippingStatus = shippingAlreadyDone || canFinishCompletedOrder
-        ? "done"
-        : completeFromFile
-          ? "done"
-          : "uploaded";
+      const nextShippingStatus = completeFromFile ? "done" : "uploaded";
       const nextOrderStatus = alreadyDone || completeFromFile
         ? "done"
         : currentOrderStatus;
@@ -258,7 +251,8 @@ export async function POST(req: Request) {
       const canSave = Boolean(
         matched &&
         row.tracking_number &&
-        !shippingAlreadyDone
+        !shippingAlreadyDone &&
+        !orderAlreadyDone
       );
 
       const candidateOrders = [...nicknameCandidates, ...recipientCandidates]
