@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDOGA Wise shipping bridge
 // @namespace https://www.ddoga.lol/
-// @version 0.3
+// @version 0.4
 // @match https://wyyyes.com/*
 // @grant none
 // ==/UserScript==
@@ -28,7 +28,15 @@
  async function request(path,options={}){
   if(!authHeader) throw Error("와이스 인증 헤더를 아직 확인하지 못했어. 와이스에서 배송 목록을 다시 열어줘.");
   const r=await originalFetch.call(window,path,{credentials:"include",headers:{"Content-Type":"application/json","Authorization":authHeader},...options});
-  const j=await r.json();if(!r.ok)throw Error(j.message||"HTTP "+r.status);return j;
+  const raw=await r.text();
+  let j;
+  try { j=JSON.parse(raw); }
+  catch (_) {
+    const kind=raw.trimStart().startsWith("<")?"HTML 페이지":raw.trimStart().slice(0,60);
+    throw Error("와이스 응답이 JSON이 아님 (HTTP "+r.status+", "+r.url+", "+kind+"). 로그인 화면/요청 경로를 확인해야 해.");
+  }
+  if(!r.ok)throw Error("HTTP "+r.status+": "+(j.message||j.error||"API 오류"));
+  return j;
  }
  async function preview(orders){
   matches=[];
