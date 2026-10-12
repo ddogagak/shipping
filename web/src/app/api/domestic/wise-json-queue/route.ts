@@ -26,12 +26,12 @@ export async function POST(req: Request) {
   if(existing)return NextResponse.json({error:"이미 등록된 주문"},{status:409});
   const {data:orders,error:oe}=await db.from("domestic_order").select("order_id,nickname,platform,first_order_date,source_order_dates").eq("platform","wise");
   if(oe)throw oe;
-  const norm=(v:unknown)=>String(v??"").normalize("NFKC").replace(/\\s+/g,"").toLowerCase();
-  const dateKey=(v:unknown)=>{const s=String(v??"");const m=s.match(/(\\d{4})[.\\/-](\\d{1,2})[.\\/-](\\d{1,2})[ T/]+(\\d{1,2}):(\\d{1,2})/);return m?[m[1],m[2].padStart(2,"0"),m[3].padStart(2,"0")].join("-")+" "+m[4].padStart(2,"0")+":"+m[5]:""};
+  const norm=(v:unknown)=>String(v??"").normalize("NFKC").replace(/\s+/g,"").toLowerCase();
+  const dateKey=(v:unknown)=>{const s=String(v??"");const m=s.match(/(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})[ T/]+(\d{1,2}):(\d{1,2})/);return m?[m[1],m[2].padStart(2,"0"),m[3].padStart(2,"0")].join("-")+" "+m[4].padStart(2,"0")+":"+m[5]:""};
   const date=new Date(q.ordered_at).toLocaleString("sv-SE",{timeZone:"Asia/Seoul",hour12:false}).replace(/-/g,".").slice(0,16);
   const duplicate=(orders??[]).find(o=>norm(o.nickname)===norm(q.buyer_nickname)&&[o.first_order_date,...(Array.isArray(o.source_order_dates)?o.source_order_dates:[])].some(d=>dateKey(d)===dateKey(date)));
   if(duplicate)return NextResponse.json({error:"기존 주문 중복 가능: "+duplicate.order_id},{status:409});
-  const {error:ie}=await db.from("domestic_order").insert({order_id:id,customer_order_no:"W"+wise_order_id,platform:"wise",source_order_dates:[date],first_order_date:date,nickname:String(q.buyer_nickname??"").split("(이전")[0].trim(),recipient_name:q.receiver_name,phone:/\\d/.test(q.receiver_phone??"")?q.receiver_phone:null,postal_code:q.postal_code,address:q.address,order_count:1,item_summary:q.item_summary,item_total_price:q.item_total_price,order_status:"accepted"});
+  const {error:ie}=await db.from("domestic_order").insert({order_id:id,customer_order_no:"W"+wise_order_id,platform:"wise",source_order_dates:[date],first_order_date:date,nickname:String(q.buyer_nickname??"").split("(이전")[0].trim(),recipient_name:q.receiver_name,phone:/\d/.test(q.receiver_phone??"")?q.receiver_phone:null,postal_code:q.postal_code,address:q.address,order_count:1,item_summary:q.item_summary,item_total_price:q.item_total_price,order_status:"accepted"});
   if(ie)throw ie;
   const {error:se}=await db.from("domestic_shipping").insert({order_id:id,carrier:"우체국택배",shipping_type:"일반택배",tracking_number:null,shipping_status:"start"});
   if(se)throw new Error("주문 등록됨, 배송정보 저장 실패: "+se.message);
