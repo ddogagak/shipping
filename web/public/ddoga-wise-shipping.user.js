@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDOGA Wise shipping bridge
 // @namespace https://www.ddoga.lol/
-// @version 0.6
+// @version 0.7
 // @match https://wyyyes.com/*
 // @grant none
 // ==/UserScript==
@@ -52,7 +52,9 @@
     const chains=(await request("/r0.app/sellers/myMarket/orderChains?userId="+encodeURIComponent(uid))).result||[];
     const ids=[...new Set(chains.filter(c=>c.delivery_id&&!c.deliveryCode&&Number(c.status)!==25).map(c=>Number(c.delivery_id)))];
     if(ids.length!==1){m.reason="배송 ID 없음 또는 여러 개";matches.push(m);continue;}
-    m.delivery_id=ids[0];m.cursor_order_chain_id=Number(chains[0].firstOrderGroupId);
+    const active=chains.filter(c=>Number(c.delivery_id)===ids[0]&&!c.deliveryCode&&Number(c.status)!==25);
+    if(active.length!==1){m.reason="합배송/추가 주문 "+active.length+"건 — PC에서 수동 처리";matches.push(m);continue;}
+    m.delivery_id=ids[0];m.cursor_order_chain_id=Number(active[0].firstOrderGroupId);
     if(!m.cursor_order_chain_id){m.reason="주문 묶음 ID 없음";matches.push(m);continue;}
     m.status="ready";m.reason="등록 가능";matches.push(m);
    }
