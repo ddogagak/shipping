@@ -63,7 +63,7 @@ export async function POST(req:Request){
     if(!ship)return [];
     const tracking=asText(ship.tracking_number),direct=asText(order.deliveryCompany).toUpperCase()==="DIRECT";
     const changes:Record<string,string|boolean>={};
-    if(ship.tracking_registered&&asText(ship.shipping_status)!=="registered"){
+    if(tracking&&asText(order.deliveryCompany).toUpperCase()!=="DIRECT"&&ship.tracking_registered&&asText(ship.shipping_status)!=="registered"){
       changes.shipping_status="registered";
     }
     if(direct&&Number(order.status)===25){if(!ship.tracking_registered)changes.tracking_registered=true;changes.order_status="kept";}
