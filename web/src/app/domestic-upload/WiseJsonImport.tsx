@@ -1,5 +1,8 @@
 "use client";
 import {useState} from "react";
+const primaryButtonStyle={border:0,borderRadius:10,padding:"10px 14px",background:"#2563eb",color:"#fff",fontWeight:800,cursor:"pointer"} as const;
+const darkButtonStyle={border:0,borderRadius:10,padding:"10px 14px",background:"#111827",color:"#fff",fontWeight:800,cursor:"pointer"} as const;
+const secondaryButtonStyle={border:"1px solid #d1d5db",borderRadius:10,padding:"9px 14px",background:"#fff",color:"#374151",fontWeight:700,cursor:"pointer"} as const;
 type Candidate={wise_order_id:number;nickname:string;ordered_at:string;items:number;existingDomestic:boolean;alreadyQueued:boolean;matched_order_ids:string[]};
 export default function WiseJsonImport(){
  const [file,setFile]=useState<File|null>(null);
@@ -28,8 +31,8 @@ export default function WiseJsonImport(){
   <p>JSON에서 새 주문을 검토 대기열에 추가하고, 모든 주문의 와이스 전용 배송/상태 스냅샷과 상품정보를 갱신합니다. 기존 ddoga 주문과 합배송은 수정하지 않습니다.</p>
   <input type="file" accept=".json,application/json" onChange={e=>{setFile(e.target.files?.[0]??null);setPreview(null);setMessage("")}}/>
   <div style={{display:"flex",gap:8,marginTop:16}}>
-   <button disabled={!file||loading} onClick={()=>run("preview")} style={{padding:"10px 16px",borderRadius:8}}>미리보기</button>
-   <button disabled={!file||loading||!preview} onClick={()=>run("save")} style={{padding:"10px 16px",borderRadius:8,background:"#7c3aed",color:"white",border:0}}>와이스 DB 갱신 + 신규 대기 등록</button>
+   <button disabled={!file||loading} onClick={()=>run("preview")} style={primaryButtonStyle}>미리보기</button>
+   <button disabled={!file||loading||!preview} onClick={()=>run("save")} style={darkButtonStyle}>와이스 DB 갱신 + 신규 대기 등록</button>
   </div>
   {message&&<p>{message}</p>}
   {preview&&<><p>전체 {preview.total}건 / 신규 후보 {preview.new_orders.length}건 / 기존 주문 추정 {preview.possible_existing.length}건 / 이미 대기열 등록 {preview.already_queued}건</p>
@@ -41,11 +44,11 @@ export default function WiseJsonImport(){
   </>}
   <div style={{marginTop:24,borderTop:"1px solid #ddd",paddingTop:16}}>
    <h3>신규 주문 검토 대기열</h3>
-   <button onClick={loadQueue} style={{padding:"8px 14px"}}>대기열 조회 / 새로고침</button>
+   <button onClick={loadQueue} style={secondaryButtonStyle}>대기열 조회 / 새로고침</button>
    {queueError&&<p style={{color:"#b91c1c"}}>{queueError}</p>}
    <div style={{maxHeight:450,overflow:"auto",marginTop:12}}><table style={{width:"100%",borderCollapse:"collapse"}}>
     <thead><tr><th>주문 ID</th><th>닉네임</th><th>주문시각</th><th>상품</th><th>금액</th><th>처리</th></tr></thead>
-    <tbody>{queue.map(o=><tr key={o.wise_order_id}><td>{o.wise_order_id}</td><td>{o.buyer_nickname}</td><td>{new Date(o.ordered_at).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})}</td><td title={o.item_summary}>{o.item_count}개 / {o.item_summary?.slice(0,40)}</td><td>{Number(o.item_total_price).toLocaleString()}원</td><td><button onClick={()=>handleQueue(o.wise_order_id,"approve")}>ddoga 등록</button> <button onClick={()=>handleQueue(o.wise_order_id,"ignore")}>제외</button></td></tr>)}</tbody>
+    <tbody>{queue.map(o=><tr key={o.wise_order_id}><td>{o.wise_order_id}</td><td>{o.buyer_nickname}</td><td>{new Date(o.ordered_at).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})}</td><td title={o.item_summary}>{o.item_count}개 / {o.item_summary?.slice(0,40)}</td><td>{Number(o.item_total_price).toLocaleString()}원</td><td><button onClick={()=>handleQueue(o.wise_order_id,"approve")} style={darkButtonStyle}>ddoga 등록</button> <button onClick={()=>handleQueue(o.wise_order_id,"ignore")} style={secondaryButtonStyle}>제외</button></td></tr>)}</tbody>
    </table></div>
    <p>주문별 등록 후 국내 주문 목록에서 수동 합배송하세요. 기존 주문과 중복이 의심되면 등록을 막습니다.</p>
   </div>
