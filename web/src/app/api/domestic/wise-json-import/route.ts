@@ -63,9 +63,6 @@ export async function POST(req:Request){
     if(!ship)return [];
     const tracking=asText(ship.tracking_number),direct=asText(order.deliveryCompany).toUpperCase()==="DIRECT";
     const changes:Record<string,string|boolean>={};
-    if(tracking&&asText(order.deliveryCompany).toUpperCase()!=="DIRECT"&&ship.tracking_registered&&asText(ship.shipping_status)!=="registered"){
-      changes.shipping_status="registered";
-    }
     if(direct&&Number(order.status)===25){if(!ship.tracking_registered)changes.tracking_registered=true;changes.order_status="kept";}
     if(!Object.keys(changes).length)return [];
     return [{wise_order_id:order.id,order_id,nickname:asText(order.user?.nickname),ordered_at:order.createdAt,wise_status:Number(order.status),delivery_company:order.deliveryCompany,tracking_number:tracking,changes}];
