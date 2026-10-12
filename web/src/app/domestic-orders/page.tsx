@@ -1,5 +1,6 @@
-import DomesticItemPhotoModal from "./DomesticItemPhotoModal";
 "use client";
+
+import DomesticItemPhotoModal from "./DomesticItemPhotoModal";
 
 import Link from "next/link";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
