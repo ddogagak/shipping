@@ -48,8 +48,9 @@ export default function WiseShippingTab(){
   setLoading(true);tab.postMessage({type:"DDOGA_WISE_SHIP_REGISTER_REQUEST",order_ids:valid.map(x=>x.order_id)},"https://wyyyes.com");
  }
  const btn={border:"1px solid #d1d5db",borderRadius:9,padding:"9px 12px",background:"white",cursor:"pointer",fontWeight:700} as const;
- return <section style={{border:"1px solid #e5e7eb",borderRadius:16,padding:20,background:"white"}}>
+ return <section style={{border:"1px solid #e5e7eb",borderRadius:16,padding:"clamp(10px,3vw,20px)",background:"white"}}>
   <h2 style={{marginTop:0}}>와이스 송장 연동</h2>
+  <p style={{fontSize:13,color:"#92400e"}}>모바일에서는 Firefox + 사용자 스크립트 지원 환경이 필요해. 단일 주문만 자동 등록하고 합배송은 제외해.</p>
   <p style={{color:"#6b7280"}}>ddoga 미등록 송장을 조회하고, 와이스에서 닉네임으로 배송을 찾아 등록해. 와이스 성공 확인 후에만 ddoga 상태를 변경해.</p>
   <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
    <button style={btn} onClick={()=>void load()}>대상 새로고침</button>
@@ -58,12 +59,12 @@ export default function WiseShippingTab(){
   </div>
   <p>{connected?"🟢 와이스 연결됨":"⚪ 와이스 연결 대기"} · 대상 {rows.length}건 · 선택 {selected.length}건</p>
   {message&&<p role="status" style={{fontWeight:700}}>{message}</p>}
-  <div style={{overflowX:"auto",maxHeight:460,overflowY:"auto"}}>
+  <div style={{overflowX:"auto",maxHeight:460,overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
    <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead><tr><th><input aria-label="전체 선택" type="checkbox" checked={rows.length>0&&selected.length===rows.length} onChange={e=>setSelected(e.target.checked?rows.map(x=>x.order_id):[])}/></th><th>닉네임</th><th>주문번호</th><th>로젠 송장번호</th></tr></thead><tbody>
    {rows.map(x=><tr key={x.order_id} style={{borderTop:"1px solid #eee"}}><td><input type="checkbox" checked={selected.includes(x.order_id)} onChange={e=>setSelected(v=>e.target.checked?[...v,x.order_id]:v.filter(id=>id!==x.order_id))}/></td><td>{x.nickname}</td><td>{x.customer_order_no||x.order_id}</td><td>{x.tracking_number}</td></tr>)}
    </tbody></table>
   </div>
-  {matches.length>0&&<div style={{marginTop:20}}><h3>와이스 매칭 미리보기</h3><table style={{width:"100%",fontSize:13}}><thead><tr><th>닉네임</th><th>송장번호</th><th>배송 ID</th><th>결과</th></tr></thead><tbody>{matches.map(x=><tr key={x.order_id}><td>{x.nickname}</td><td>{x.tracking_number}</td><td>{x.delivery_id||"-"}</td><td>{x.reason||x.status}</td></tr>)}</tbody></table><button style={{...btn,marginTop:14,background:"#111827",color:"white"}} disabled={loading||!matches.some(x=>x.status==="ready")} onClick={register}>매칭 성공 건 와이스 송장 등록</button></div>}
+  {matches.length>0&&<div style={{marginTop:20,overflowX:"auto"}}><h3>와이스 매칭 미리보기</h3><table style={{width:"100%",fontSize:13}}><thead><tr><th>닉네임</th><th>송장번호</th><th>배송 ID</th><th>결과</th></tr></thead><tbody>{matches.map(x=><tr key={x.order_id}><td>{x.nickname}</td><td>{x.tracking_number}</td><td>{x.delivery_id||"-"}</td><td>{x.reason||x.status}</td></tr>)}</tbody></table><button style={{...btn,marginTop:14,background:"#111827",color:"white",minHeight:46,maxWidth:"100%"}} disabled={loading||!matches.some(x=>x.status==="ready")} onClick={register}>매칭 성공 건 와이스 송장 등록</button></div>}
  </section>;
 
 }
