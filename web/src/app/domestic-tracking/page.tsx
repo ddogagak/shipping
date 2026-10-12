@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, type CSSProperties } from "react";
 import * as XLSX from "xlsx";
+import WiseShippingTab from "./WiseShippingTab";
 
 type TrackingPreviewRow = {
   id: string;
@@ -139,6 +140,7 @@ function trackingResultLabel(row: TrackingPreviewRow) {
 }
 
 export default function DomesticTrackingPage() {
+  const [activeTab,setActiveTab] = useState<"excel"|"wise">("excel");
   const [fileName, setFileName] = useState("");
   const [rows, setRows] = useState<TrackingPreviewRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -336,6 +338,11 @@ export default function DomesticTrackingPage() {
         </div>
       </div>
 
+      <div style={{display:"flex",gap:8,marginBottom:16}}>
+        <button type="button" onClick={()=>setActiveTab("excel")} style={{...navButtonStyle,background:activeTab==="excel"?"#111827":"#fff",color:activeTab==="excel"?"#fff":"#111827"}}>운송장엑셀 업로드</button>
+        <button type="button" onClick={()=>setActiveTab("wise")} style={{...navButtonStyle,background:activeTab==="wise"?"#111827":"#fff",color:activeTab==="wise"?"#fff":"#111827"}}>와이스 송장 연동</button>
+      </div>
+      {activeTab==="wise"?<WiseShippingTab/>:<>
       <section style={cardStyle}>
         <label style={uploadBoxStyle}>
           <strong>운송장 엑셀 업로드</strong>
@@ -518,6 +525,7 @@ export default function DomesticTrackingPage() {
           </div>
         </section>
       ) : null}
+      </>}
     </main>
   );
 }
