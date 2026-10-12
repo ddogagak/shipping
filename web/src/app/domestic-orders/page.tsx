@@ -1,3 +1,4 @@
+import DomesticItemPhotoModal from "./DomesticItemPhotoModal";
 "use client";
 
 import Link from "next/link";
@@ -386,6 +387,7 @@ export default function DomesticOrdersPage() {
   const [memoModalValue, setMemoModalValue] = useState("");
   const [memoModalSaving, setMemoModalSaving] = useState(false);
   const [openItemTooltipId, setOpenItemTooltipId] = useState<string | null>(null);
+  const [photoOrder, setPhotoOrder] = useState<Row | null>(null);
 
   const [platforms, setPlatforms] = useState<string[]>([]);
   const [orderStatuses, setOrderStatuses] = useState<string[]>(["accepted", "checked","packaged"]);
@@ -1994,6 +1996,7 @@ export default function DomesticOrdersPage() {
                           <button
                             type="button"
                             style={itemPreviewStyle}
+                            onDoubleClick={(event) => { event.stopPropagation(); setPhotoOrder(row); }}
                             onClick={(event) => {
                               event.stopPropagation();
                               setOpenItemTooltipId((current) => current === row.order_id ? null : row.order_id);
@@ -2051,6 +2054,7 @@ export default function DomesticOrdersPage() {
           </div>
         )}
       </section>
+          {photoOrder ? <DomesticItemPhotoModal orderId={photoOrder.order_id} nickname={photoOrder.nickname || ""} onClose={() => setPhotoOrder(null)} /> : null}
           {memoModalRow ? (
         <div style={memoBackdropStyle} onMouseDown={() => setMemoModalRow(null)}>
           <div style={memoModalStyle} onMouseDown={(event) => event.stopPropagation()}>
