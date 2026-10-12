@@ -3,6 +3,7 @@ import {useState} from "react";
 const primaryButtonStyle={border:0,borderRadius:10,padding:"10px 14px",background:"#2563eb",color:"#fff",fontWeight:800,cursor:"pointer"} as const;
 const darkButtonStyle={border:0,borderRadius:10,padding:"10px 14px",background:"#111827",color:"#fff",fontWeight:800,cursor:"pointer"} as const;
 const secondaryButtonStyle={border:"1px solid #d1d5db",borderRadius:10,padding:"9px 14px",background:"#fff",color:"#374151",fontWeight:700,cursor:"pointer"} as const;
+type UpdateCandidate={wise_order_id:number;order_id:string;nickname:string;ordered_at:string;wise_status:number;delivery_company:string|null;tracking_number:string;changes:Record<string,string|boolean>};
 type Candidate={wise_order_id:number;nickname:string;ordered_at:string;items:number;existingDomestic:boolean;alreadyQueued:boolean;matched_order_ids:string[]};
 export default function WiseJsonImport(){
  const [file,setFile]=useState<File|null>(null);
@@ -10,9 +11,10 @@ export default function WiseJsonImport(){
  const [queueError,setQueueError]=useState("");
  async function loadQueue(){try{const r=await fetch("/api/domestic/wise-json-queue");const d=await r.json();if(!r.ok)throw new Error(d.error);setQueue(d.orders??[]);setQueueError("");}catch(e){setQueueError(e instanceof Error?e.message:"조회 실패")}}
  async function handleQueue(id:number,action:"approve"|"ignore"){if(!confirm(action==="approve"?"이 신규 주문을 ddoga 주문으로 등록할까요?":"이 주문을 대기열에서 제외할까요?"))return;try{const r=await fetch("/api/domestic/wise-json-queue",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({wise_order_id:id,action})});const d=await r.json();if(!r.ok)throw new Error(d.error);await loadQueue();setMessage(action==="approve"?`주문 등록 완료: ${d.order_id}`:"대기열에서 제외했습니다.");}catch(e){setMessage(e instanceof Error?e.message:"처리 실패")}}
+ const [selectedUpdates,setSelectedUpdates]=useState<number[]>([]);
  const [loading,setLoading]=useState(false);
  const [message,setMessage]=useState("");
- const [preview,setPreview]=useState<{total:number;new_orders:Candidate[];possible_existing:Candidate[];queued_orders:Candidate[];already_queued:number}|null>(null);
+ const [preview,setPreview]=useState<{total:number;new_orders:Candidate[];possible_existing:Candidate[];queued_orders:Candidate[];already_queued:number;update_candidates:UpdateCandidate[]}|null>(null);
  async function run(mode:"preview"|"save"){
   if(!file)return;
   if(mode==="save"&&!confirm("와이스 주문 스냅샷을 갱신하고 신규 주문을 검토 대기열에 등록할까요? ddoga 주문/배송 데이터는 수정하지 않습니다."))return;
@@ -22,9 +24,21 @@ export default function WiseJsonImport(){
    const res=await fetch("/api/domestic/wise-json-import",{method:"POST",body:form});
    const data=await res.json();
    if(!res.ok)throw new Error(data.error||"업로드 실패");
-   if(mode==="preview"){setPreview(data);setMessage("미리보기 완료. 기존 주문 추정은 닉네임+주문시각 기준이며 확인이 필요합니다.");}
+   if(mode==="preview"){setPreview(data);setSelectedUpdates((data.update_candidates??[]).map((x:UpdateCandidate)=>x.wise_order_id));setMessage("미리보기 완료. 기존 주문 추정은 닉네임+주문시각 기준이며 확인이 필요합니다.");}
    else{setPreview(null);setMessage(`저장 완료: 신규 검토 대기 ${data.queued_new}건 / 와이스 스냅샷 ${data.updated_snapshots}건 / 상품 ${data.updated_items}건. ddoga 주문/배송정보 변경 없음.`);}
   }catch(e){setMessage(e instanceof Error?e.message:"알 수 없는 오류")}finally{setLoading(false)}
+ }
+ async function applyUpdates(){
+  if(!file||!selectedUpdates.length)return;
+  if(!confirm(`선택한 ${selectedUpdates.length}건의 기존 주문 상태를 변경할까요?`))return;
+  setLoading(true);
+  try{
+   const form=new FormData();form.append("file",file);form.append("mode","apply_updates");form.append("selected_ids",JSON.stringify(selectedUpdates));
+   const r=await fetch("/api/domestic/wise-json-import",{method:"POST",body:form});const d=await r.json();
+   if(!r.ok)throw new Error(d.error||"변경 실패");
+   setMessage(`상태 업데이트 완료 ${d.updated}건 / 실패 ${d.failed}건`+(d.failed?" — "+d.results.filter((x:{ok:boolean})=>!x.ok).map((x:{order_id:string;error:string})=>x.order_id+": "+x.error).join(", "):""));
+   setSelectedUpdates([]);
+  }catch(e){setMessage(e instanceof Error?e.message:"변경 실패")}finally{setLoading(false)}
  }
  return <section style={{border:"1px solid #e5e7eb",borderRadius:16,padding:20,background:"#fff",marginTop:16}}>
   <h2 style={{marginTop:0}}>와이스 JSON 동기화</h2>
@@ -35,6 +49,16 @@ export default function WiseJsonImport(){
    <button disabled={!file||loading||!preview} onClick={()=>run("save")} style={darkButtonStyle}>와이스 DB 갱신 + 신규 대기 등록</button>
   </div>
   {message&&<p>{message}</p>}
+  {preview&&preview.update_candidates?.length>0&&<div style={{marginTop:18,padding:14,border:"1px solid #cbd5e1",borderRadius:12}}>
+   <h3>기존 주문 상태 업데이트 대상 ({preview.update_candidates.length}건)</h3>
+   <p>체크한 항목만 ddoga 주문/배송 상태를 수정합니다. 신규 주문 등록과 별개입니다.</p>
+   <label><input type="checkbox" checked={selectedUpdates.length===preview.update_candidates.length} onChange={e=>setSelectedUpdates(e.target.checked?preview.update_candidates.map(x=>x.wise_order_id):[])}/> 전체 선택</label>
+   <div style={{maxHeight:340,overflow:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}>
+    <thead><tr><th>선택</th><th>닉네임 / 날짜</th><th>와이스 상태</th><th>ddoga 주문</th><th>변경 내용</th></tr></thead>
+    <tbody>{preview.update_candidates.map(x=><tr key={x.wise_order_id} style={{borderTop:"1px solid #eee"}}><td><input type="checkbox" checked={selectedUpdates.includes(x.wise_order_id)} onChange={e=>setSelectedUpdates(v=>e.target.checked?[...v,x.wise_order_id]:v.filter(id=>id!==x.wise_order_id))}/></td><td>{x.nickname} / {new Date(x.ordered_at).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})}</td><td>{x.wise_status} / {x.delivery_company||"-"}</td><td>{x.order_id}</td><td>{Object.entries(x.changes).map(([k,v])=>k==="tracking_registered"?"등록 Y":k==="shipping_status"?"배송상태 운송장등록":k==="order_status"?"주문상태 "+(v==="kept"?"직배킵":v==="done"?"완료":v):k+" "+v).join(" / ")}</td></tr>)}</tbody>
+   </table></div>
+   <button disabled={loading||!selectedUpdates.length} onClick={applyUpdates} style={{...darkButtonStyle,marginTop:10}}>선택 {selectedUpdates.length}건 상태 업데이트</button>
+  </div>}
   {preview&&<><p>전체 {preview.total}건 / 신규 후보 {preview.new_orders.length}건 / 기존 주문 추정 {preview.possible_existing.length}건 / 이미 대기열 등록 {preview.already_queued}건</p>
    <div style={{maxHeight:480,overflow:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}>
     <thead><tr><th>분류</th><th>와이스 주문 ID</th><th>닉네임</th><th>주문시각</th><th>상품수</th><th>매칭된 ddoga 주문</th></tr></thead>
