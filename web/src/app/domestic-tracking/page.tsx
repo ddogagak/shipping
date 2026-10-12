@@ -27,6 +27,8 @@ type TrackingPreviewRow = {
   current_shipping_type?: string;
   existing_tracking_number?: string;
   match_status: string;
+  match_detail?: string;
+  match_candidates?: Array<{order_id:string;customer_order_no:string;nickname:string;recipient_name:string;phone:string}>;
   tracking_comparison?: "new" | "same" | "changed" | "unmatched";
   already_done?: boolean;
   can_save?: boolean;
@@ -148,6 +150,7 @@ export default function DomesticTrackingPage() {
   const selectedCount = rows.filter((row) => row.selected).length;
   const matchedCount = rows.filter((row) => row.matched_order_id).length;
   const completeCount = rows.filter((row) => row.matched_order_id && isPickedUp(row.pickup_status)).length;
+  const unmatchedRows = rows.filter((row) => !row.matched_order_id);
 
   async function parseAndPreview(file: File) {
     setLoading(true);
@@ -396,6 +399,34 @@ export default function DomesticTrackingPage() {
               저장 {saveResult.updated}건 / 배송완료 {saveResult.completed}건 / 운송장 입력 {saveResult.uploaded}건 / 스킵 {saveResult.skipped}건
             </div>
           ) : null}
+
+          {unmatchedRows.length > 0 && (
+            <div style={{marginTop:16,padding:14,border:"1px solid #f59e0b",borderRadius:12,background:"#fffbeb"}}>
+              <h3 style={{margin:"0 0 8px"}}>미매칭 상세 ({unmatchedRows.length}건) — DB 저장 제외</h3>
+              <p style={{margin:"0 0 10px",fontSize:13}}>엑셀 원본값과 DB 후보를 비교해 확인할 수 있어. 여기서 임의로 매칭하거나 저장하지 않아.</p>
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                  <thead><tr><th style={thStyle}>엑셀 행</th><th style={thStyle}>물품명 / 닉네임</th><th style={thStyle}>수취인 / 연락처</th><th style={thStyle}>운송장</th><th style={thStyle}>실패 사유 / DB 후보</th></tr></thead>
+                  <tbody>{unmatchedRows.map((row,index)=>(
+                    <tr key={row.id}>
+                      <td style={tdStyle}>{index+1}</td>
+                      <td style={tdStyle}>{row.product_name || "-"}</td>
+                      <td style={tdStyle}>{row.file_recipient_name || "-"} / {row.phone || "-"}</td>
+                      <td style={tdStyle}>{row.tracking_number || "-"}</td>
+                      <td style={tdStyle}>
+                        <strong>{row.match_detail || matchStatusLabel(row.match_status)}</strong>
+                        {(row.match_candidates || []).map(candidate=>(
+                          <div key={candidate.order_id} style={{marginTop:5,fontSize:12}}>
+                            후보: {candidate.nickname || "-"} / {candidate.recipient_name || "-"} / {candidate.phone || "-"} / {candidate.customer_order_no || candidate.order_id}
+                          </div>
+                        ))}
+                      </td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           <div style={{ overflowX: "auto", marginTop: 16 }}>
             <table style={tableStyle}>
