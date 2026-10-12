@@ -65,3 +65,5 @@ export default function WiseShippingTab(){
   </div>
   {matches.length>0&&<div style={{marginTop:20}}><h3>와이스 매칭 미리보기</h3><table style={{width:"100%",fontSize:13}}><thead><tr><th>닉네임</th><th>송장번호</th><th>배송 ID</th><th>결과</th></tr></thead><tbody>{matches.map(x=><tr key={x.order_id}><td>{x.nickname}</td><td>{x.tracking_number}</td><td>{x.delivery_id||"-"}</td><td>{x.reason||x.status}</td></tr>)}</tbody></table><button style={{...btn,marginTop:14,background:"#111827",color:"white"}} disabled={loading||!matches.some(x=>x.status==="ready")} onClick={register}>매칭 성공 건 와이스 송장 등록</button></div>}
  </section>;
+
+}
