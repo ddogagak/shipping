@@ -1,6 +1,6 @@
 "use client";
 import {useState} from "react";
-type Candidate={wise_order_id:number;nickname:string;ordered_at:string;items:number;existingDomestic:boolean;alreadyQueued:boolean};
+type Candidate={wise_order_id:number;nickname:string;ordered_at:string;items:number;existingDomestic:boolean;alreadyQueued:boolean;matched_order_ids:string[]};
 export default function WiseJsonImport(){
  const [file,setFile]=useState<File|null>(null);
  const [queue,setQueue]=useState<Array<{wise_order_id:number;buyer_nickname:string;ordered_at:string;item_summary:string;item_count:number;item_total_price:number}>>([]);
@@ -9,7 +9,7 @@ export default function WiseJsonImport(){
  async function handleQueue(id:number,action:"approve"|"ignore"){if(!confirm(action==="approve"?"이 신규 주문을 ddoga 주문으로 등록할까요?":"이 주문을 대기열에서 제외할까요?"))return;try{const r=await fetch("/api/domestic/wise-json-queue",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({wise_order_id:id,action})});const d=await r.json();if(!r.ok)throw new Error(d.error);await loadQueue();setMessage(action==="approve"?`주문 등록 완료: ${d.order_id}`:"대기열에서 제외했습니다.");}catch(e){setMessage(e instanceof Error?e.message:"처리 실패")}}
  const [loading,setLoading]=useState(false);
  const [message,setMessage]=useState("");
- const [preview,setPreview]=useState<{total:number;new_orders:Candidate[];possible_existing:Candidate[];already_queued:number}|null>(null);
+ const [preview,setPreview]=useState<{total:number;new_orders:Candidate[];possible_existing:Candidate[];queued_orders:Candidate[];already_queued:number}|null>(null);
  async function run(mode:"preview"|"save"){
   if(!file)return;
   if(mode==="save"&&!confirm("와이스 주문 스냅샷을 갱신하고 신규 주문을 검토 대기열에 등록할까요? ddoga 주문/배송 데이터는 수정하지 않습니다."))return;
@@ -33,8 +33,11 @@ export default function WiseJsonImport(){
   </div>
   {message&&<p>{message}</p>}
   {preview&&<><p>전체 {preview.total}건 / 신규 후보 {preview.new_orders.length}건 / 기존 주문 추정 {preview.possible_existing.length}건 / 이미 대기열 등록 {preview.already_queued}건</p>
-   <div style={{maxHeight:420,overflow:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th>와이스 주문 ID</th><th>닉네임</th><th>주문시각</th><th>상품수</th></tr></thead><tbody>{preview.new_orders.map(o=><tr key={o.wise_order_id}><td>{o.wise_order_id}</td><td>{o.nickname}</td><td>{new Date(o.ordered_at).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})}</td><td>{o.items}</td></tr>)}</tbody></table></div>
-   <p style={{color:"#9a3412"}}>주의: 기존 주문 추정에 실패한 주문이 신규 후보로 표시될 수 있습니다. 신규 대기열을 실제 국내 주문으로 전환하는 기능은 아직 연결하지 않았습니다.</p>
+   <div style={{maxHeight:480,overflow:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}>
+    <thead><tr><th>분류</th><th>와이스 주문 ID</th><th>닉네임</th><th>주문시각</th><th>상품수</th><th>매칭된 ddoga 주문</th></tr></thead>
+    <tbody>{[...preview.new_orders.map(o=>({...o,category:"신규 후보"})),...preview.possible_existing.map(o=>({...o,category:"기존 주문 중복 추정"})),...(preview.queued_orders??[]).filter(o=>!o.existingDomestic).map(o=>({...o,category:"이미 대기열 등록"}))].map(o=><tr key={o.category+o.wise_order_id} style={{borderTop:"1px solid #ddd",background:o.existingDomestic?"#fff7ed":o.alreadyQueued?"#f1f5f9":"white"}}><td>{o.category}</td><td>{o.wise_order_id}</td><td>{o.nickname}</td><td>{new Date(o.ordered_at).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})}</td><td>{o.items}</td><td>{o.matched_order_ids?.join(", ")||"-"}</td></tr>)}</tbody>
+   </table></div>
+   <p style={{color:"#9a3412"}}>기존 주문은 닉네임+주문시각으로 추정합니다. 신규 후보도 중복 가능성이 있으니 확인하세요. JSON 저장 후 아래 대기열에서 주문별로 ddoga 등록할 수 있습니다.</p>
   </>}
   <div style={{marginTop:24,borderTop:"1px solid #ddd",paddingTop:16}}>
    <h3>신규 주문 검토 대기열</h3>
