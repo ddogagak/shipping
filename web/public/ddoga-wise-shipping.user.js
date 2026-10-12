@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name DDOGA Wise shipping bridge
 // @namespace https://www.ddoga.lol/
-// @version 0.5
+// @version 0.6
 // @match https://wyyyes.com/*
 // @grant none
 // ==/UserScript==
 (()=>{
  const origin="https://www.ddoga.lol";
  const norm=x=>String(x||"").normalize("NFKC").replace(/\s+/g,"").toLowerCase();
+ const digits=x=>String(x||"").replace(/\D/g,"");
  let matches=[];
  let authHeader = "";
  const originalFetch = window.fetch;
@@ -62,11 +63,15 @@
  }
  async function register(ids){
   const results=[];
-  for(const m of matches.filter(x=>x.status==="ready"&&ids.includes(x.order_id))){
+  const targets=matches.filter(x=>x.status==="ready"&&ids.includes(x.order_id));
+  if(!targets.length){send("DDOGA_WISE_SHIP_RESULT",{results:[{nickname:"선택 주문",ok:false,error:"등록 대상이 없어. 미리보기를 다시 실행해줘."}]});return;}
+  for(const m of targets){
    try{
     const url="/r0.app/sellers/myMarket/deliveries?cursorOrderChainId="+m.cursor_order_chain_id+"&deliveryIds="+m.delivery_id;
-    const j=await request(url,{method:"PATCH",body:JSON.stringify({deliveryCode:m.tracking_number,deliveryCompany:"LOGEN",status:25})});
-    if(j.message!=="success"||!j.result?.some(x=>Number(x.id)===m.delivery_id&&Number(x.status)===25&&x.deliveryCompany==="LOGEN"&&String(x.deliveryCode)===String(m.tracking_number)))throw Error("와이스 등록 응답 불일치");
+    const cleanCode=digits(m.tracking_number);
+    if(!/^\d{8,}$/.test(cleanCode))throw Error("송장번호 형식 오류");
+    const j=await request(url,{method:"PATCH",body:JSON.stringify({deliveryCode:cleanCode,deliveryCompany:"LOGEN",status:25})});
+    if(j.message!=="success"||!j.result?.some(x=>Number(x.id)===m.delivery_id&&Number(x.status)===25&&x.deliveryCompany==="LOGEN"&&digits(x.deliveryCode)===cleanCode))throw Error("와이스 등록 응답 불일치");
     send("DDOGA_WISE_SHIP_SYNC",{row:{order_id:m.order_id,tracking_number:m.tracking_number,delivery_id:m.delivery_id}});
     results.push({nickname:m.nickname,ok:true});
    }catch(e){results.push({nickname:m.nickname,ok:false,error:e.message});}
