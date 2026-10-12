@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type CSSProperties } from "react";
 import * as XLSX from "xlsx";
+import WiseJsonImport from "./WiseJsonImport";
 
 type Platform = "wise" | "x" | "bunjang";
 
@@ -79,6 +80,7 @@ function toExcelRow(row: DomesticRow) {
 
 export default function DomesticUploadPage() {
   const [platform, setPlatform] = useState<Platform>("wise");
+  const [uploadTab,setUploadTab] = useState<"legacy"|"wise-json">("wise-json");
   const [inputText, setInputText] = useState("");
   const [fresh, setFresh] = useState<DomesticRow[]>([]);
   const [duplicated, setDuplicated] = useState<DomesticRow[]>([]);
@@ -228,6 +230,8 @@ export default function DomesticUploadPage() {
 
   return (
     <main style={{ maxWidth: 1280, margin: "0 auto", padding: 24 }}>
+      <div style={{display:"flex",gap:8,marginBottom:16}}><button type="button" style={tabStyle(uploadTab==="legacy")} onClick={()=>setUploadTab("legacy")}>텍스트 입력</button><button type="button" style={tabStyle(uploadTab==="wise-json")} onClick={()=>setUploadTab("wise-json")}>와이스 JSON 동기화</button></div>
+      {uploadTab==="wise-json" ? <WiseJsonImport/> : <>
       <section style={cardStyle}>
         <h1 style={{ marginTop: 0, marginBottom: 8 }}>Domestic Upload</h1>
         <p style={{ color: "#6b7280", margin: 0 }}>
@@ -330,6 +334,7 @@ export default function DomesticUploadPage() {
           <PreviewTable rows={duplicated} disabled />
         </section>
       ) : null}
+      </>}
     </main>
   );
 }
