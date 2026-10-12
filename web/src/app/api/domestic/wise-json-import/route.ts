@@ -16,7 +16,6 @@ export async function POST(req:Request){
   const parsed=JSON.parse(await file.text());
   if(!Array.isArray(parsed)||!parsed.every(x=>x&&Number.isSafeInteger(x.id)&&Array.isArray(x.stocks)))return NextResponse.json({error:"와이스 주문 배열 형식이 아닙니다."},{status:400});
   const orders=(parsed as RawOrder[]).filter(o=>[10,16,25].includes(Number(o.status)));
-  const updateOrders=(parsed as RawOrder[]).filter(o=>[10,16,25,80,89].includes(Number(o.status)));
   const db=createServiceRoleClient();
   const {data:domestic,error:domesticError}=await db.from("domestic_order").select("order_id,customer_order_no,nickname,platform,first_order_date,source_order_dates");
   if(domesticError) return NextResponse.json({error:"기존 주문 조회 실패",detail:domesticError.message},{status:500});
@@ -57,16 +56,7 @@ export async function POST(req:Request){
     shippingRows.push(...(data??[]));
   }
   const shippingMap=new Map((shippingRows??[]).map(x=>[String(x.order_id),x]));
-  const extraRows=updateOrders.filter(o=>[80,89].includes(Number(o.status))&&validDate(o.createdAt)).map(o=>{
-    const nickname=asText(o.user?.nickname),formatted=kst(validDate(o.createdAt)!);
-    const mmdd=formatted.slice(5,7)+formatted.slice(8,10);
-    const byDate=domesticKeys.get(key(nickname)+"|"+formatted)??[];
-    const byNo=(domestic??[]).filter(d=>d.platform==="wise"&&key(asText(d.nickname))===key(nickname)&&asText(d.customer_order_no).includes("_"+mmdd)).map(d=>String(d.order_id));
-    const exactId=(domestic??[]).filter(d=>String(d.order_id)==="WJSON_"+o.id).map(d=>String(d.order_id));
-    const matches=[...new Set([...exactId,...byDate])];
-    return {order:o,matched_order_ids:[...new Set(matches)]};
-  });
-  const updateCandidates=[...rows.filter(x=>x.existingDomestic).map(x=>({order:x.order,matched_order_ids:x.matched_order_ids})),...extraRows].flatMap(({order,matched_order_ids})=>{
+  const updateCandidates=rows.filter(x=>x.existingDomestic).map(x=>({order:x.order,matched_order_ids:x.matched_order_ids})).flatMap(({order,matched_order_ids})=>{
     // Never automatically alter ambiguous/combined matches.
     if(matched_order_ids.length!==1)return [];
     const order_id=matched_order_ids[0],ship=shippingMap.get(order_id);
@@ -77,7 +67,6 @@ export async function POST(req:Request){
       changes.shipping_status="registered";
     }
     if(direct&&Number(order.status)===25){if(!ship.tracking_registered)changes.tracking_registered=true;changes.order_status="kept";}
-    if(tracking&&[80,89].includes(Number(order.status))){if(!ship.tracking_registered)changes.tracking_registered=true;changes.order_status="done";}
     if(!Object.keys(changes).length)return [];
     return [{wise_order_id:order.id,order_id,nickname:asText(order.user?.nickname),ordered_at:order.createdAt,wise_status:Number(order.status),delivery_company:order.deliveryCompany,tracking_number:tracking,changes}];
   });
