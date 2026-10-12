@@ -22,21 +22,22 @@ export async function POST(req:Request){
   const {data:queued,error:queueError}=await db.from("domestic_wise_import_queue").select("wise_order_id");
   if(queueError) return NextResponse.json({error:"와이스 신규 주문 대기열 테이블 조회 실패",detail:queueError.message,hint:"Supabase에서 20261012_wise_json_import_queue.sql 마이그레이션을 먼저 실행해야 합니다."},{status:500});
   const queuedIds=new Set((queued??[]).map(x=>Number(x.wise_order_id)));
-  const domesticKeys=new Set<string>();
+  const domesticKeys=new Map<string,string[]>();
   for(const d of domestic??[]){
    if(d.platform!=="wise")continue;
    for(const date of [...(Array.isArray(d.source_order_dates)?d.source_order_dates:[]),d.first_order_date]){
     const m=asText(date).match(/^(\\d{4})[.\\/-](\\d{1,2})[.\\/-](\\d{1,2})\\s+(\\d{1,2}):(\\d{1,2})/);
-    if(m)domesticKeys.add(key(asText(d.nickname))+"|"+[m[1],m[2].padStart(2,"0"),m[3].padStart(2,"0")].join("-")+" "+m[4].padStart(2,"0")+":"+m[5]);
+    if(m){const k=key(asText(d.nickname))+"|"+[m[1],m[2].padStart(2,"0"),m[3].padStart(2,"0")].join("-")+" "+m[4].padStart(2,"0")+":"+m[5];domesticKeys.set(k,[...(domesticKeys.get(k)??[]),String(d.order_id)]);}
    }
   }
   const rows=orders.filter(x=>validDate(x.createdAt)).map(o=>{
    const date=validDate(o.createdAt)!;
    const nickname=asText(o.user?.nickname);
-   const existingDomestic=domesticKeys.has(key(nickname)+"|"+kst(date));
-   return {order:o,wise_order_id:o.id,nickname,ordered_at:date,existingDomestic,alreadyQueued:queuedIds.has(o.id),items:o.stocks?.length??0};
+   const matched_order_ids=domesticKeys.get(key(nickname)+"|"+kst(date))??[];
+   const existingDomestic=matched_order_ids.length>0;
+   return {order:o,wise_order_id:o.id,nickname,ordered_at:date,existingDomestic,matched_order_ids,alreadyQueued:queuedIds.has(o.id),items:o.stocks?.length??0};
   });
-  if(mode==="preview")return NextResponse.json({ok:true,total:rows.length,new_orders:rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued).map(({order,...x})=>x),possible_existing:rows.filter(x=>x.existingDomestic).map(({order,...x})=>x),already_queued:rows.filter(x=>x.alreadyQueued).length,notice:"닉네임+주문 분 단위 날짜로 기존 주문을 추정합니다. 동일 분 주문은 검토가 필요합니다."});
+  if(mode==="preview")return NextResponse.json({ok:true,total:rows.length,new_orders:rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued).map(({order,...x})=>x),possible_existing:rows.filter(x=>x.existingDomestic).map(({order,...x})=>x),already_queued:rows.filter(x=>x.alreadyQueued).length,queued_orders:rows.filter(x=>x.alreadyQueued).map(({order,...x})=>x),notice:"닉네임+주문 분 단위 날짜로 기존 주문을 추정합니다. 동일 분 주문은 검토가 필요합니다."});
   if(mode!=="save")return NextResponse.json({error:"Invalid mode"},{status:400});
   // Never alter existing domestic orders or shipping. Refresh WYYYES-only snapshots and item metadata.
   for(const chunk of batches(orders)){
