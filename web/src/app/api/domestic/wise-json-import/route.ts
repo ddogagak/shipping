@@ -18,9 +18,9 @@ export async function POST(req:Request){
   const orders=parsed as RawOrder[];
   const db=createServiceRoleClient();
   const {data:domestic,error:domesticError}=await db.from("domestic_order").select("order_id,nickname,platform,first_order_date,source_order_dates");
-  if(domesticError)throw domesticError;
+  if(domesticError) return NextResponse.json({error:"기존 주문 조회 실패",detail:domesticError.message},{status:500});
   const {data:queued,error:queueError}=await db.from("domestic_wise_import_queue").select("wise_order_id");
-  if(queueError)throw queueError;
+  if(queueError) return NextResponse.json({error:"와이스 신규 주문 대기열 테이블 조회 실패",detail:queueError.message,hint:"Supabase에서 20261012_wise_json_import_queue.sql 마이그레이션을 먼저 실행해야 합니다."},{status:500});
   const queuedIds=new Set((queued??[]).map(x=>Number(x.wise_order_id)));
   const domesticKeys=new Set<string>();
   for(const d of domestic??[]){
@@ -42,10 +42,10 @@ export async function POST(req:Request){
   for(const chunk of batches(orders)){
    const snapshots=chunk.map(o=>({wise_order_id:o.id,wise_status:o.status??null,wise_delivery_company:o.deliveryCompany??null,wise_delivery_code:o.deliveryCode??null,wise_start_at:validDate(o.startAt),wise_updated_at:validDate(o.updatedAt),snapshot_imported_at:new Date().toISOString()}));
    const {error}=await db.from("domestic_wise_order_snapshot").upsert(snapshots,{onConflict:"wise_order_id"});
-   if(error)throw error;
+   if(error)throw new Error("와이스 배송 스냅샷 저장 실패: "+error.message);
   }
   const photoRows=orders.flatMap(o=>(o.stocks??[]).filter(s=>Number.isSafeInteger(s.id)).map(s=>({wise_stock_id:s.id,wise_order_id:o.id,buyer_nickname:asText(o.user?.nickname),ordered_at:validDate(o.createdAt)??new Date().toISOString(),item_name:asText(s.name),item_price:Number(s.price??0),image_url:s.thumbnail??null})));
-  for(const chunk of batches(photoRows)){const {error}=await db.from("domestic_wise_item_photo").upsert(chunk,{onConflict:"wise_stock_id"});if(error)throw error}
+  for(const chunk of batches(photoRows)){const {error}=await db.from("domestic_wise_item_photo").upsert(chunk,{onConflict:"wise_stock_id"});if(error)throw new Error("와이스 상품정보 저장 실패: "+error.message)}
   const fresh=rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued);
   for(const chunk of batches(fresh)){
    const payload=chunk.map(({order:o,ordered_at,nickname})=>({wise_order_id:o.id,buyer_nickname:nickname,ordered_at,receiver_name:o.receiverName??null,receiver_phone:o.receiverPhoneNum??null,postal_code:o.postNum??null,address:[o.addr1,o.addr2,o.addr3].filter(Boolean).join(" "),item_summary:(o.stocks??[]).map(s=>asText(s.name)).join(" / "),item_total_price:(o.stocks??[]).reduce((sum,s)=>sum+Number(s.price??0),0),item_count:o.stocks?.length??0}));
