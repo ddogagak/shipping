@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDOGA Wise shipping bridge
 // @namespace https://www.ddoga.lol/
-// @version 0.4
+// @version 0.5
 // @match https://wyyyes.com/*
 // @grant none
 // ==/UserScript==
@@ -41,7 +41,7 @@
  async function preview(orders){
   matches=[];
   try{
-   const list=await request("/r0.app/sellers/myMarket/undeliveredUsers");
+   const list=await request("/r0.app/sellers/myMarket/buyers/undeliveredUsers");
    const users=Array.isArray(list.result)?list.result:[];
    for(const o of orders){
     const m={order_id:o.order_id,nickname:o.nickname,tracking_number:o.tracking_number,status:"skip",reason:"",delivery_id:0,cursor_order_chain_id:0};
