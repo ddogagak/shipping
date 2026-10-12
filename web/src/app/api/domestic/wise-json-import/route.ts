@@ -49,10 +49,12 @@ export async function POST(req:Request){
   });
   // Existing ddoga orders: offer explicit, checked status updates only.
   const existingIds=(domestic??[]).filter(d=>d.platform==="wise").map(d=>String(d.order_id));
-  const {data:shippingRows,error:shippingError}=existingIds.length
-    ?await db.from("domestic_shipping").select("order_id,tracking_number,tracking_registered,shipping_status").in("order_id",existingIds)
-    :{data:[],error:null};
-  if(shippingError)throw shippingError;
+  const shippingRows:Array<{order_id:string;tracking_number:string|null;tracking_registered:boolean|null;shipping_status:string|null}>=[];
+  for(const chunk of batches(existingIds,100)){
+    const {data,error}=await db.from("domestic_shipping").select("order_id,tracking_number,tracking_registered,shipping_status").in("order_id",chunk);
+    if(error)throw new Error("기존 배송정보 조회 실패: "+error.message);
+    shippingRows.push(...(data??[]));
+  }
   const shippingMap=new Map((shippingRows??[]).map(x=>[String(x.order_id),x]));
   const extraRows=updateOrders.filter(o=>[80,89].includes(Number(o.status))&&validDate(o.createdAt)).map(o=>{
     const nickname=asText(o.user?.nickname),formatted=kst(validDate(o.createdAt)!);
@@ -117,5 +119,9 @@ export async function POST(req:Request){
    const {error}=await db.from("domestic_wise_import_queue").upsert(payload,{onConflict:"wise_order_id",ignoreDuplicates:true});if(error)throw error;
   }
   return NextResponse.json({ok:true,queued_new:fresh.length,updated_snapshots:orders.length,updated_items:photoRows.length,excluded_count:parsed.length-orders.length,skipped_existing:rows.filter(x=>x.existingDomestic).length,skipped_queued:rows.filter(x=>x.alreadyQueued).length});
- }catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Import failed"},{status:500})}
+ }catch(e){
+  console.error("Wise JSON import failed:",e);
+  const err=e as {message?:string;details?:string;hint?:string;code?:string}|null;
+  return NextResponse.json({error:err?.message||String(e)||"Import failed",detail:err?.details,code:err?.code,hint:err?.hint},{status:500});
+ }
 }
