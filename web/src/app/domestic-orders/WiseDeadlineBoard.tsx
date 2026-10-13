@@ -1,7 +1,8 @@
 "use client";
-import {useMemo,useState} from "react";
+import {useMemo,useState,useEffect,useRef} from "react";
 
 type Order={order_id:string;nickname:string;platform:string;first_order_date:string|null;order_status:string|null;tracking_registered:boolean};
+type Snapshot={userId:string;nickname:string;orders:{id:number;status:number;createdAt:string;deliveryCompany?:string;deliveryCode?:string}[]};
 type WiseRow={nickname:string;order_id:string;days:number;status:"unshipped"|"pending"|"confirmed"|"urgent";source:"ddoga"|"wise"};
 function daysSince(date:string|null){
  if(!date)return -1;
@@ -13,9 +14,34 @@ function daysSince(date:string|null){
 }
 export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
  const [open,setOpen]=useState(false);
+ const popupRef=useRef<Window|null>(null);
  const [wiseRows,setWiseRows]=useState<WiseRow[]|null>(null);
  const [busy,setBusy]=useState(false);
  const [notice,setNotice]=useState("");
+ useEffect(()=>{
+  const onMessage=(event:MessageEvent)=>{
+   if(event.origin!=="https://wyyyes.com"||event.source!==popupRef.current)return;
+   if(event.data?.type==="DDOGA_WISE_SHIP_READY"){
+    popupRef.current?.postMessage({type:"DDOGA_WISE_SNAPSHOT_REQUEST"},"https://wyyyes.com");
+   }
+   if(event.data?.type==="DDOGA_WISE_SNAPSHOT_RESULT"){
+    setBusy(false);
+    if(event.data.error){setNotice(String(event.data.error));return;}
+    const buyers:Snapshot[]=Array.isArray(event.data.records)?event.data.records:[];
+    const next:WiseRow[]=[];
+    for(const buyer of buyers)for(const order of buyer.orders||[]){
+     if(![10,16,25].includes(Number(order.status)))continue;
+     const days=daysSince(order.createdAt);
+     const pending=Number(order.status)===16&&order.deliveryCompany==="DIRECT";
+     next.push({nickname:buyer.nickname,order_id:String(order.id),days,status:pending?"pending":days>=13?"urgent":"unshipped",source:"wise"});
+    }
+    setWiseRows(next);
+    setNotice("와이스 "+buyers.length+"명 조회 완료");
+   }
+  };
+  window.addEventListener("message",onMessage);
+  return()=>window.removeEventListener("message",onMessage);
+ },[]);
  const rows=useMemo(()=>{
   if(wiseRows)return wiseRows;
   return orders.filter(o=>String(o.platform||"").toLowerCase()==="wise"&&o.order_status!=="done"&&o.order_status!=="kept"&&!o.tracking_registered)
@@ -26,12 +52,18 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
  const candidates=unique(rows.filter(r=>r.status==="unshipped"&&r.days>=11&&r.days<13));
  const pending=unique(rows.filter(r=>r.status==="pending"));
  const urgent=unique(rows.filter(r=>r.status==="urgent"||(r.status==="unshipped"&&r.days>=13)));
- async function refresh(){
-  setBusy(true);setNotice("");
-  // This dashboard deliberately does not claim to have live Wise data without a confirmed API response.
-  setWiseRows(null);
-  setNotice("현재는 DDOGA 주문일 기준 임시 집계야. 와이스 실시간 상태 조회는 API 확인 후 연결할 예정이야.");
-  setBusy(false);
+ function refresh(){
+  setBusy(true);setNotice("와이스 응답을 기다리는 중...");
+  const popup=window.open("https://wyyyes.com/shipping-waiting-user-list","ddoga_wise_shipping");
+  if(!popup){setBusy(false);setNotice("팝업 차단을 해제해줘.");return;}
+  popupRef.current=popup;
+  popup.focus();
+  let tries=0;
+  const timer=window.setInterval(()=>{
+   if(popup.closed||tries++>=30){window.clearInterval(timer);if(tries>=30){setBusy(false);setNotice("와이스 응답 시간 초과. 몽키 스크립트를 확인해줘.");}return;}
+   popup.postMessage({type:"DDOGA_WISE_SHIP_PING"},"https://wyyyes.com");
+  },600);
+  window.setTimeout(()=>window.clearInterval(timer),19000);
  }
  const card=(label:string,count:number,color:string,detail?:string)=>(
   <div style={{border:"1px solid #111827",borderRadius:12,padding:14,background:color}}>
@@ -45,7 +77,7 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
    <strong>와이스 배송기한 관리</strong>
    <button type="button" onClick={()=>void refresh()} disabled={busy} style={{padding:"7px 12px",borderRadius:8,border:"1px solid #ddd",background:"white",cursor:"pointer"}}>집계 새로고침</button>
   </div>
-  <div style={{fontSize:12,color:"#92400e",marginBottom:10}}>DDOGA 기준 임시 집계 · 와이스 직접배송/수령확인 상태는 아직 연동되지 않았어.</div>
+  <div style={{fontSize:12,color:"#92400e",marginBottom:10}}>{wiseRows?"와이스 주문 조회 결과":"조회 전에는 DDOGA 기준 임시 집계가 표시돼. 새로고침을 눌러 와이스를 조회해줘."}</div>
   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(155px,1fr))",gap:10}}>
    {card("미발송 구매자",unshipped.length,"#fff")}
    {card("직킵여부 확인대상",candidates.length,"#fffbe6","11일 이상 · 13일 미만")}
