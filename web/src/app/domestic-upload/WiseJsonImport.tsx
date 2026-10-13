@@ -7,11 +7,15 @@ type UpdateCandidate={wise_order_id:number;order_id:string;nickname:string;order
 type Candidate={wise_order_id:number;nickname:string;ordered_at:string;items:number;existingDomestic:boolean;alreadyQueued:boolean;matched_order_ids:string[]};
 export default function WiseJsonImport(){
  const [file,setFile]=useState<File|null>(null);
+ const [wiseTab,setWiseTab]=useState<Window|null>(null);
+ const [wiseConnected,setWiseConnected]=useState(false);
  useEffect(()=>{
   const allowedOrigin="https://wyyyes.com";
   function onMessage(event:MessageEvent){
-   if(event.origin!==allowedOrigin||event.source!==window.opener)return;
+   if(event.origin!==allowedOrigin||(event.source!==window.opener&&event.source!==wiseTab))return;
    const data=event.data;
+   if(data?.type==="DDOGA_WISE_PULL_READY"){setWiseConnected(true);setMessage("와이스 연결됨");return;}
+   if(data?.type==="DDOGA_WISE_PULL_ERROR"){setMessage(String(data.error||"조회 실패"));return;}
    if(data?.type==="DDOGA_WISE_PING"){
     (event.source as Window).postMessage({type:"DDOGA_WISE_READY"},allowedOrigin);
     return;
@@ -28,7 +32,7 @@ export default function WiseJsonImport(){
   }
   window.addEventListener("message",onMessage);
   return ()=>window.removeEventListener("message",onMessage);
- },[]);
+ },[wiseTab]);
  const [queue,setQueue]=useState<Array<{wise_order_id:number;buyer_nickname:string;ordered_at:string;item_summary:string;item_count:number;item_total_price:number}>>([]);
  const [queueError,setQueueError]=useState("");
  async function loadQueue(){try{const r=await fetch("/api/domestic/wise-json-queue");const d=await r.json();if(!r.ok)throw new Error(d.error);setQueue(d.orders??[]);setQueueError("");}catch(e){setQueueError(e instanceof Error?e.message:"조회 실패")}}
@@ -64,6 +68,8 @@ export default function WiseJsonImport(){
  }
  return <section style={{border:"1px solid #e5e7eb",borderRadius:16,padding:20,background:"#fff",marginTop:16}}>
   <h2 style={{marginTop:0}}>와이스 JSON 동기화</h2>
+  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button style={secondaryButtonStyle} onClick={()=>{const w=window.open("https://wyyyes.com/deliverylist","ddoga_wise_order_pull");if(w){setWiseTab(w);setWiseConnected(false)}else setMessage("팝업 차단을 해제해줘.")}}>와이스 연결 탭 열기</button><button style={primaryButtonStyle} disabled={!wiseConnected||loading} onClick={()=>{wiseTab?.postMessage({type:"DDOGA_WISE_PULL_REQUEST"},"https://wyyyes.com");setMessage("와이스 주문 조회 중...")}}>와이스 판매목록 가져오기 (40건)</button></div>
+  <p>{wiseConnected?"🟢 와이스 연결됨":"⚪ 와이스 연결 대기"}</p>
   <p>JSON에서 새 주문을 검토 대기열에 추가하고, 모든 주문의 와이스 전용 배송/상태 스냅샷과 상품정보를 갱신합니다. 기존 ddoga 주문과 합배송은 수정하지 않습니다.</p>
   <input type="file" accept=".json,application/json" onChange={e=>{setFile(e.target.files?.[0]??null);setPreview(null);setMessage("")}}/>
   <div style={{display:"flex",gap:8,marginTop:16}}>
