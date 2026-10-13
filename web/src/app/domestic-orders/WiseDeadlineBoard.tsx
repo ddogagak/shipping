@@ -34,21 +34,21 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
   setBusy(false);
  }
  const card=(label:string,count:number,color:string,detail?:string)=>(
-  <div style={{border:"1px solid #e5e7eb",borderRadius:12,padding:14,background:color}}>
+  <div style={{border:"1px solid #111827",borderRadius:12,padding:14,background:color}}>
    <div style={{fontSize:13,fontWeight:700}}>{label}</div>
    <div style={{fontSize:24,fontWeight:800,marginTop:4}}>{count}명</div>
    {detail&&<div style={{fontSize:11,color:"#6b7280",marginTop:4}}>{detail}</div>}
   </div>
  );
- return <div style={{marginTop:16}}>
+ return <div style={{marginTop:16,padding:16,background:"#FFF54F",border:"1px solid #111827",borderRadius:14}}>
   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap",marginBottom:10}}>
    <strong>와이스 배송기한 관리</strong>
    <button type="button" onClick={()=>void refresh()} disabled={busy} style={{padding:"7px 12px",borderRadius:8,border:"1px solid #ddd",background:"white",cursor:"pointer"}}>집계 새로고침</button>
   </div>
   <div style={{fontSize:12,color:"#92400e",marginBottom:10}}>DDOGA 기준 임시 집계 · 와이스 직접배송/수령확인 상태는 아직 연동되지 않았어.</div>
   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(155px,1fr))",gap:10}}>
-   {card("미발송 구매자",unshipped.length,"#f8fafc")}
-   {card("직킵여부 확인대상",candidates.length,"#fff7ed","11일 이상 · 13일 미만")}
+   {card("미발송 구매자",unshipped.length,"#fff")}
+   {card("직킵여부 확인대상",candidates.length,"#fffbe6","11일 이상 · 13일 미만")}
    {card("수령확인 대기",pending.length,"#fefce8","와이스 상태 연동 전")}
    {card("발송긴급",urgent.length,"#fef2f2","13일 이상")}
   </div>
