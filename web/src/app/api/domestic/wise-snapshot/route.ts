@@ -73,3 +73,34 @@ export async function POST(request: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true, updatedAt: updated_at, rows });
 }
+
+export async function PATCH(request: Request) {
+ const body = await request.json().catch(() => null);
+ const id = String(body?.order_id || "");
+ const action = body?.action;
+ if (!id || !["register","dismiss"].includes(action)) return NextResponse.json({error:"잘못된 요청"},{status:400});
+ const db = createServiceRoleClient();
+ const {data:snapshot,error:readError} = await db.from("domestic_wise_snapshot").select("rows").eq("id",SNAPSHOT_ID).maybeSingle();
+ if (readError) return NextResponse.json({error:readError.message},{status:500});
+ const rows:Row[] = Array.isArray(snapshot?.rows) ? snapshot.rows as Row[] : [];
+ const selected = rows.find(row=>row.order_id===id && row.status==="confirmed");
+ if (!selected) return NextResponse.json({error:"처리할 추정 주문이 없어"},{status:409});
+ if (action==="register") {
+  const normalize=(s:string)=>s.normalize("NFKC").replace(/\\s+/g,"").toLowerCase();
+  const {data:orders,error:ordersError}=await db.from("domestic_order").select("order_id,nickname,platform,order_status,domestic_shipping(tracking_registered,shipping_status)");
+  if(ordersError)return NextResponse.json({error:ordersError.message},{status:500});
+  const found=(orders||[]).filter((o:any)=>o.platform==="wise"&&normalize(String(o.nickname||""))===normalize(selected.nickname));
+  if(found.length!==1)return NextResponse.json({error:"같은 닉네임의 주문이 여러 건이거나 없어. 직접 확인해줘."},{status:409});
+  const order:any=found[0];
+  const shipping=Array.isArray(order.domestic_shipping)?order.domestic_shipping[0]:order.domestic_shipping;
+  if(!shipping||shipping.tracking_registered!==false||["kept","done"].includes(String(order.order_status||""))||shipping.shipping_status==="done")return NextResponse.json({error:"이미 처리됐거나 변경 불가 상태야"},{status:409});
+  const {data:changed,error:shippingError}=await db.from("domestic_shipping").update({tracking_registered:true}).eq("order_id",order.order_id).eq("tracking_registered",false).neq("shipping_status","done").select("order_id");
+  if(shippingError||!changed?.length)return NextResponse.json({error:shippingError?.message||"등록 변경 실패"},{status:409});
+  const {error:orderError}=await db.from("domestic_order").update({order_status:"kept"}).eq("order_id",order.order_id);
+  if(orderError)return NextResponse.json({error:"등록 Y 저장됨, 직킵 변경 실패: "+orderError.message},{status:500});
+ }
+ const next=rows.filter(row=>row.order_id!==id);
+ const {error:saveError}=await db.from("domestic_wise_snapshot").update({rows:next,updated_at:new Date().toISOString()}).eq("id",SNAPSHOT_ID);
+ if(saveError)return NextResponse.json({error:saveError.message},{status:500});
+ return NextResponse.json({ok:true,rows:next});
+}
