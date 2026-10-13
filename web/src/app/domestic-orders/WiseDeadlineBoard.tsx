@@ -33,6 +33,7 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
      if(![10,16,25].includes(Number(order.status)))continue;
      const days=daysSince(order.createdAt);
      const pending=Number(order.status)===16&&order.deliveryCompany==="DIRECT";
+     if(Number(order.status)===25)continue; // 발송완료는 긴급/미발송 집계에서 제외
      next.push({nickname:buyer.nickname,order_id:String(order.id),days,status:pending?"pending":days>=13?"urgent":"unshipped",source:"wise"});
     }
     setWiseRows(next);
