@@ -53,6 +53,20 @@ export async function POST(request: Request) {
     });
   }
   const supabase = createServiceRoleClient();
+  // A partial Wise scan must not be interpreted as receipt confirmation.
+  if ((body as { complete?: unknown }).complete !== true) {
+    return NextResponse.json({ error: "일부 주문 조회 실패: 이전 목록 유지" }, { status: 422 });
+  }
+  const { data: previous, error: readError } = await supabase
+    .from("domestic_wise_snapshot").select("rows").eq("id", SNAPSHOT_ID).maybeSingle();
+  if (readError) return NextResponse.json({ error: readError.message }, { status: 500 });
+  const previousRows: Row[] = Array.isArray(previous?.rows) ? previous.rows as Row[] : [];
+  const present = new Set(rows.map(row => row.order_id));
+  const confirmed = previousRows.filter(row =>
+    (row.status === "pending" || row.status === "confirmed") &&
+    !present.has(row.order_id)
+  ).map(row => ({ ...row, status: "confirmed" as const }));
+  rows.push(...confirmed);
   const updated_at = new Date().toISOString();
   const { error } = await supabase.from("domestic_wise_snapshot")
     .upsert({ id: SNAPSHOT_ID, rows, updated_at }, { onConflict: "id" });
