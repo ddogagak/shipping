@@ -20,6 +20,7 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
  const [busy,setBusy]=useState(false);
  const [updatedAt,setUpdatedAt]=useState<string|null>(null);
  const [notice,setNotice]=useState("");
+ const [acting,setActing]=useState<string|null>(null);
  useEffect(()=>{
   let active=true;
   fetch("/api/domestic/wise-snapshot",{cache:"no-store"}).then(async res=>{
@@ -54,7 +55,6 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
    if(event.data?.type==="DDOGA_WISE_SNAPSHOT_RESULT"){
     if(event.data.error){setBusy(false);setNotice(String(event.data.error));return;}
     if((event.data.records||[]).some((r:Snapshot & {error?:string})=>r.error)){setBusy(false);setNotice("와이스 일부 주문 조회 실패 · 이전 기록 유지");return;}
-    if(false){setNotice(String(event.data.error));return;}
     const buyers:Snapshot[]=Array.isArray(event.data.records)?event.data.records:[];
     const next:WiseRow[]=[];
     for(const buyer of buyers)for(const order of buyer.orders||[]){
@@ -98,6 +98,22 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
   },600);
   window.setTimeout(()=>window.clearInterval(timer),19000);
  }
+ async function handleConfirmation(orderId:string,action:"register"|"dismiss"){
+  if(acting)return;
+  setActing(orderId);
+  try{
+   const response=await fetch("/api/domestic/wise-snapshot",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({order_id:orderId,action})});
+   const data=await response.json();
+   if(!response.ok)throw Error(data.error||"처리 실패");
+   setWiseRows(data.rows);
+   const now=new Date().toISOString();
+   setUpdatedAt(now);
+   localStorage.setItem(CACHE_KEY,JSON.stringify({rows:data.rows,updatedAt:now}));
+   setNotice(action==="register"?"등록 Y · 주문상태 직킵 변경 완료":"추정 목록에서 삭제 완료");
+   if(action==="register")window.location.reload();
+  }catch(error){setNotice("처리 실패: "+String(error instanceof Error?error.message:error));}
+  finally{setActing(null);}
+ }
  const nicknameStyle={display:"inline-flex",alignItems:"center",gap:5,border:"1px solid #111827",borderRadius:8,padding:"5px 8px",background:"#fff",fontWeight:800,fontSize:13} as const;
  const timeLabel=updatedAt?new Date(updatedAt).toLocaleString("ko-KR",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}):"동기화 기록 없음";
  const card=(label:string,count:number,color:string,detail?:string)=>(
@@ -138,7 +154,7 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
    {card("발송긴급",urgent.length,"#fef2f2","13일 이상")}
   </div>
   {urgent.length>0&&<div style={{marginTop:10,padding:10,borderRadius:8,background:"#fef2f2",fontSize:13}}><strong>발송긴급:</strong> {urgent.map(x=><span key={x.order_id} style={{...nicknameStyle,marginRight:6}}>{x.nickname} ({x.days}일)</span>)}</div>}
-  <div style={{marginTop:10,padding:10,borderRadius:8,background:"#f0fdf4",fontSize:13}}><strong>직킵 수령확인 추정 {confirmed.length}명:</strong> {confirmed.length?confirmed.map(x=><span key={x.order_id} style={{...nicknameStyle,marginLeft:6}}>{x.nickname}</span>):"대상 없음"}</div>
+  <div style={{marginTop:10,padding:10,borderRadius:8,background:"#f0fdf4",fontSize:13}}><strong>직킵 수령확인 추정 {confirmed.length}명:</strong> {confirmed.length?confirmed.map(x=><span key={x.order_id} style={{...nicknameStyle,marginLeft:6}}>{x.nickname} <button type="button" disabled={acting!==null} onClick={()=>void handleConfirmation(x.order_id,"register")} style={{background:"#166534",color:"#fff",border:0,borderRadius:5,padding:"3px 7px",cursor:"pointer"}}>등록</button><button type="button" disabled={acting!==null} onClick={()=>void handleConfirmation(x.order_id,"dismiss")} style={{background:"#e5e7eb",border:0,borderRadius:5,padding:"3px 7px",cursor:"pointer"}}>삭제</button></span>):"대상 없음"}</div>
   {notice&&<p role="status" style={{fontSize:12}}>{notice}</p>}
  </div>;
 }
