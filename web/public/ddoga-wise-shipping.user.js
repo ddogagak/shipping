@@ -45,7 +45,7 @@
   const until=Date.now()+timeout;
   while(Date.now()<until){
    const button=[...document.querySelectorAll('div[tabindex="0"]')].find(el=>
-    !clicked.has(el)&&/^일괄 발송 완료 처리\\s*\\(총\\s*\\d+건\\)$/.test((el.innerText||"").trim())&&el.getBoundingClientRect().width>0&&el.getBoundingClientRect().height>0);
+    !clicked.has(el)&&/^일괄 발송 완료 처리\s*\(총\s*\d+건\)$/.test((el.innerText||"").trim())&&el.getBoundingClientRect().width>0&&el.getBoundingClientRect().height>0);
    if(button){clicked.add(button);button.click();console.log("[DDOGA WISE] 일괄 발송 확인 클릭");return;}
    await new Promise(r=>setTimeout(r,150));
   }
@@ -94,6 +94,7 @@
  }
  window.addEventListener("message",e=>{
   if(e.origin!==origin||e.source!==window.opener)return;
+  if(e.data?.type==="DDOGA_WISE_SHIP_PING")ready();
   if(e.data?.type==="DDOGA_WISE_SHIP_PREVIEW_REQUEST")void preview(e.data.orders||[]);
   if(e.data?.type==="DDOGA_WISE_SHIP_REGISTER_REQUEST")void register(e.data.order_ids||[]);
  });
