@@ -1201,6 +1201,31 @@ export default function DomesticOrdersPage() {
     await patch("excel_exported");
   }
 
+  function sendLogenExcel() {
+    if (!selectedRows.length) {
+      alert("로젠 전송할 주문을 선택해줘.");
+      return;
+    }
+    const data = selectedRows.map(toExcelRow);
+    const worksheet = XLSX.utils.json_to_sheet(data, { header: HEADERS });
+    worksheet["!cols"] = [
+      { wch: 24 }, { wch: 14 }, { wch: 42 }, { wch: 30 },
+      { wch: 18 }, { wch: 10 }, { wch: 14 }, { wch: 24 },
+    ];
+    for (let rowIndex = 3; rowIndex <= data.length + 2; rowIndex += 1) {
+      const phoneCell = worksheet[`E${rowIndex}`];
+      const orderNoCell = worksheet[`H${rowIndex}`];
+      if (phoneCell) phoneCell.t = "s";
+      if (orderNoCell) orderNoCell.t = "s";
+    }
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "로젠택배");
+    const base64 = XLSX.write(workbook, { bookType: "xlsx", type: "base64" });
+    window.dispatchEvent(new CustomEvent("ddoga:logen:send", {
+      detail: { base64, filename: `logen_shipping_${Date.now()}.xlsx`, count: data.length },
+    }));
+  }
+
   async function exportHanjinExcel() {
     if (!selectedRows.length) {
       alert("한진 엑셀 추출할 주문을 선택해줘.");
@@ -1508,6 +1533,10 @@ export default function DomesticOrdersPage() {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button type="button" onClick={exportExcel} style={blackButtonStyle}>
               선택 {selectedIds.length}건 로젠엑셀
+            </button>
+
+            <button type="button" onClick={sendLogenExcel} style={blueButtonStyle}>
+              🚚 로젠전송
             </button>
 
             <button type="button" onClick={exportHanjinExcel} style={blueButtonStyle}>
