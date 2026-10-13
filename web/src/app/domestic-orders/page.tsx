@@ -1090,6 +1090,7 @@ export default function DomesticOrdersPage() {
         if (finished) return;
         finished = true;
         clearTimeout(timer);
+        clearInterval(pingTimer);
         window.removeEventListener("message", onMessage);
         resolve({ok,error});
       };
@@ -1117,6 +1118,10 @@ export default function DomesticOrdersPage() {
         }
       };
       window.addEventListener("message",onMessage);
+      const pingTimer = window.setInterval(() => {
+        if (stage === "ready" && !popup.closed) popup.postMessage({type:"DDOGA_WISE_SHIP_PING"},"https://wyyyes.com");
+      },600);
+      popup.postMessage({type:"DDOGA_WISE_SHIP_PING"},"https://wyyyes.com");
     });
   }
 
