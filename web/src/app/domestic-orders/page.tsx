@@ -529,7 +529,7 @@ export default function DomesticOrdersPage() {
             // [요청상태 추가] 검색에도 내부 요청값 포함
             row.request_status,
             s?.tracking_number,
-            shippingType,
+            normalizedShippingType(s?.shipping_type),
           ].join(" ").toLowerCase();
 
           if (!text.includes(q.trim().toLowerCase())) return false;
