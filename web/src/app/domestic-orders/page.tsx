@@ -1079,6 +1079,47 @@ export default function DomesticOrdersPage() {
     await saveRow(nextRow);
   }
 
+  // N→Y: 와이스 주문이면 기존 Wise bridge에 1건 등록을 요청한다.
+  async function registerWiseOne(row: Row, trackingNumber: string): Promise<{ok:boolean;error?:string}> {
+    const popup = window.open("https://wyyyes.com/shipping-waiting-user-list", "ddoga_wise_shipping");
+    if (!popup) return {ok:false,error:"와이스 팝업이 차단됨"};
+    return new Promise(resolve => {
+      let finished = false;
+      let stage: "ready" | "preview" | "register" = "ready";
+      const finish = (ok:boolean,error?:string) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        window.removeEventListener("message", onMessage);
+        resolve({ok,error});
+      };
+      const timer = window.setTimeout(() => finish(false,"와이스 응답 시간 초과 (로그인/인증 확인)"),90000);
+      const onMessage = (event:MessageEvent) => {
+        if (event.origin !== "https://wyyyes.com" || event.source !== popup || finished) return;
+        const data = event.data;
+        if (data?.type === "DDOGA_WISE_SHIP_READY" && stage === "ready") {
+          stage = "preview";
+          popup.postMessage({type:"DDOGA_WISE_SHIP_PREVIEW_REQUEST",orders:[{
+            order_id:row.order_id,nickname:row.nickname,tracking_number:trackingNumber
+          }]},"https://wyyyes.com");
+        } else if (data?.type === "DDOGA_WISE_SHIP_PREVIEW" && stage === "preview") {
+          const match = (data.matches || []).find((x:{order_id:string}) => x.order_id === row.order_id);
+          if (data.error || match?.status !== "ready") {
+            finish(false,data.error || match?.reason || "와이스 주문 매칭 실패");
+            return;
+          }
+          stage = "register";
+          popup.postMessage({type:"DDOGA_WISE_SHIP_REGISTER_REQUEST",order_ids:[row.order_id]},"https://wyyyes.com");
+        } else if (data?.type === "DDOGA_WISE_SHIP_RESULT" && stage === "register") {
+          const result = (data.results || []).find((x:{order_id?:string;nickname?:string}) =>
+            x.order_id === row.order_id || x.nickname === row.nickname);
+          finish(Boolean(result?.ok),result?.error || (result ? undefined : "와이스 등록 결과 확인 실패"));
+        }
+      };
+      window.addEventListener("message",onMessage);
+    });
+  }
+
   async function registerTracking(row: Row) {
     const s = shipping(row) || defaultShipping();
     const trackingNumber = String(s.tracking_number || "").trim();
@@ -1089,6 +1130,10 @@ export default function DomesticOrdersPage() {
     }
 
     setSavingRowId(row.order_id);
+    const isWise = String(row.platform || "").toLowerCase() === "wise";
+    // 브라우저 팝업 차단을 피하기 위해 클릭 직후 연결창부터 연다.
+    // 비-Wise 주문은 기존 등록 동작을 유지한다.
+    const wisePromise = isWise ? registerWiseOne(row, trackingNumber) : null;
 
     // 클릭 직후 복사를 먼저 시도해야 브라우저의 사용자 제스처 권한을 안정적으로 유지할 수 있습니다.
     let copied = false;
@@ -1100,6 +1145,8 @@ export default function DomesticOrdersPage() {
     }
 
     try {
+      const wiseResult = wisePromise ? await wisePromise : null;
+      // 성공/실패와 무관하게 사용자가 요청한 대로 DDOGA는 Y로 전환한다.
       const res = await fetch("/api/domestic/orders", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -1122,11 +1169,15 @@ export default function DomesticOrdersPage() {
         tracking_registered: true,
       });
 
-      setMessage(
-        copied
+      const notice = wiseResult
+        ? wiseResult.ok
+          ? "와이스 운송장 등록 성공 · DDOGA 등록 Y"
+          : "와이스 등록 실패: " + (wiseResult.error || "원인 불명") + " · DDOGA 등록 Y · " + (copied ? "운송장 복사됨" : "운송장 복사 실패")
+        : copied
           ? `운송장등록 완료 · ${trackingNumber} 복사됨`
-          : "운송장등록 완료 · 클립보드 복사는 브라우저 권한을 확인해줘."
-      );
+          : "운송장등록 완료 · 클립보드 복사는 브라우저 권한을 확인해줘.";
+      setMessage(notice);
+      if (wiseResult) alert(notice + (!wiseResult.ok ? "\\n운송장: " + trackingNumber : ""));
       await load();
     } finally {
       setSavingRowId(null);
