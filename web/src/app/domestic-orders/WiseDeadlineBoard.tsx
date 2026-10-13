@@ -115,25 +115,26 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
     </button>
    </div>
   </div>
-  <div style={{fontSize:12,color:"#111827",marginBottom:10}}>{wiseRows?"마지막 와이스 동기화 결과 · DB와 브라우저에 보관돼.":"와이스 동기화 기록이 없어. 오른쪽 새로고침 아이콘을 눌러줘."}</div>
+  {!wiseRows&&<div style={{fontSize:12,color:"#111827",marginBottom:10}}>와이스 동기화 기록이 없어. 오른쪽 새로고침 아이콘을 눌러줘.</div>}
   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(155px,1fr))",gap:10}}>
    {card("미발송 구매자",unshipped.length,"#fff")}
-   {card("직킵여부 확인대상",candidates.length,"#fffbe6","11일 이상 · 13일 미만")}
-   {card("수령확인 대기",pending.length,"#fefce8","와이스 상태 연동 전")}
+   <div style={{border:"1px solid #111827",borderRadius:12,padding:14,background:"#fffbe6"}}>
+    <button type="button" onClick={()=>setOpen(v=>!v)} aria-expanded={open} style={{width:"100%",border:0,padding:0,background:"transparent",textAlign:"left",cursor:"pointer",color:"#111827"}}>
+     <div style={{fontSize:13,fontWeight:700}}>직킵여부 확인대상</div>
+     <div style={{fontSize:24,fontWeight:800,marginTop:4}}>{candidates.length}명 <span style={{fontSize:14}}>{open?"▲":"▼"}</span></div>
+     <div style={{fontSize:11,color:"#6b7280",marginTop:4}}>11일 이상 · 13일 미만</div>
+    </button>
+    {open&&<div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:10}}>{candidates.length?candidates.map(x=><span key={x.order_id} style={nicknameStyle}>{x.nickname} <span style={{fontSize:11,fontWeight:600}}>({x.days}일)</span></span>):<span style={{fontSize:12}}>대상 없음</span>}</div>}
+   </div>
+   <div style={{border:"1px solid #111827",borderRadius:12,padding:14,background:"#fefce8"}}>
+    <div style={{fontSize:13,fontWeight:700}}>수령확인 대기</div>
+    <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginTop:4}}>
+     <span style={{fontSize:24,fontWeight:800}}>{pending.length}명</span>
+     {pending.map(x=><span key={x.order_id} style={nicknameStyle}>{x.nickname}</span>)}
+    </div>
+   </div>
    {card("발송긴급",urgent.length,"#fef2f2","13일 이상")}
   </div>
-  <div style={{marginTop:12,border:"1px solid #e5e7eb",borderRadius:10,overflow:"hidden"}}>
-   <button type="button" onClick={()=>setOpen(v=>!v)} style={{width:"100%",textAlign:"left",background:"#fff7ed",border:0,padding:12,cursor:"pointer",fontWeight:700}}>
-    {open?"▼":"▶"} 직킵여부 확인대상 {candidates.length}명
-   </button>
-   {open&&<div style={{padding:12}}>
-    {candidates.length?candidates.map(x=><div key={x.order_id} style={{padding:"8px 0",borderBottom:"1px solid #eee"}}>
-     <span style={nicknameStyle}>{x.nickname}</span> <span style={{fontSize:12,color:"#6b7280"}}>· {x.days}일 경과</span>
-     <span style={{fontSize:12,marginLeft:8,color:"#111827"}}>메시지·direct 연동 준비 중</span>
-    </div>):<span style={{fontSize:13,color:"#6b7280"}}>대상 없음</span>}
-   </div>}
-  </div>
-  {pending.length>0&&<div style={{marginTop:10,fontSize:13,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}><strong>수령확인 대기:</strong> {pending.map(x=><span key={x.order_id} style={nicknameStyle}>{x.nickname}</span>)}</div>}
   {urgent.length>0&&<div style={{marginTop:10,padding:10,borderRadius:8,background:"#fef2f2",fontSize:13}}><strong>발송긴급:</strong> {urgent.map(x=><span key={x.order_id} style={{...nicknameStyle,marginRight:6}}>{x.nickname} ({x.days}일)</span>)}</div>}
   {notice&&<p role="status" style={{fontSize:12}}>{notice}</p>}
  </div>;
