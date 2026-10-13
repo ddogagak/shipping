@@ -391,7 +391,6 @@ export default function DomesticOrdersPage() {
   const [openItemTooltipId, setOpenItemTooltipId] = useState<string | null>(null);
   const [photoOrder, setPhotoOrder] = useState<Row | null>(null);
 
-  const [platforms, setPlatforms] = useState<string[]>([]);
   const [orderStatuses, setOrderStatuses] = useState<string[]>(["accepted", "checked","packaged"]);
   // [요청상태 추가] 기본은 전체 표시
   const [requestStatuses, setRequestStatuses] = useState<string[]>([]);
@@ -401,7 +400,6 @@ export default function DomesticOrdersPage() {
     "uploaded",
     "registered",
   ]);
-  const [shippingTypes, setShippingTypes] = useState<string[]>([]);
   const [q, setQ] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("first_order_date");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
@@ -511,12 +509,10 @@ export default function DomesticOrdersPage() {
         const shippingStatus = s?.shipping_status || "start";
         const shippingType = normalizedShippingType(s?.shipping_type);
 
-        if (platforms.length && !platforms.includes(row.platform)) return false;
         if (orderStatuses.length && !orderStatuses.includes(row.order_status || "accepted")) return false;
         // [요청상태 추가]
         if (requestStatuses.length && !requestStatuses.includes(row.request_status || "none")) return false;
         if (shippingStatuses.length && !shippingStatuses.includes(shippingStatus)) return false;
-        if (shippingTypes.length && !shippingTypes.includes(shippingType)) return false;
 
         if (q.trim()) {
           const text = [
@@ -543,7 +539,7 @@ export default function DomesticOrdersPage() {
         return true;
       })
       .sort((a, b) => compareRows(a, b, sortKey, sortDirection));
-  }, [rows, platforms, orderStatuses, requestStatuses, shippingStatuses, shippingTypes, q, sortKey, sortDirection]);
+  }, [rows, orderStatuses, requestStatuses, shippingStatuses, q, sortKey, sortDirection]);
 
   const keptAlarmRows = useMemo(() => {
     return rows
@@ -1526,13 +1522,6 @@ export default function DomesticOrdersPage() {
         <h2 style={{ marginTop: 0 }}>필터</h2>
 
         <FilterGroup
-          title="플랫폼"
-          options={PLATFORM_OPTIONS}
-          selected={platforms}
-          onToggle={(value) => setPlatforms((prev) => toggleList(prev, value))}
-        />
-
-        <FilterGroup
           title="주문상태"
           options={ORDER_STATUS_OPTIONS}
           selected={orderStatuses}
@@ -1552,13 +1541,6 @@ export default function DomesticOrdersPage() {
           options={SHIPPING_STATUS_OPTIONS}
           selected={shippingStatuses}
           onToggle={(value) => setShippingStatuses((prev) => toggleList(prev, value))}
-        />
-
-        <FilterGroup
-          title="배송수단"
-          options={SHIPPING_TYPE_OPTIONS}
-          selected={shippingTypes}
-          onToggle={(value) => setShippingTypes((prev) => toggleList(prev, value))}
         />
 
         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
