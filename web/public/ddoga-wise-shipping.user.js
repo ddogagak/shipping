@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDOGA Wise shipping bridge
 // @namespace https://www.ddoga.lol/
-// @version 0.7
+// @version 0.9
 // @match https://wyyyes.com/*
 // @grant none
 // ==/UserScript==
@@ -39,6 +39,17 @@
   if(!r.ok)throw Error("HTTP "+r.status+": "+(j.message||j.error||"API 오류"));
   return j;
  }
+ // 화면에 합배송 확인 팝업이 나타날 경우에만 추가 확인
+ const clicked=new WeakSet();
+ async function confirmIfAppears(timeout=1800){
+  const until=Date.now()+timeout;
+  while(Date.now()<until){
+   const button=[...document.querySelectorAll('div[tabindex="0"]')].find(el=>
+    !clicked.has(el)&&/^일괄 발송 완료 처리\\s*\\(총\\s*\\d+건\\)$/.test((el.innerText||"").trim())&&el.getBoundingClientRect().width>0&&el.getBoundingClientRect().height>0);
+   if(button){clicked.add(button);button.click();console.log("[DDOGA WISE] 일괄 발송 확인 클릭");return;}
+   await new Promise(r=>setTimeout(r,150));
+  }
+ }
  async function preview(orders){
   matches=[];
   try{
@@ -53,7 +64,7 @@
     const ids=[...new Set(chains.filter(c=>c.delivery_id&&!c.deliveryCode&&Number(c.status)!==25).map(c=>Number(c.delivery_id)))];
     if(ids.length!==1){m.reason="배송 ID 없음 또는 여러 개";matches.push(m);continue;}
     const active=chains.filter(c=>Number(c.delivery_id)===ids[0]&&!c.deliveryCode&&Number(c.status)!==25);
-    if(active.length!==1){m.reason="합배송/추가 주문 "+active.length+"건 — PC에서 수동 처리";matches.push(m);continue;}
+    if(active.length<1){m.reason="미발송 주문 없음";matches.push(m);continue;}
     m.delivery_id=ids[0];m.cursor_order_chain_id=Number(active[0].firstOrderGroupId);
     if(!m.cursor_order_chain_id){m.reason="주문 묶음 ID 없음";matches.push(m);continue;}
     m.status="ready";m.reason="등록 가능";matches.push(m);
@@ -74,9 +85,10 @@
     if(!/^\d{8,}$/.test(cleanCode))throw Error("송장번호 형식 오류");
     const j=await request(url,{method:"PATCH",body:JSON.stringify({deliveryCode:cleanCode,deliveryCompany:"LOGEN",status:25})});
     if(j.message!=="success"||!j.result?.some(x=>Number(x.id)===m.delivery_id&&Number(x.status)===25&&x.deliveryCompany==="LOGEN"&&digits(x.deliveryCode)===cleanCode))throw Error("와이스 등록 응답 불일치");
+    await confirmIfAppears();
     send("DDOGA_WISE_SHIP_SYNC",{row:{order_id:m.order_id,tracking_number:m.tracking_number,delivery_id:m.delivery_id}});
-    results.push({nickname:m.nickname,ok:true});
-   }catch(e){results.push({nickname:m.nickname,ok:false,error:e.message});}
+    results.push({order_id:m.order_id,nickname:m.nickname,ok:true});
+   }catch(e){results.push({order_id:m.order_id,nickname:m.nickname,ok:false,error:e.message});}
   }
   send("DDOGA_WISE_SHIP_RESULT",{results});
  }
