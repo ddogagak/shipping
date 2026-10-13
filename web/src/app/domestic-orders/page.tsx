@@ -507,7 +507,6 @@ export default function DomesticOrdersPage() {
       .filter((row) => {
         const s = shipping(row);
         const shippingStatus = s?.shipping_status || "start";
-        const shippingType = normalizedShippingType(s?.shipping_type);
 
         if (orderStatuses.length && !orderStatuses.includes(row.order_status || "accepted")) return false;
         // [요청상태 추가]
