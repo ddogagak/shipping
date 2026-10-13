@@ -71,5 +71,5 @@ export async function POST(request: Request) {
   const { error } = await supabase.from("domestic_wise_snapshot")
     .upsert({ id: SNAPSHOT_ID, rows, updated_at }, { onConflict: "id" });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true, updatedAt: updated_at });
+  return NextResponse.json({ ok: true, updatedAt: updated_at, rows });
 }
