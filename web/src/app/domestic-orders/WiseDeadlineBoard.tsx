@@ -21,6 +21,19 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
  const [updatedAt,setUpdatedAt]=useState<string|null>(null);
  const [notice,setNotice]=useState("");
  useEffect(()=>{
+  let active=true;
+  fetch("/api/domestic/wise-snapshot",{cache:"no-store"}).then(async res=>{
+   const data=await res.json();
+   if(!res.ok)throw Error(data.error||"DB 조회 실패");
+   if(active&&data.snapshot&&Array.isArray(data.snapshot.rows)){
+    setWiseRows(data.snapshot.rows);
+    setUpdatedAt(data.snapshot.updated_at);
+    localStorage.setItem(CACHE_KEY,JSON.stringify({rows:data.snapshot.rows,updatedAt:data.snapshot.updated_at}));
+   }
+  }).catch(error=>{if(active)setNotice("DB 조회 실패 · 브라우저 저장본 표시 중: "+String(error.message||error));});
+  return()=>{active=false;};
+ },[]);
+ useEffect(()=>{
   try{
    const saved=localStorage.getItem(CACHE_KEY);
    if(saved){
@@ -55,7 +68,10 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
     catch{setNotice("동기화 완료. 다만 브라우저 저장에 실패했어.");}
     setWiseRows(next);
     setUpdatedAt(time);
-    setNotice("와이스 "+buyers.length+"명 조회 완료");
+    setNotice("와이스 "+buyers.length+"명 조회 완료 · DB 저장 중...");
+    void fetch("/api/domestic/wise-snapshot",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rows:next})})
+      .then(async response=>{const data=await response.json();if(!response.ok)throw Error(data.error||"DB 저장 실패");setUpdatedAt(data.updatedAt);localStorage.setItem(CACHE_KEY,JSON.stringify({rows:next,updatedAt:data.updatedAt}));setNotice("와이스 "+buyers.length+"명 동기화 · DB 저장 완료");})
+      .catch(error=>setNotice("와이스 조회 완료 · DB 저장 실패: "+String(error.message||error)));
    }
   };
   window.addEventListener("message",onMessage);
@@ -99,7 +115,7 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
     </button>
    </div>
   </div>
-  <div style={{fontSize:12,color:"#111827",marginBottom:10}}>{wiseRows?"마지막 와이스 동기화 결과 · 새로고침해도 유지돼.":"와이스 동기화 기록이 없어. 오른쪽 새로고침 아이콘을 눌러줘."}</div>
+  <div style={{fontSize:12,color:"#111827",marginBottom:10}}>{wiseRows?"마지막 와이스 동기화 결과 · DB와 브라우저에 보관돼.":"와이스 동기화 기록이 없어. 오른쪽 새로고침 아이콘을 눌러줘."}</div>
   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(155px,1fr))",gap:10}}>
    {card("미발송 구매자",unshipped.length,"#fff")}
    {card("직킵여부 확인대상",candidates.length,"#fffbe6","11일 이상 · 13일 미만")}
