@@ -52,8 +52,9 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
     popupRef.current?.postMessage({type:"DDOGA_WISE_SNAPSHOT_REQUEST"},"https://wyyyes.com");
    }
    if(event.data?.type==="DDOGA_WISE_SNAPSHOT_RESULT"){
-    setBusy(false);
-    if(event.data.error){setNotice(String(event.data.error));return;}
+    if(event.data.error){setBusy(false);setNotice(String(event.data.error));return;}
+    if((event.data.records||[]).some((r:Snapshot & {error?:string})=>r.error)){setBusy(false);setNotice("와이스 일부 주문 조회 실패 · 이전 기록 유지");return;}
+    if(false){setNotice(String(event.data.error));return;}
     const buyers:Snapshot[]=Array.isArray(event.data.records)?event.data.records:[];
     const next:WiseRow[]=[];
     for(const buyer of buyers)for(const order of buyer.orders||[]){
@@ -69,8 +70,8 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
     setWiseRows(next);
     setUpdatedAt(time);
     setNotice("와이스 "+buyers.length+"명 조회 완료 · DB 저장 중...");
-    void fetch("/api/domestic/wise-snapshot",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rows:next})})
-      .then(async response=>{const data=await response.json();if(!response.ok)throw Error(data.error||"DB 저장 실패");setUpdatedAt(data.updatedAt);localStorage.setItem(CACHE_KEY,JSON.stringify({rows:next,updatedAt:data.updatedAt}));setNotice("와이스 "+buyers.length+"명 동기화 · DB 저장 완료");})
+    void fetch("/api/domestic/wise-snapshot",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rows:next,complete:true})})
+      .then(async response=>{const data=await response.json();if(!response.ok)throw Error(data.error||"DB 저장 실패");setUpdatedAt(data.updatedAt);localStorage.setItem(CACHE_KEY,JSON.stringify({rows:next,updatedAt:data.updatedAt}));setWiseRows(data.rows||next);setNotice("와이스 "+buyers.length+"명 동기화 · DB 저장 완료");})
       .catch(error=>setNotice("와이스 조회 완료 · DB 저장 실패: "+String(error.message||error)));
    }
   };
@@ -82,6 +83,7 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
  const unshipped=unique(rows.filter(r=>r.status==="unshipped"||r.status==="urgent"));
  const candidates=unique(rows.filter(r=>r.status==="unshipped"&&r.days>=11&&r.days<13));
  const pending=unique(rows.filter(r=>r.status==="pending"));
+ const confirmed=unique(rows.filter(r=>r.status==="confirmed"));
  const urgent=unique(rows.filter(r=>r.status==="urgent"||(r.status==="unshipped"&&r.days>=13)));
  function refresh(){
   setBusy(true);setNotice("와이스 응답을 기다리는 중...");
@@ -136,6 +138,7 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
    {card("발송긴급",urgent.length,"#fef2f2","13일 이상")}
   </div>
   {urgent.length>0&&<div style={{marginTop:10,padding:10,borderRadius:8,background:"#fef2f2",fontSize:13}}><strong>발송긴급:</strong> {urgent.map(x=><span key={x.order_id} style={{...nicknameStyle,marginRight:6}}>{x.nickname} ({x.days}일)</span>)}</div>}
+  <div style={{marginTop:10,padding:10,borderRadius:8,background:"#f0fdf4",fontSize:13}}><strong>직킵 수령확인 추정 {confirmed.length}명:</strong> {confirmed.length?confirmed.map(x=><span key={x.order_id} style={{...nicknameStyle,marginLeft:6}}>{x.nickname}</span>):"대상 없음"}</div>
   {notice&&<p role="status" style={{fontSize:12}}>{notice}</p>}
  </div>;
 }
