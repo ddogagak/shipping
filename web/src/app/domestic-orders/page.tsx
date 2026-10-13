@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import DomesticItemPhotoModal from "./DomesticItemPhotoModal";
+import WiseDeadlineBoard from "./WiseDeadlineBoard";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import * as XLSX from "xlsx";
 
@@ -1394,15 +1395,7 @@ export default function DomesticOrdersPage() {
 
         {message ? <p style={{ color: "#b91c1c" }}>{message}</p> : null}
 
-        <div style={summaryGridStyle}>
-          <Summary label="전체" value={rows.length} />
-          <Summary label="현재 표시" value={filteredRows.length} />
-          <Summary label="선택" value={selectedIds.length} />
-          <Summary
-            label="배송완료"
-            value={rows.filter((row) => shipping(row)?.shipping_status === "done").length}
-          />
-        </div>
+        <WiseDeadlineBoard orders={rows.map(row => ({order_id:row.order_id,nickname:row.nickname || "",platform:row.platform,first_order_date:row.first_order_date,order_status:row.order_status,tracking_registered:Boolean(shipping(row)?.tracking_registered)}))} />
       </section>
 
       <section style={checkBoardStyle}>
