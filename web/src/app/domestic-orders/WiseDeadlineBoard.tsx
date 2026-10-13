@@ -3,6 +3,7 @@ import {useMemo,useState,useEffect,useRef} from "react";
 
 type Order={order_id:string;nickname:string;platform:string;first_order_date:string|null;order_status:string|null;tracking_registered:boolean};
 type Snapshot={userId:string;nickname:string;orders:{id:number;status:number;createdAt:string;deliveryCompany?:string;deliveryCode?:string}[]};
+const CACHE_KEY="ddoga:wise-deadline-snapshot:v1";
 type WiseRow={nickname:string;order_id:string;days:number;status:"unshipped"|"pending"|"confirmed"|"urgent";source:"ddoga"|"wise"};
 function daysSince(date:string|null){
  if(!date)return -1;
@@ -17,7 +18,20 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
  const popupRef=useRef<Window|null>(null);
  const [wiseRows,setWiseRows]=useState<WiseRow[]|null>(null);
  const [busy,setBusy]=useState(false);
+ const [updatedAt,setUpdatedAt]=useState<string|null>(null);
  const [notice,setNotice]=useState("");
+ useEffect(()=>{
+  try{
+   const saved=localStorage.getItem(CACHE_KEY);
+   if(saved){
+    const parsed=JSON.parse(saved);
+    if(Array.isArray(parsed.rows)&&typeof parsed.updatedAt==="string"){
+     setWiseRows(parsed.rows);
+     setUpdatedAt(parsed.updatedAt);
+    }
+   }
+  }catch{setNotice("저장된 동기화 데이터를 읽을 수 없어.");}
+ },[]);
  useEffect(()=>{
   const onMessage=(event:MessageEvent)=>{
    if(event.origin!=="https://wyyyes.com"||event.source!==popupRef.current)return;
@@ -36,19 +50,19 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
      if(Number(order.status)===25)continue; // 발송완료는 긴급/미발송 집계에서 제외
      next.push({nickname:buyer.nickname,order_id:String(order.id),days,status:pending?"pending":days>=13?"urgent":"unshipped",source:"wise"});
     }
+    const time=new Date().toISOString();
+    try{localStorage.setItem(CACHE_KEY,JSON.stringify({rows:next,updatedAt:time}));}
+    catch{setNotice("동기화 완료. 다만 브라우저 저장에 실패했어.");}
     setWiseRows(next);
+    setUpdatedAt(time);
     setNotice("와이스 "+buyers.length+"명 조회 완료");
    }
   };
   window.addEventListener("message",onMessage);
   return()=>window.removeEventListener("message",onMessage);
  },[]);
- const rows=useMemo(()=>{
-  if(wiseRows)return wiseRows;
-  return orders.filter(o=>String(o.platform||"").toLowerCase()==="wise"&&o.order_status!=="done"&&o.order_status!=="kept"&&!o.tracking_registered)
-   .map(o=>({nickname:o.nickname,order_id:o.order_id,days:daysSince(o.first_order_date),status:daysSince(o.first_order_date)>=13?"urgent" as const:"unshipped" as const,source:"ddoga" as const}));
- },[orders,wiseRows]);
- const unique=(a:WiseRow[])=>Array.from(new Map(a.map(r=>[r.nickname.trim().toLowerCase(),r])).values()).filter(x=>x.nickname);
+ const rows=useMemo(()=>wiseRows||[],[wiseRows]);
+ const unique=(a:WiseRow[])=>Array.from(new Map(a.filter(x=>x.nickname).sort((a,b)=>b.days-a.days).map(r=>[r.nickname.trim().toLowerCase(),r])).values());
  const unshipped=unique(rows.filter(r=>r.status==="unshipped"||r.status==="urgent"));
  const candidates=unique(rows.filter(r=>r.status==="unshipped"&&r.days>=11&&r.days<13));
  const pending=unique(rows.filter(r=>r.status==="pending"));
@@ -66,6 +80,8 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
   },600);
   window.setTimeout(()=>window.clearInterval(timer),19000);
  }
+ const nicknameStyle={display:"inline-flex",alignItems:"center",gap:5,border:"1px solid #111827",borderRadius:8,padding:"5px 8px",background:"#fff",fontWeight:800,fontSize:13} as const;
+ const timeLabel=updatedAt?new Date(updatedAt).toLocaleString("ko-KR",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}):"동기화 기록 없음";
  const card=(label:string,count:number,color:string,detail?:string)=>(
   <div style={{border:"1px solid #111827",borderRadius:12,padding:14,background:color}}>
    <div style={{fontSize:13,fontWeight:700}}>{label}</div>
@@ -73,12 +89,17 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
    {detail&&<div style={{fontSize:11,color:"#6b7280",marginTop:4}}>{detail}</div>}
   </div>
  );
- return <div style={{marginTop:16,padding:16,background:"#FFF54F",border:"1px solid #111827",borderRadius:14}}>
+ return <div style={{marginTop:16,padding:16,background:"#fff",border:"1px solid #111827",borderRadius:14}}>
   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap",marginBottom:10}}>
    <strong>와이스 배송기한 관리</strong>
-   <button type="button" onClick={()=>void refresh()} disabled={busy} style={{padding:"7px 12px",borderRadius:8,border:"1px solid #ddd",background:"white",cursor:"pointer"}}>집계 새로고침</button>
+   <div style={{display:"flex",alignItems:"center",gap:9}}>
+    <span style={{fontSize:12,fontWeight:700,color:"#111827"}}>최근 업데이트: {timeLabel}</span>
+    <button type="button" aria-label="와이스 동기화 새로고침" title="와이스 동기화 새로고침" onClick={refresh} disabled={busy} style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:38,height:38,border:"2px solid #111827",borderRadius:"50%",background:"#fff",color:"#111827",cursor:busy?"wait":"pointer",opacity:busy?0.5:1}}>
+     <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.4 6.1"/><path d="M20 4v7h-7"/></svg>
+    </button>
+   </div>
   </div>
-  <div style={{fontSize:12,color:"#92400e",marginBottom:10}}>{wiseRows?"와이스 주문 조회 결과":"조회 전에는 DDOGA 기준 임시 집계가 표시돼. 새로고침을 눌러 와이스를 조회해줘."}</div>
+  <div style={{fontSize:12,color:"#111827",marginBottom:10}}>{wiseRows?"마지막 와이스 동기화 결과 · 새로고침해도 유지돼.":"와이스 동기화 기록이 없어. 오른쪽 새로고침 아이콘을 눌러줘."}</div>
   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(155px,1fr))",gap:10}}>
    {card("미발송 구매자",unshipped.length,"#fff")}
    {card("직킵여부 확인대상",candidates.length,"#fffbe6","11일 이상 · 13일 미만")}
@@ -91,13 +112,13 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
    </button>
    {open&&<div style={{padding:12}}>
     {candidates.length?candidates.map(x=><div key={x.order_id} style={{padding:"8px 0",borderBottom:"1px solid #eee"}}>
-     <span style={{fontWeight:700}}>{x.nickname}</span> <span style={{fontSize:12,color:"#6b7280"}}>· {x.days}일 경과</span>
-     <span style={{fontSize:12,marginLeft:8,color:"#92400e"}}>메시지·direct 연동 준비 중</span>
+     <span style={nicknameStyle}>{x.nickname}</span> <span style={{fontSize:12,color:"#6b7280"}}>· {x.days}일 경과</span>
+     <span style={{fontSize:12,marginLeft:8,color:"#111827"}}>메시지·direct 연동 준비 중</span>
     </div>):<span style={{fontSize:13,color:"#6b7280"}}>대상 없음</span>}
    </div>}
   </div>
-  {pending.length>0&&<div style={{marginTop:10,fontSize:13}}>수령확인 대기: {pending.map(x=>x.nickname).join(", ")}</div>}
-  {urgent.length>0&&<div style={{marginTop:10,padding:10,borderRadius:8,background:"#fef2f2",fontSize:13}}><strong>발송긴급:</strong> {urgent.map(x=>x.nickname+" ("+x.days+"일)").join(", ")}</div>}
+  {pending.length>0&&<div style={{marginTop:10,fontSize:13,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}><strong>수령확인 대기:</strong> {pending.map(x=><span key={x.order_id} style={nicknameStyle}>{x.nickname}</span>)}</div>}
+  {urgent.length>0&&<div style={{marginTop:10,padding:10,borderRadius:8,background:"#fef2f2",fontSize:13}}><strong>발송긴급:</strong> {urgent.map(x=><span key={x.order_id} style={{...nicknameStyle,marginRight:6}}>{x.nickname} ({x.days}일)</span>)}</div>}
   {notice&&<p role="status" style={{fontSize:12}}>{notice}</p>}
  </div>;
 }
