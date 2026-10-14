@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDOGA Wise shipping bridge
 // @namespace https://www.ddoga.lol/
-// @version 0.10
+// @version 0.12
 // @match https://wyyyes.com/*
 // @grant none
 // ==/UserScript==
@@ -41,14 +41,15 @@
  }
  // 화면에 합배송 확인 팝업이 나타날 경우에만 추가 확인
  const clicked=new WeakSet();
- async function confirmIfAppears(timeout=1800){
+ async function confirmIfAppears(timeout=5000){
   const until=Date.now()+timeout;
   while(Date.now()<until){
    const button=[...document.querySelectorAll('div[tabindex="0"]')].find(el=>
     !clicked.has(el)&&/^일괄 발송 완료 처리\s*\(총\s*\d+건\)$/.test((el.innerText||"").trim())&&el.getBoundingClientRect().width>0&&el.getBoundingClientRect().height>0);
-   if(button){clicked.add(button);button.click();console.log("[DDOGA WISE] 일괄 발송 확인 클릭");return;}
+   if(button){clicked.add(button);button.click();console.log("[DDOGA WISE] 일괄 발송 확인 클릭");return true;}
    await new Promise(r=>setTimeout(r,150));
   }
+  return false;
  }
  async function preview(orders){
   matches=[];
@@ -81,12 +82,23 @@
   if(!targets.length){send("DDOGA_WISE_SHIP_RESULT",{results:[{nickname:"선택 주문",ok:false,error:"등록 대상이 없어. 미리보기를 다시 실행해줘."}]});return;}
   for(const m of targets){
    try{
+    send("DDOGA_WISE_SHIP_PROGRESS",{message:m.nickname+": 와이스 송장 등록 요청 중..."});
     const url="/r0.app/sellers/myMarket/deliveries?cursorOrderChainId="+m.cursor_order_chain_id+"&deliveryIds="+m.delivery_id;
     const cleanCode=digits(m.tracking_number);
     if(!/^\d{8,}$/.test(cleanCode))throw Error("송장번호 형식 오류");
     const j=await request(url,{method:"PATCH",body:JSON.stringify({deliveryCode:cleanCode,deliveryCompany:"LOGEN",status:25})});
-    if(j.message!=="success"||!j.result?.some(x=>Number(x.id)===m.delivery_id&&Number(x.status)===25&&x.deliveryCompany==="LOGEN"&&digits(x.deliveryCode)===cleanCode))throw Error("와이스 등록 응답 불일치");
+    if(j.message!=="success")throw Error("와이스 등록 요청 실패: "+(j.message||j.error||"알 수 없는 응답"));
+    send("DDOGA_WISE_SHIP_PROGRESS",{message:m.nickname+": 합배송 확인 버튼 확인 중..."});
     await confirmIfAppears();
+    // 확인 버튼을 누른 뒤 와이스의 최종 배송 상태를 다시 조회한다.
+    let verified=false;
+    for(let i=0;i<8;i++){
+     await new Promise(r=>setTimeout(r,600));
+     const check=await request("/r0.app/sellers/myMarket/deliveries?cursorOrderChainId="+m.cursor_order_chain_id+"&deliveryIds="+m.delivery_id);
+     const records=Array.isArray(check.result)?check.result:[];
+     if(records.some(x=>Number(x.id||x.delivery_id)===m.delivery_id&&Number(x.status)===25&&x.deliveryCompany==="LOGEN"&&digits(x.deliveryCode)===cleanCode)){verified=true;break;}
+    }
+    if(!verified)throw Error("송장 등록 요청 후 발송 완료를 확인하지 못했어. 와이스에서 직접 확인하고 재등록은 하지 마.");
     send("DDOGA_WISE_SHIP_SYNC",{row:{order_id:m.order_id,tracking_number:m.tracking_number,delivery_id:m.delivery_id}});
     results.push({order_id:m.order_id,nickname:m.nickname,ok:true});
    }catch(e){results.push({order_id:m.order_id,nickname:m.nickname,ok:false,error:e.message});}
