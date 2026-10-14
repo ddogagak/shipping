@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDOGA Wise shipping bridge
 // @namespace https://www.ddoga.lol/
-// @version 0.9
+// @version 0.10
 // @match https://wyyyes.com/*
 // @grant none
 // ==/UserScript==
@@ -61,11 +61,12 @@
     if(people.length!==1){m.reason=people.length?"중복 닉네임":"닉네임 없음";matches.push(m);continue;}
     const uid=people[0]._id||people[0].userId;
     const chains=(await request("/r0.app/sellers/myMarket/orderChains?userId="+encodeURIComponent(uid))).result||[];
-    const ids=[...new Set(chains.filter(c=>c.delivery_id&&!c.deliveryCode&&Number(c.status)!==25).map(c=>Number(c.delivery_id)))];
-    if(ids.length!==1){m.reason="배송 ID 없음 또는 여러 개";matches.push(m);continue;}
-    const active=chains.filter(c=>Number(c.delivery_id)===ids[0]&&!c.deliveryCode&&Number(c.status)!==25);
-    if(active.length<1){m.reason="미발송 주문 없음";matches.push(m);continue;}
-    m.delivery_id=ids[0];m.cursor_order_chain_id=Number(active[0].firstOrderGroupId);
+    // 와이스가 반환한 배송 목록 순서를 유지하고, 미발송 입력칸 중 첫 번째를 선택한다.
+    const active=chains.filter(c=>Number(c.delivery_id)>0&&!c.deliveryCode&&Number(c.status)!==25);
+    if(active.length<1){m.reason="등록 가능한 미발송 배송 ID 없음";matches.push(m);continue;}
+    const first=active[0];
+    m.delivery_id=Number(first.delivery_id);
+    m.cursor_order_chain_id=Number(first.firstOrderGroupId);
     if(!m.cursor_order_chain_id){m.reason="주문 묶음 ID 없음";matches.push(m);continue;}
     m.status="ready";m.reason="등록 가능";matches.push(m);
    }
