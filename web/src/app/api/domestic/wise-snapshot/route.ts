@@ -86,11 +86,17 @@ export async function PATCH(request: Request) {
  const selected = rows.find(row=>row.order_id===id && row.status==="confirmed");
  if (!selected) return NextResponse.json({error:"처리할 추정 주문이 없어"},{status:409});
  if (action==="register") {
-  const normalize=(s:string)=>s.normalize("NFKC").replace(/\\s+/g,"").toLowerCase();
+  const normalize=(s:string)=>s.normalize("NFKC").replace(/\s+/g,"").toLowerCase();
   const {data:orders,error:ordersError}=await db.from("domestic_order").select("order_id,nickname,platform,order_status,domestic_shipping(tracking_registered,shipping_status)");
   if(ordersError)return NextResponse.json({error:ordersError.message},{status:500});
-  const found=(orders||[]).filter((o:any)=>o.platform==="wise"&&normalize(String(o.nickname||""))===normalize(selected.nickname));
-  if(found.length!==1)return NextResponse.json({error:"같은 닉네임의 주문이 여러 건이거나 없어. 직접 확인해줘."},{status:409});
+  const found=(orders||[]).filter((o:any)=>{
+   if(o.platform!=="wise"||normalize(String(o.nickname||""))!==normalize(selected.nickname))return false;
+   const shipping=Array.isArray(o.domestic_shipping)?o.domestic_shipping[0]:o.domestic_shipping;
+   return shipping?.tracking_registered===false &&
+     !["kept","done"].includes(String(o.order_status||"")) &&
+     shipping.shipping_status!=="done";
+  });
+  if(found.length!==1)return NextResponse.json({error:"등록 가능한 주문이 0건 또는 여러 건이야. 직접 확인해줘."},{status:409});
   const order:any=found[0];
   const shipping=Array.isArray(order.domestic_shipping)?order.domestic_shipping[0]:order.domestic_shipping;
   if(!shipping||shipping.tracking_registered!==false||["kept","done"].includes(String(order.order_status||""))||shipping.shipping_status==="done")return NextResponse.json({error:"이미 처리됐거나 변경 불가 상태야"},{status:409});
