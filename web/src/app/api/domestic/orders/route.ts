@@ -144,6 +144,40 @@ export async function PATCH(req: Request) {
     });
   }
 
+  // 로젠 집하 확인: 기존 운송장과 일치하는 주문만 완료 처리
+  if (action === "confirm_pickup") {
+    const orderId = String(body.order_id || "").trim();
+    const trackingNumber = String(body.tracking_number || "").replace(/\\D/g, "");
+    if (!orderId || !trackingNumber) {
+      return NextResponse.json({ error: "주문번호 또는 운송장번호가 없습니다." }, { status: 400 });
+    }
+    const { data: shipping, error: readError } = await supabase
+      .from("domestic_shipping")
+      .select("tracking_number,shipping_status")
+      .eq("order_id", orderId).single();
+    if (readError || !shipping) {
+      return NextResponse.json({ error: "배송정보 조회 실패", detail: readError?.message }, { status: 500 });
+    }
+    if (String(shipping.tracking_number || "").replace(/\\D/g, "") !== trackingNumber) {
+      return NextResponse.json({ error: "운송장번호 불일치" }, { status: 409 });
+    }
+    if (shipping.shipping_status === "done") {
+      return NextResponse.json({ ok: true, already: true });
+    }
+    const { error: shippingError } = await supabase.from("domestic_shipping")
+      .update({ shipping_status: "done", updated_at: now })
+      .eq("order_id", orderId).eq("tracking_number", shipping.tracking_number);
+    if (shippingError) {
+      return NextResponse.json({ error: "집하 배송상태 저장 실패", detail: shippingError.message }, { status: 500 });
+    }
+    const { error: orderError } = await supabase.from("domestic_order")
+      .update({ order_status: "done", updated_at: now }).eq("order_id", orderId);
+    if (orderError) {
+      return NextResponse.json({ error: "집하 주문상태 저장 실패", detail: orderError.message }, { status: 500 });
+    }
+    return NextResponse.json({ ok: true, already: false, shipping_status: "done" });
+  }
+
   if (action === "update_delivery_info") {
     const orderId = String(body.order_id || "").trim();
 
