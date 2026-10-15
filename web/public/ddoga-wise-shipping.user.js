@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDOGA Wise shipping bridge
 // @namespace https://www.ddoga.lol/
-// @version 0.12
+// @version 0.13
 // @match https://wyyyes.com/*
 // @grant none
 // ==/UserScript==
@@ -36,7 +36,7 @@
     const kind=raw.trimStart().startsWith("<")?"HTML 페이지":raw.trimStart().slice(0,60);
     throw Error("와이스 응답이 JSON이 아님 (HTTP "+r.status+", "+r.url+", "+kind+"). 로그인 화면/요청 경로를 확인해야 해.");
   }
-  if(!r.ok)throw Error("HTTP "+r.status+": "+(j.message||j.error||"API 오류"));
+  if(!r.ok){const err=new Error("HTTP "+r.status+": "+(j.message||j.error||"API 오류"));err.status=r.status;throw err;}
   return j;
  }
  // 화면에 합배송 확인 팝업이 나타날 경우에만 추가 확인
@@ -86,10 +86,18 @@
     const url="/r0.app/sellers/myMarket/deliveries?cursorOrderChainId="+m.cursor_order_chain_id+"&deliveryIds="+m.delivery_id;
     const cleanCode=digits(m.tracking_number);
     if(!/^\d{8,}$/.test(cleanCode))throw Error("송장번호 형식 오류");
-    const j=await request(url,{method:"PATCH",body:JSON.stringify({deliveryCode:cleanCode,deliveryCompany:"LOGEN",status:25})});
-    if(j.message!=="success")throw Error("와이스 등록 요청 실패: "+(j.message||j.error||"알 수 없는 응답"));
-    send("DDOGA_WISE_SHIP_PROGRESS",{message:m.nickname+": 합배송 확인 버튼 확인 중..."});
-    await confirmIfAppears();
+    let needsConfirmation=false;
+    try{
+     const j=await request(url,{method:"PATCH",body:JSON.stringify({deliveryCode:cleanCode,deliveryCompany:"LOGEN",status:25})});
+     if(j.message!=="success")throw Error("와이스 등록 요청 실패: "+(j.message||j.error||"알 수 없는 응답"));
+    }catch(e){
+     if(e.status!==412)throw e;
+     needsConfirmation=true;
+     send("DDOGA_WISE_SHIP_PROGRESS",{message:m.nickname+": 추가 주문(412) 감지. 와이스 합배송 확인 버튼 확인 중..."});
+    }
+    const clickedConfirmation=await confirmIfAppears();
+    if(needsConfirmation&&!clickedConfirmation)throw Error("와이스가 추가 주문(HTTP 412)을 요구했지만 확인 버튼을 찾지 못했어. 와이스에서 직접 송장 등록 후 일괄 발송 완료 처리를 해줘.");
+    send("DDOGA_WISE_SHIP_PROGRESS",{message:m.nickname+": 최종 발송 상태 확인 중..."});
     // 확인 버튼을 누른 뒤 와이스의 최종 배송 상태를 다시 조회한다.
     let verified=false;
     for(let i=0;i<8;i++){
