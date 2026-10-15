@@ -1566,12 +1566,16 @@ export default function DomesticOrdersPage() {
           <div style={{ fontWeight: 800 }}>선택 {selectedIds.length}건</div>
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button type="button" onClick={exportExcel} style={blackButtonStyle}>
-              선택 {selectedIds.length}건 로젠엑셀
-            </button>
-
             <button type="button" onClick={sendLogenExcel} style={blueButtonStyle}>
               🚚 로젠전송
+            </button>
+
+            <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("ddoga:pickup:open"))} style={blackButtonStyle}>
+              📦 동기화
+            </button>
+
+            <button type="button" onClick={exportExcel} style={blackButtonStyle}>
+              선택 {selectedIds.length}건 로젠엑셀
             </button>
 
             <button type="button" onClick={exportHanjinExcel} style={blueButtonStyle}>
