@@ -268,7 +268,7 @@ function toExcelRow(row: DomesticOrder) {
       return formatted.replace(/\D/g, "").length >= 9
         ? formatted
         : "010-6452-8842";
-    })()
+    })(),
     내품수량: Number(row.order_count || 1),
     물품금액: roundedItemPrice,
     주문번호: row.customer_order_no || "",
