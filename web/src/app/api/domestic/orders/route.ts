@@ -326,9 +326,11 @@ export async function PATCH(req: Request) {
             : body.shipping_type,
         tracking_number: trackingNumber,
         tracking_registered:
-          nextOrderStatus === "done" || nextOrderStatus === "kept"
-            ? true
-            : Boolean(body.tracking_registered),
+          nextShippingStatus === "start"
+            ? false
+            : nextOrderStatus === "done" || nextOrderStatus === "kept"
+              ? true
+              : Boolean(body.tracking_registered),
         updated_at: now,
       })
       .eq("order_id", orderId);
