@@ -263,7 +263,12 @@ function toExcelRow(row: DomesticOrder) {
     수하인명: row.recipient_name || "",
     수하인주소1: mainAddress,
     수하인주소2: detailAddress,
-    수하인휴대폰: formatHanjinPhone(row.phone),
+    수하인휴대폰: (() => {
+      const formatted = formatHanjinPhone(row.phone);
+      return formatted.replace(/\D/g, "").length >= 9
+        ? formatted
+        : "010-6452-8842";
+    })()
     내품수량: Number(row.order_count || 1),
     물품금액: roundedItemPrice,
     주문번호: row.customer_order_no || "",
