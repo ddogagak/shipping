@@ -38,7 +38,7 @@ function addPeriod(map: Map<string, any>, key: string, order: any, items: any[])
   bucket.sales += orderTotal;
   bucket.order_count += 1;
   bucket.item_count += items.length;
-  const buyer = bucket.buyers.get(buyerName) || { buyer_nickname: buyerName, sales: 0, order_count: 0, item_count: 0, order_ids: new Set<string>() };
+  const buyer = bucket.buyers.get(buyerName) || { buyer_nickname: buyerName, sales: 0, item_count: 0, order_ids: new Set<string>() };
   buyer.sales += orderTotal;
   buyer.item_count += items.length;
   buyer.order_ids.add(String(order.id));
@@ -75,10 +75,7 @@ async function buildReport(customKeywords: unknown) {
     : [];
   const excludedKeywords = Array.from(new Set([...DEFAULT_EXCLUDED, ...SHIPPING_KEYWORDS, ...userKeywords]));
   const terms = excludedKeywords.map(term => term.toLowerCase());
-  const [itemRows, purchaseRows] = await Promise.all([
-    readAll("domestic_wise_item_photo", "wise_order_id,buyer_nickname,ordered_at,item_name,item_price,imported_at"),
-    readAll("purchase_orders", "ordered_at,paid_amount,local_shipping,currency,order_status")
-  ]);
+  const itemRows = await readAll("domestic_wise_item_photo", "wise_order_id,buyer_nickname,ordered_at,item_name,item_price,imported_at");
   const orders = new Map<string, any>();
   let lastImportedAt = "";
   for (const row of itemRows) {
@@ -121,38 +118,26 @@ async function buildReport(customKeywords: unknown) {
     allTimeBuyers.set(buyerName, buyer);
   }
 
-  const salesPeriodMaps = [monthly, quarterly];
-  for (const row of purchaseRows) {
-    if (String(row.order_status || "").trim() === "취소") continue;
-    const date = kstDate(row.ordered_at);
-    if (!date) continue;
-    const monthKey = date.slice(0, 7);
-    const quarterKey = date.slice(0, 4) + "-Q" + (Math.floor((Number(date.slice(5, 7)) - 1) / 3) + 1);
-    for (const [map, key] of [[monthly, monthKey], [quarterly, quarterKey]] as const) {
-      const bucket = map.get(key) || blank(key);
-      const currency = String(row.currency || "UNKNOWN").toUpperCase();
-      bucket.purchases = bucket.purchases || {};
-      bucket.purchases[currency] = (bucket.purchases[currency] || 0) + money(row.paid_amount) + money(row.local_shipping);
-      map.set(key, bucket);
-    }
-  }
+  const buyerRows = Array.from(allTimeBuyers.values()).map((buyer: any) => ({
+    buyer_nickname: buyer.buyer_nickname,
+    sales: buyer.sales,
+    order_count: buyer.order_ids.size,
+    item_count: buyer.item_count
+  })).sort((a: any, b: any) => b.sales - a.sales);
 
   return {
     ok: true,
-    monthly: serialize(monthly).map((p: any) => ({ ...p, purchases: monthly.get(p.key)?.purchases || {} })),
-    quarterly: serialize(quarterly).map((p: any) => ({ ...p, purchases: quarterly.get(p.key)?.purchases || {} })),
-    all_time_buyers: Array.from(allTimeBuyers.values()).map((buyer: any) => ({
-      buyer_nickname: buyer.buyer_nickname,
-      sales: buyer.sales,
-      order_count: buyer.order_ids.size,
-      item_count: buyer.item_count
-    })).sort((a: any, b: any) => b.sales - a.sales),
+    monthly: serialize(monthly),
+    quarterly: serialize(quarterly),
+    all_time_buyers: buyerRows,
     excluded_item_count: excludedItemCount,
     included_order_count: includedOrderCount,
     included_item_count: includedItemCount,
     imported_order_count: orders.size,
     last_imported_at: lastImportedAt || null,
-    excluded_keywords: excludedKeywords
+    excluded_keywords: excludedKeywords,
+    default_excluded_keywords: [...DEFAULT_EXCLUDED, ...SHIPPING_KEYWORDS],
+    custom_keywords: userKeywords
   };
 }
 
