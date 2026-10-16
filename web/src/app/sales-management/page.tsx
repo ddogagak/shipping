@@ -8,7 +8,7 @@ type Period = { key: string; sales: number; order_count: number; item_count: num
 type ItemPref = { includeCost: boolean; memo: string; deleted?: boolean };
 type ItemSettings = { id: string; includeCost: boolean; memo: string; deleted: boolean };
 type Report = { monthly: Period[]; quarterly: Period[]; all_time_sales_rows: SaleRow[]; excluded_item_count: number; included_order_count: number; included_item_count: number; imported_order_count: number; last_imported_at: string | null; wise_gross_total: number; settings: { cumulative_settled_amount: number; excluded_keywords: string[]; item_settings: ItemSettings[] } };
-type StockItem = { display_name?: string; product_name?: string; option_text?: string; purchase_quantity?: number; component_count?: number; unit_cost_price?: number };
+type StockItem = { display_name?: string; product_name?: string; option_text?: string; ordered_at?: string; purchase_quantity?: number; component_count?: number; unit_cost_price?: number; box_cost_price?: number };
 type ItemPrefs = Record<string, ItemPref>;
 const money = (value: number) => Math.round(Number(value || 0)).toLocaleString("ko-KR");
 const itemKey = (text: string) => text.normalize("NFKC").toLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
@@ -30,6 +30,14 @@ function periodLabel(key: string) {
 function kstDate(value?: string | null) {
   if (!value) return "-";
   return new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", dateStyle: "medium" }).format(new Date(value));
+}
+function stockPeriodKey(value: string | undefined, granularity: "month" | "quarter") {
+  const date = new Date(String(value || ""));
+  if (Number.isNaN(date.getTime())) return "";
+  const day = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+  return granularity === "month"
+    ? day.slice(0, 7)
+    : day.slice(0, 4) + "-Q" + (Math.floor((Number(day.slice(5, 7)) - 1) / 3) + 1);
 }
 function buildCostIndex(items: StockItem[]) {
   const groups = new Map<string, { cost: number; weight: number }>();
@@ -97,7 +105,7 @@ export default function SalesManagementPage() {
   const [granularity, setGranularity] = useState<"month" | "quarter">("month");
   const [selectedPeriod, setSelectedPeriod] = useState("");
   const [settledAmount, setSettledAmount] = useState(0);
-  const [settledInput, setSettledInput] = useState("0");
+  const [settlementLoading, setSettlementLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
@@ -118,7 +126,6 @@ export default function SalesManagementPage() {
       setInventory(Array.isArray(stockData.items) ? stockData.items : []);
       const amount = Number(salesData.settings?.cumulative_settled_amount || 0);
       setSettledAmount(amount);
-      setSettledInput(String(amount));
       setKeywords(Array.isArray(salesData.settings?.excluded_keywords) ? salesData.settings.excluded_keywords : []);
       const prefs: ItemPrefs = {};
       for (const row of salesData.settings?.item_settings || []) prefs[String(row.id)] = { includeCost: row.includeCost !== false, memo: String(row.memo || ""), deleted: row.deleted === true };
@@ -150,7 +157,12 @@ export default function SalesManagementPage() {
   }), [currentRows, costIndex, draftPrefs]);
   const knownCost = itemRows.reduce((sum, row) => sum + (row.cost ?? 0), 0);
   const unmatchedQuantity = itemRows.reduce((sum, row) => sum + (row.includeCost && row.unitCost == null ? 1 : 0), 0);
-  const grossAfterCogs = currentSummary.sales - knownCost;
+  const currentInventoryRows = inventory.filter(row => selectedKey && stockPeriodKey(row.ordered_at, granularity) === selectedKey);
+  const currentInventoryCost = currentInventoryRows.reduce((sum, row) => {
+    const boxCost = Number(row.box_cost_price || 0) || Number(row.unit_cost_price || 0) * Math.max(1, Number(row.component_count || 1));
+    return sum + (Number.isFinite(boxCost) ? boxCost : 0) * Math.max(0, Number(row.purchase_quantity || 0));
+  }, 0);
+  const grossAfterCogs = currentSummary.sales - currentInventoryCost;
   const allRowsById = useMemo(() => new Map((report?.all_time_sales_rows || []).map(row => [row.id, row])), [report]);
   const deletedItems = Object.entries(savedPrefs).filter(([, pref]) => pref.deleted);
   const hasUnsaved = JSON.stringify(savedPrefs) !== JSON.stringify(draftPrefs);
@@ -174,19 +186,36 @@ export default function SalesManagementPage() {
     setKeywordInput("");
     void saveKeywords([...keywords, term]);
   };
-  const saveSettlement = async (event: FormEvent) => {
-    event.preventDefault();
-    const amount = Number(settledInput.replace(/,/g, ""));
-    if (!Number.isFinite(amount) || amount < 0) { setError("누적 정산금액은 0 이상의 숫자로 입력해 주세요."); return; }
-    try {
-      const response = await fetch("/api/sales-management", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cumulative_settled_amount: amount }) });
-      const data = await response.json();
-      if (!response.ok || !data.ok) throw new Error(data.message || "누적 정산금액 저장에 실패했습니다.");
-      setSettledAmount(Number(data.settings.cumulative_settled_amount));
-      setSettledInput(String(data.settings.cumulative_settled_amount));
-      setNotice("누적 정산금액을 DB에 저장했습니다.");
-      setError("");
-    } catch (e) { setError(e instanceof Error ? e.message : "누적 정산금액 저장에 실패했습니다."); }
+  const importWiseSettlement = () => {
+    setError("");
+    setNotice("와이스에서 누적 정산금액을 불러오는 중입니다.");
+    const popup = window.open("https://wyyyes.com/expected-settlement-amount", "ddoga-wise-settlement", "popup=yes,width=1050,height=850");
+    if (!popup) { setError("팝업이 차단됐습니다. ddoga.lol 팝업을 허용해 주세요."); return; }
+    setSettlementLoading(true);
+    let finished = false;
+    const cleanup = () => {
+      if (finished) return;
+      finished = true;
+      window.removeEventListener("message", receive);
+      window.clearTimeout(timeout);
+      setSettlementLoading(false);
+    };
+    const receive = async (event: MessageEvent) => {
+      if (event.origin !== "https://wyyyes.com" || event.source !== popup || event.data?.type !== "DDOGA_WISE_SETTLEMENT_AMOUNT") return;
+      const amount = Number(event.data.amount);
+      if (!Number.isFinite(amount) || amount < 0) { cleanup(); setError("와이스에서 받은 정산금액이 올바르지 않습니다."); return; }
+      cleanup();
+      popup.close();
+      try {
+        const response = await fetch("/api/sales-management", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cumulative_settled_amount: amount }) });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.message || "정산금액 저장에 실패했습니다.");
+        setSettledAmount(Number(data.settings.cumulative_settled_amount));
+        setNotice("와이스 누적 정산금액 " + money(amount) + "원을 가져와 저장했습니다.");
+      } catch (e) { setError(e instanceof Error ? e.message : "정산금액 저장에 실패했습니다."); }
+    };
+    window.addEventListener("message", receive);
+    const timeout = window.setTimeout(() => { cleanup(); setError("금액을 읽지 못했습니다. 와이스 로그인 상태와 정산 페이지를 확인해 주세요."); }, 90000);
   };
   const updateDraft = (key: string, patch: Partial<ItemPref>) => {
     setDraftPrefs(current => ({ ...current, [key]: { includeCost: current[key]?.includeCost !== false, memo: current[key]?.memo || "", deleted: current[key]?.deleted === true, ...patch } }));
@@ -257,17 +286,14 @@ export default function SalesManagementPage() {
     {!loading && !error && report && <>
       <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12 }}>
         <article style={{ ...card, background: "#eff6ff", borderColor: "#bfdbfe" }}><span style={label}>매출 · {selectedKey ? periodLabel(selectedKey) : "선택 기간"}</span><strong style={{ ...value, color: "#1d4ed8" }}>{money(currentSummary.sales)}원</strong><small style={{ color: "#6b7280" }}>필터·삭제 적용 · 주문 {money(currentSummary.order_count)}건</small></article>
-        <article style={card}><span style={label}>방송판매재고 기준 사입원가</span><strong style={value}>{money(knownCost)}원</strong><small style={{ color: "#6b7280" }}>Y 아이템만 · 미매칭 {money(unmatchedQuantity)}개</small></article>
-        <article style={{ ...card, background: "#f0fdf4", borderColor: "#bbf7d0" }}><span style={label}>매출 − 확인된 상품원가</span><strong style={{ ...value, color: grossAfterCogs >= 0 ? "#15803d" : "#b91c1c" }}>{money(grossAfterCogs)}원</strong><small style={{ color: "#6b7280" }}>수수료·세금·미매칭 원가 제외 전 차액</small></article>
+        <article style={card}><span style={label}>방송판매재고 매입금액 · {selectedKey ? periodLabel(selectedKey) : "선택 기간"}</span><strong style={value}>{money(currentInventoryCost)}원</strong><small style={{ color: "#6b7280" }}>해당 기간 방송재고 {money(currentInventoryRows.length)}개 · 매출 매칭/토글 무관</small></article>
+        <article style={{ ...card, background: "#f0fdf4", borderColor: "#bbf7d0" }}><span style={label}>매출 − 방송재고 매입금액</span><strong style={{ ...value, color: grossAfterCogs >= 0 ? "#15803d" : "#b91c1c" }}>{money(grossAfterCogs)}원</strong><small style={{ color: "#6b7280" }}>선택 기간 매출에서 전체 방송재고 매입액을 뺀 금액</small></article>
         <article style={{ ...card, background: "#f8fafc" }}><span style={label}>와이스 전체 판매금액 · 누적</span><strong style={value}>{money(Number(report.wise_gross_total || 0))}원</strong><small style={{ color: "#6b7280" }}>배송비·키워드·아이템 삭제·원가토글 적용 전 전체</small></article>
         <article style={{ ...card, background: "#fff7ed", borderColor: "#fed7aa" }}><span style={label}>누적 정산예정액</span><strong style={{ ...value, color: "#c2410c" }}>{money(expectedSettlement)}원</strong><small style={{ color: "#6b7280" }}>전체 판매금액 × 0.94 − 누적 정산금액</small></article>
         <article style={card}>
-          <span style={label}>누적 정산금액 · 통장 입금완료</span>
-          <form onSubmit={saveSettlement} style={{ display: "flex", gap: 6, marginTop: 8 }}>
-            <input inputMode="decimal" value={settledInput} onChange={e => setSettledInput(e.target.value)} style={{ width: 145, minWidth: 0, height: 34, padding: "0 8px", border: "1px solid #d1d5db", borderRadius: 7 }} />
-            <button type="submit" style={button}>저장</button>
-          </form>
-          <small style={{ display: "block", color: "#6b7280", marginTop: 8 }}>현재 {money(settledAmount)}원</small>
+          <span style={label}>누적 정산금액 · 와이스 연동</span>
+          <strong style={{ ...value, fontSize: 21 }}>{money(settledAmount)}원</strong>
+          <button type="button" onClick={importWiseSettlement} disabled={settlementLoading} style={{ ...button, marginTop: 9 }}>{settlementLoading ? "와이스 확인 중..." : "와이스에서 금액 가져오기"}</button>
         </article>
       </section>
 
