@@ -59,7 +59,7 @@ export default function WiseJsonImport(){
    const form=new FormData();form.append("file",file);form.append("mode","sales_sync");
    const res=await fetch("/api/domestic/wise-json-import",{method:"POST",body:form});
    const data=await res.json();if(!res.ok)throw new Error(data.error||"매출자료 저장 실패");
-   setMessage("매출자료 저장 완료: "+Number(data.sales_saved||0).toLocaleString("ko-KR")+"건");
+   setMessage("매출자료 저장 완료: "+Number(data.sales_saved_orders||0).toLocaleString("ko-KR")+"건");
   }catch(e){setMessage("매출자료 저장 실패: "+(e instanceof Error?e.message:"알 수 없는 오류"))}
   finally{setLoading(false);setActivity("")}
  }
