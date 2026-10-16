@@ -7,7 +7,6 @@ type Buyer = { buyer_nickname: string; sales: number; order_count: number; item_
 type Period = { key: string; sales: number; order_count: number; item_count: number; items: SoldItem[]; buyers: Buyer[] };
 type Report = { monthly: Period[]; quarterly: Period[]; all_time_buyers: Buyer[]; excluded_item_count: number; included_order_count: number; included_item_count: number; imported_order_count: number; last_imported_at: string | null; default_excluded_keywords: string[]; custom_keywords: string[] };
 type StockItem = { display_name?: string; product_name?: string; option_text?: string; purchase_quantity?: number; component_count?: number; unit_cost_price?: number };
-type CostMatch = { unitCost: number; cost: number | null };
 const STORAGE_KEY = "ddoga_sales_excluded_keywords";
 const money = (value: number) => Math.round(Number(value || 0)).toLocaleString("ko-KR");
 const pageStyle: CSSProperties = { maxWidth: 1320, margin: "0 auto", padding: 24, color: "#111827" };
@@ -57,7 +56,6 @@ export default function SalesManagementPage() {
   const [inventory, setInventory] = useState<StockItem[]>([]);
   const [keywords, setKeywords] = useState<string[]>([]);
   const [keywordInput, setKeywordInput] = useState("");
-  const [ready, setReady] = useState(false);
   const [granularity, setGranularity] = useState<"month" | "quarter">("month");
   const [selected, setSelected] = useState("");
   const [loading, setLoading] = useState(true);
@@ -91,7 +89,6 @@ export default function SalesManagementPage() {
       if (Array.isArray(parsed)) terms = parsed.map(x => String(x || "").trim()).filter(Boolean);
     } catch {}
     setKeywords(terms);
-    setReady(true);
     void refresh(terms);
   }, [refresh]);
 
