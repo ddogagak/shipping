@@ -5,6 +5,7 @@ export const runtime = "nodejs";
 const DEFAULT_EXCLUDED = ["야생", "용자", "소장", "양도", "양고"];
 const SHIPPING_KEYWORDS = ["배송비", "배송료", "택배비", "送料", "shipping fee", "shipping cost", "delivery fee", "postage"];
 const DEFAULT_KEYWORDS = [...DEFAULT_EXCLUDED, ...SHIPPING_KEYWORDS];
+const INITIAL_SETTLED_AMOUNT = 17232999;
 
 async function readAll(table: string, columns: string) {
   const db = createServiceRoleClient();
@@ -53,14 +54,7 @@ function addPeriod(map: Map<string, any>, key: string, order: any, items: any[])
   const buyerName = String(order.buyer_nickname || "").trim() || "(닉네임 없음)";
   for (const item of items) {
     const orderId = String(order.id);
-    const row = {
-      id: String(item.id),
-      order_id: orderId,
-      item_name: item.item_name,
-      item_price: money(item.item_price),
-      buyer_nickname: buyerName,
-      ordered_at: order.ordered_at
-    };
+    const row = { id: String(item.id), order_id: orderId, item_name: item.item_name, item_price: money(item.item_price), buyer_nickname: buyerName, ordered_at: order.ordered_at };
     bucket.sales += row.item_price;
     bucket.item_count += 1;
     bucket.order_ids.add(orderId);
@@ -100,10 +94,28 @@ function serialize(map: Map<string, any>) {
   })).sort((a, b) => b.key.localeCompare(a.key));
 }
 
-async function buildReport(keywordInput: unknown) {
-  const excludedKeywords = Array.isArray(keywordInput)
-    ? Array.from(new Set(keywordInput.map(value => String(value || "").normalize("NFKC").trim().slice(0, 80)).filter(Boolean))).slice(0, 100)
-    : DEFAULT_KEYWORDS;
+async function readSettings() {
+  const db = createServiceRoleClient();
+  const [{ data: settings, error }, { data: itemSettings, error: itemError }] = await Promise.all([
+    db.from("sales_management_settings").select("id,cumulative_settled_amount,excluded_keywords,updated_at").eq("id", "main").maybeSingle(),
+    db.from("sales_management_item_setting").select("wise_stock_id,include_cost,memo,is_deleted,updated_at")
+  ]);
+  if (error) throw error;
+  if (itemError) throw itemError;
+  return {
+    cumulative_settled_amount: money(settings?.cumulative_settled_amount ?? INITIAL_SETTLED_AMOUNT),
+    excluded_keywords: Array.isArray(settings?.excluded_keywords) ? settings.excluded_keywords.map((x: unknown) => String(x)) : DEFAULT_KEYWORDS,
+    item_settings: (itemSettings || []).map((row: any) => ({
+      id: String(row.wise_stock_id),
+      includeCost: row.include_cost !== false,
+      memo: String(row.memo || ""),
+      deleted: row.is_deleted === true
+    })),
+    updated_at: settings?.updated_at || null
+  };
+}
+
+async function buildReport(excludedKeywords: string[]) {
   const terms = excludedKeywords.map(term => term.toLowerCase());
   const itemRows = await readAll("domestic_wise_item_photo", "wise_stock_id,wise_order_id,buyer_nickname,ordered_at,item_name,item_price,imported_at");
   const orders = new Map<string, any>();
@@ -120,12 +132,13 @@ async function buildReport(keywordInput: unknown) {
 
   const monthly = new Map<string, any>();
   const quarterly = new Map<string, any>();
-  const allTimeBuyers = new Map<string, any>();
   const allTimeSalesRows: any[] = [];
   let excludedItemCount = 0;
   let includedOrderCount = 0;
   let includedItemCount = 0;
+  let wiseGrossTotal = 0;
   for (const order of orders.values()) {
+    wiseGrossTotal += order.items.reduce((sum: number, item: any) => sum + money(item.item_price), 0);
     const date = kstDate(order.ordered_at);
     if (!date) continue;
     const items = order.items.filter((item: any) => {
@@ -143,46 +156,77 @@ async function buildReport(keywordInput: unknown) {
     addPeriod(quarterly, quarterKey, order, items);
     const buyerName = String(order.buyer_nickname || "").trim() || "(닉네임 없음)";
     for (const item of items) {
-      addBuyer(allTimeBuyers, buyerName, item, String(order.id));
-      allTimeSalesRows.push({
-        id: String(item.id),
-        order_id: String(order.id),
-        item_name: item.item_name,
-        item_price: money(item.item_price),
-        buyer_nickname: buyerName,
-        ordered_at: order.ordered_at
-      });
+      allTimeSalesRows.push({ id: String(item.id), order_id: String(order.id), item_name: item.item_name, item_price: money(item.item_price), buyer_nickname: buyerName, ordered_at: order.ordered_at });
     }
   }
-
   return {
     ok: true,
     monthly: serialize(monthly),
     quarterly: serialize(quarterly),
-    all_time_buyers: serializeBuyers(allTimeBuyers),
-    all_time_sales_rows: allTimeSalesRows.sort((a: any, b: any) => String(b.ordered_at).localeCompare(String(a.ordered_at))),
+    all_time_sales_rows: allTimeSalesRows.sort((a, b) => String(b.ordered_at).localeCompare(String(a.ordered_at))),
     excluded_item_count: excludedItemCount,
     included_order_count: includedOrderCount,
     included_item_count: includedItemCount,
     imported_order_count: orders.size,
     last_imported_at: lastImportedAt || null,
-    excluded_keywords: excludedKeywords,
-    default_excluded_keywords: DEFAULT_KEYWORDS
+    wise_gross_total: wiseGrossTotal
   };
 }
+function responseError(error: unknown) {
+  const message = error instanceof Error ? error.message : "매출관리 자료를 처리하지 못했습니다.";
+  return NextResponse.json({ ok: false, message }, { status: 500 });
+}
+
 export async function GET() {
   try {
-    return NextResponse.json(await buildReport(undefined));
+    const settings = await readSettings();
+    const report = await buildReport(settings.excluded_keywords);
+    return NextResponse.json({ ...report, settings });
   } catch (error) {
-    return NextResponse.json({ ok: false, message: error instanceof Error ? error.message : "매출 자료를 불러오지 못했습니다." }, { status: 500 });
+    return responseError(error);
   }
 }
-export async function POST(request: Request) {
+export async function PATCH(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const input = Array.isArray(body?.excluded_keywords) ? body.excluded_keywords : body?.custom_keywords;
-    return NextResponse.json(await buildReport(input));
+    const patch: Record<string, any> = { updated_at: new Date().toISOString() };
+    if (Object.prototype.hasOwnProperty.call(body, "excluded_keywords")) {
+      if (!Array.isArray(body.excluded_keywords)) return NextResponse.json({ ok: false, message: "제외 키워드 목록이 올바르지 않습니다." }, { status: 400 });
+      patch.excluded_keywords = Array.from(new Set(body.excluded_keywords.map((x: unknown) => String(x || "").normalize("NFKC").trim().slice(0, 80)).filter(Boolean))).slice(0, 100);
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "cumulative_settled_amount")) {
+      const amount = Number(body.cumulative_settled_amount);
+      if (!Number.isFinite(amount) || amount < 0) return NextResponse.json({ ok: false, message: "누적 정산금액은 0 이상의 숫자로 입력해 주세요." }, { status: 400 });
+      patch.cumulative_settled_amount = Math.round(amount * 100) / 100;
+    }
+    if (Object.keys(patch).length === 1) return NextResponse.json({ ok: false, message: "저장할 설정이 없습니다." }, { status: 400 });
+    const db = createServiceRoleClient();
+    const { data, error } = await db.from("sales_management_settings").upsert({ id: "main", ...patch }, { onConflict: "id" }).select("id,cumulative_settled_amount,excluded_keywords,updated_at").single();
+    if (error) throw error;
+    return NextResponse.json({ ok: true, settings: data });
   } catch (error) {
-    return NextResponse.json({ ok: false, message: error instanceof Error ? error.message : "매출 자료를 불러오지 못했습니다." }, { status: 500 });
+    return responseError(error);
+  }
+}
+export async function PUT(request: Request) {
+  try {
+    const body = await request.json().catch(() => ({}));
+    if (!Array.isArray(body.item_settings)) return NextResponse.json({ ok: false, message: "저장할 아이템 설정이 없습니다." }, { status: 400 });
+    const rows = body.item_settings.map((row: any) => ({
+      wise_stock_id: Number(row.id),
+      include_cost: row.includeCost !== false,
+      memo: String(row.memo || "").slice(0, 2000),
+      is_deleted: row.deleted === true,
+      updated_at: new Date().toISOString()
+    })).filter((row: any) => Number.isSafeInteger(row.wise_stock_id) && row.wise_stock_id > 0);
+    if (rows.length !== body.item_settings.length) return NextResponse.json({ ok: false, message: "아이템 식별자가 올바르지 않습니다." }, { status: 400 });
+    if (rows.length) {
+      const db = createServiceRoleClient();
+      const { error } = await db.from("sales_management_item_setting").upsert(rows, { onConflict: "wise_stock_id" });
+      if (error) throw error;
+    }
+    return NextResponse.json({ ok: true, saved_count: rows.length });
+  } catch (error) {
+    return responseError(error);
   }
 }
