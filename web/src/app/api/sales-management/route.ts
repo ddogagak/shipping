@@ -201,8 +201,17 @@ export async function PATCH(request: Request) {
     }
     if (Object.keys(patch).length === 1) return NextResponse.json({ ok: false, message: "저장할 설정이 없습니다." }, { status: 400 });
     const db = createServiceRoleClient();
-    const { data, error } = await db.from("sales_management_settings").upsert({ id: "main", ...patch }, { onConflict: "id" }).select("id,cumulative_settled_amount,excluded_keywords,updated_at").single();
+    const selectedColumns = "id,cumulative_settled_amount,excluded_keywords,updated_at";
+    const { data: updated, error } = await db.from("sales_management_settings").update(patch).eq("id", "main").select(selectedColumns).maybeSingle();
     if (error) throw error;
+    let data = updated;
+    if (!data) {
+      const { data: inserted, error: insertError } = await db.from("sales_management_settings")
+        .insert({ id: "main", cumulative_settled_amount: INITIAL_SETTLED_AMOUNT, excluded_keywords: DEFAULT_KEYWORDS, ...patch })
+        .select(selectedColumns).single();
+      if (insertError) throw insertError;
+      data = inserted;
+    }
     return NextResponse.json({ ok: true, settings: data });
   } catch (error) {
     return responseError(error);
@@ -213,12 +222,12 @@ export async function PUT(request: Request) {
     const body = await request.json().catch(() => ({}));
     if (!Array.isArray(body.item_settings)) return NextResponse.json({ ok: false, message: "저장할 아이템 설정이 없습니다." }, { status: 400 });
     const rows = body.item_settings.map((row: any) => ({
-      wise_stock_id: Number(row.id),
+      wise_stock_id: String(row.id || ""),
       include_cost: row.includeCost !== false,
       memo: String(row.memo || "").slice(0, 2000),
       is_deleted: row.deleted === true,
       updated_at: new Date().toISOString()
-    })).filter((row: any) => Number.isSafeInteger(row.wise_stock_id) && row.wise_stock_id > 0);
+    })).filter((row: any) => /^\\d+$/.test(row.wise_stock_id));
     if (rows.length !== body.item_settings.length) return NextResponse.json({ ok: false, message: "아이템 식별자가 올바르지 않습니다." }, { status: 400 });
     if (rows.length) {
       const db = createServiceRoleClient();
