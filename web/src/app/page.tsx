@@ -64,6 +64,7 @@ export default async function HomePage() {
           <Link href="/purchases" style={cardStyle()}><div style={titleStyle}>매입관리</div><p style={descStyle}>실제 구매 · 증빙 · 배송 · 입고 관리</p></Link>
           <Link href="/purchases/import" style={cardStyle()}><div style={titleStyle}>매입 엑셀 등록</div><p style={descStyle}>Taobao 주문 엑셀을 매입 DB로 등록</p></Link>
           <Link href="/sale-inventory" style={cardStyle()}><div style={titleStyle}>방송 판매재고</div><p style={descStyle}>입고완료 상품 · 라인업 · 판매가 · 판매수량 관리</p></Link>
+          <Link href="/sales-management" style={cardStyle()}><div style={titleStyle}>매출관리</div><p style={descStyle}>와이스 매출 · 매입 사입을 월별/분기별로 분석</p></Link>
         </div>
 
         <h2 style={sectionTitleMarginStyle}>STOCK</h2>
