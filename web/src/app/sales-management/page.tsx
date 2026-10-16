@@ -2,10 +2,10 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
 
-type SoldItem = { item_name: string; quantity: number; sales: number; order_ids?: string[] };
-type Buyer = { buyer_nickname: string; sales: number; order_count: number; item_count: number; items?: SoldItem[] };
-type Period = { key: string; sales: number; order_count: number; item_count: number; items: SoldItem[]; buyers: Buyer[]; order_ids?: string[] };
-type Report = { monthly: Period[]; quarterly: Period[]; all_time_buyers: Buyer[]; excluded_item_count: number; included_order_count: number; included_item_count: number; imported_order_count: number; last_imported_at: string | null; default_excluded_keywords: string[]; excluded_keywords: string[] };
+type SaleRow = { id: string; order_id: string; item_name: string; item_price: number; buyer_nickname: string; ordered_at: string };
+type Buyer = { buyer_nickname: string; sales: number; order_count: number; item_count: number };
+type Period = { key: string; sales: number; order_count: number; item_count: number; sales_rows: SaleRow[] };
+type Report = { monthly: Period[]; quarterly: Period[]; all_time_sales_rows: SaleRow[]; excluded_item_count: number; included_order_count: number; included_item_count: number; imported_order_count: number; last_imported_at: string | null; default_excluded_keywords: string[]; excluded_keywords: string[] };
 type StockItem = { display_name?: string; product_name?: string; option_text?: string; purchase_quantity?: number; component_count?: number; unit_cost_price?: number };
 type ItemPref = { includeCost: boolean; memo: string; deleted?: boolean };
 type ItemPrefs = Record<string, ItemPref>;
@@ -32,7 +32,7 @@ function periodLabel(key: string) {
 }
 function kstDate(value?: string | null) {
   if (!value) return "-";
-  return new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  return new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", dateStyle: "medium" }).format(new Date(value));
 }
 function buildCostIndex(items: StockItem[]) {
   const groups = new Map<string, { cost: number; weight: number }>();
@@ -59,22 +59,28 @@ function buildCostIndex(items: StockItem[]) {
   }
   return new Map(Array.from(groups, ([key, group]) => [key, group.cost / group.weight]));
 }
-function visibleItems(items: SoldItem[], prefs: ItemPrefs) {
-  return (items || []).filter(item => !prefs[itemKey(item.item_name)]?.deleted);
+function visibleRows(rows: SaleRow[], prefs: ItemPrefs) {
+  return (rows || []).filter(row => !prefs[row.id]?.deleted);
 }
-function summarizeItems(items: SoldItem[]) {
-  const sales = items.reduce((sum, item) => sum + Number(item.sales || 0), 0);
-  const item_count = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-  const orderIds = new Set(items.flatMap(item => item.order_ids || []));
-  return { sales, item_count, order_count: orderIds.size };
+function summarizeRows(rows: SaleRow[], prefs: ItemPrefs) {
+  const visible = visibleRows(rows, prefs);
+  return {
+    sales: visible.reduce((sum, row) => sum + Number(row.item_price || 0), 0),
+    item_count: visible.length,
+    order_count: new Set(visible.map(row => row.order_id)).size,
+  };
 }
-function visibleBuyers(buyers: Buyer[], prefs: ItemPrefs) {
-  return (buyers || []).map(buyer => {
-    if (!buyer.items) return buyer;
-    const items = visibleItems(buyer.items, prefs);
-    const summary = summarizeItems(items);
-    return { ...buyer, ...summary, items };
-  }).filter(buyer => buyer.sales > 0);
+function buyersFromRows(rows: SaleRow[], prefs: ItemPrefs): Buyer[] {
+  const map = new Map<string, { sales: number; orderIds: Set<string>; item_count: number }>();
+  for (const row of visibleRows(rows, prefs)) {
+    const name = String(row.buyer_nickname || "").trim() || "(닉네임 없음)";
+    const buyer = map.get(name) || { sales: 0, orderIds: new Set<string>(), item_count: 0 };
+    buyer.sales += Number(row.item_price || 0);
+    buyer.orderIds.add(row.order_id);
+    buyer.item_count += 1;
+    map.set(name, buyer);
+  }
+  return Array.from(map, ([buyer_nickname, row]) => ({ buyer_nickname, sales: row.sales, order_count: row.orderIds.size, item_count: row.item_count })).sort((a, b) => b.sales - a.sales);
 }
 function cleanPrefs(value: unknown): ItemPrefs {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
@@ -146,28 +152,23 @@ export default function SalesManagementPage() {
   const periods = useMemo(() => granularity === "month" ? report?.monthly || [] : report?.quarterly || [], [granularity, report]);
   const selectedKey = periods.some(p => p.key === selectedPeriod) ? selectedPeriod : periods[0]?.key || "";
   const rawCurrent = periods.find(p => p.key === selectedKey);
-  const currentItems = useMemo(() => visibleItems(rawCurrent?.items || [], savedPrefs), [rawCurrent, savedPrefs]);
-  const currentSummary = useMemo(() => summarizeItems(currentItems), [currentItems]);
-  const currentBuyers = useMemo(() => visibleBuyers(rawCurrent?.buyers || [], savedPrefs), [rawCurrent, savedPrefs]);
-  const allTimeBuyers = useMemo(() => visibleBuyers(report?.all_time_buyers || [], savedPrefs), [report, savedPrefs]);
+  const currentRows = useMemo(() => visibleRows(rawCurrent?.sales_rows || [], savedPrefs), [rawCurrent, savedPrefs]);
+  const currentSummary = useMemo(() => summarizeRows(rawCurrent?.sales_rows || [], savedPrefs), [rawCurrent, savedPrefs]);
+  const currentBuyers = useMemo(() => buyersFromRows(rawCurrent?.sales_rows || [], savedPrefs), [rawCurrent, savedPrefs]);
+  const allTimeBuyers = useMemo(() => buyersFromRows(report?.all_time_sales_rows || [], savedPrefs), [report, savedPrefs]);
   const allTimeByBuyer = useMemo(() => new Map(allTimeBuyers.map(buyer => [buyer.buyer_nickname, buyer])), [allTimeBuyers]);
   const costIndex = useMemo(() => buildCostIndex(inventory), [inventory]);
-  const itemRows = useMemo(() => currentItems.map(item => {
-    const key = itemKey(item.item_name);
-    const unitCost = costIndex.get(key);
-    const includeCost = savedPrefs[key]?.includeCost !== false;
-    return { ...item, key, unitCost: unitCost ?? null, includeCost, cost: includeCost && unitCost != null ? unitCost * item.quantity : null };
-  }), [currentItems, costIndex, savedPrefs]);
-  const knownCost = itemRows.reduce((sum, item) => sum + (item.cost ?? 0), 0);
-  const unmatchedQuantity = itemRows.reduce((sum, item) => sum + (item.includeCost && item.unitCost == null ? item.quantity : 0), 0);
+  const itemRows = useMemo(() => currentRows.map(row => {
+    const key = row.id;
+    const unitCost = costIndex.get(itemKey(row.item_name));
+    const includeCost = draftPrefs[key]?.includeCost !== false;
+    const memo = draftPrefs[key]?.memo || "";
+    return { ...row, key, unitCost: unitCost ?? null, includeCost, memo, cost: includeCost && unitCost != null ? unitCost : null };
+  }), [currentRows, costIndex, draftPrefs]);
+  const knownCost = itemRows.reduce((sum, row) => sum + (row.cost ?? 0), 0);
+  const unmatchedQuantity = itemRows.reduce((sum, row) => sum + (row.includeCost && row.unitCost == null ? 1 : 0), 0);
   const grossAfterCogs = currentSummary.sales - knownCost;
-  const allItems = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const period of [...(report?.monthly || []), ...(report?.quarterly || [])]) {
-      for (const item of period.items) map.set(itemKey(item.item_name), item.item_name);
-    }
-    return map;
-  }, [report]);
+  const allRowsById = useMemo(() => new Map((report?.all_time_sales_rows || []).map(row => [row.id, row])), [report]);
   const deletedItems = Object.entries(savedPrefs).filter(([, pref]) => pref.deleted);
   const hasUnsaved = JSON.stringify(savedPrefs) !== JSON.stringify(draftPrefs);
 
@@ -206,6 +207,7 @@ export default function SalesManagementPage() {
       setDraftPrefs(normalized);
       setSelectedItems([]);
       setNotice("아이템 설정과 메모를 저장했습니다.");
+      setError("");
     } catch {
       setError("저장하지 못했습니다. 브라우저 저장 공간을 확인해 주세요.");
     } finally {
@@ -250,8 +252,8 @@ export default function SalesManagementPage() {
 
     {!loading && !error && report && <>
       <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12 }}>
-        <article style={{ ...card, background: "#eff6ff", borderColor: "#bfdbfe" }}><span style={label}>매출 · {selectedKey ? periodLabel(selectedKey) : "선택 기간"}</span><strong style={{ ...value, color: "#1d4ed8" }}>{money(currentSummary.sales)}원</strong><small style={{ color: "#6b7280" }}>필터·삭제 적용 · 주문 {money(currentSummary.order_count)}건</small></article>
-        <article style={card}><span style={label}>방송판매재고 기준 사입원가</span><strong style={value}>{money(knownCost)}원</strong><small style={{ color: "#6b7280" }}>원가 포함 아이템만 · 미매칭 {money(unmatchedQuantity)}개</small></article>
+        <article style={{ ...card, background: "#eff6ff", borderColor: "#bfdbfe" }}><span style={label}>매출 · {selectedKey ? periodLabel(selectedKey) : "선택 기간"}</span><strong style={{ ...value, color: "#1d4ed8" }}>{money(currentSummary.sales)}원</strong><small style={{ color: "#6b7280" }}>키워드·삭제 적용 · 주문 {money(currentSummary.order_count)}건</small></article>
+        <article style={card}><span style={label}>방송판매재고 기준 사입원가</span><strong style={value}>{money(knownCost)}원</strong><small style={{ color: "#6b7280" }}>Y 아이템만 계산 · 미매칭 {money(unmatchedQuantity)}개</small></article>
         <article style={{ ...card, background: "#f0fdf4", borderColor: "#bbf7d0" }}><span style={label}>매출 − 확인된 상품원가</span><strong style={{ ...value, color: grossAfterCogs >= 0 ? "#15803d" : "#b91c1c" }}>{money(grossAfterCogs)}원</strong><small style={{ color: "#6b7280" }}>수수료·세금·미매칭 원가 제외 전 차액</small></article>
         <article style={{ ...card, background: "#f9fafb" }}><span style={label}>와이스 통장 입금</span><strong style={{ ...value, fontSize: 20, color: "#6b7280" }}>데이터 연동 대기</strong><small style={{ color: "#6b7280" }}>입금 내역 링크를 받으면 연결합니다.</small></article>
       </section>
@@ -266,13 +268,13 @@ export default function SalesManagementPage() {
         {periods.length === 0 ? <div style={{ padding: 24, color: "#6b7280" }}>표시할 자료가 없습니다. 와이스 주문을 동기화해 주세요.</div> :
           <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 620, fontSize: 13 }}>
             <thead><tr style={{ background: "#f9fafb" }}><th style={th}>기간</th><th style={th}>매출</th><th style={th}>주문</th><th style={th}>판매수량</th><th style={th}>선택</th></tr></thead>
-            <tbody>{periods.map(p => { const vis = summarizeItems(visibleItems(p.items, savedPrefs)); return <tr key={p.key} onClick={() => setSelectedPeriod(p.key)} style={{ cursor: "pointer", background: p.key === selectedKey ? "#eff6ff" : "#fff" }}><td style={td}><b>{periodLabel(p.key)}</b></td><td style={td}>{money(vis.sales)}원</td><td style={td}>{money(vis.order_count)}건</td><td style={td}>{money(vis.item_count)}개</td><td style={td}>{p.key === selectedKey ? "●" : ""}</td></tr>; })}</tbody>
+            <tbody>{periods.map(p => { const vis = summarizeRows(p.sales_rows, savedPrefs); return <tr key={p.key} onClick={() => setSelectedPeriod(p.key)} style={{ cursor: "pointer", background: p.key === selectedKey ? "#eff6ff" : "#fff" }}><td style={td}><b>{periodLabel(p.key)}</b></td><td style={td}>{money(vis.sales)}원</td><td style={td}>{money(vis.order_count)}건</td><td style={td}>{money(vis.item_count)}개</td><td style={td}>{p.key === selectedKey ? "●" : ""}</td></tr>; })}</tbody>
           </table></div>}
       </section>
 
       <section style={panel}>
         <div style={{ ...panelTitle, display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <span>{selectedKey ? periodLabel(selectedKey) : "선택 기간"} 판매 아이템</span>
+          <span>{selectedKey ? periodLabel(selectedKey) : "선택 기간"} 판매 내역</span>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <button style={button} disabled={!selectedItems.length} onClick={() => applyToSelected({ deleted: true })}>삭제</button>
             <button style={button} disabled={!selectedItems.length} onClick={() => applyToSelected({ includeCost: true })}>매입금액에 포함</button>
@@ -281,26 +283,28 @@ export default function SalesManagementPage() {
           </div>
         </div>
         {hasUnsaved && <div style={{ padding: "8px 14px", background: "#fffbeb", color: "#92400e", fontSize: 12 }}>저장되지 않은 원가 설정·삭제·메모가 있습니다.</div>}
-        {!itemRows.length ? <div style={{ padding: 24, color: "#6b7280" }}>이 기간의 판매 아이템이 없습니다.</div> :
-          <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1100, fontSize: 13 }}>
-            <thead><tr style={{ background: "#f9fafb" }}><th style={th}><input aria-label="현재 아이템 전체 선택" type="checkbox" checked={itemRows.length > 0 && itemRows.every(row => selectedItems.includes(row.key))} onChange={e => setSelectedItems(e.target.checked ? itemRows.map(row => row.key) : [])} /></th><th style={th}>아이템</th><th style={th}>판매수량</th><th style={th}>매출</th><th style={th}>원가 포함</th><th style={th}>개당 원가</th><th style={th}>계산 원가</th><th style={th}>메모</th></tr></thead>
-            <tbody>{itemRows.map(item => {
-              const draft = draftPrefs[item.key] || { includeCost: savedPrefs[item.key]?.includeCost !== false, memo: savedPrefs[item.key]?.memo || "", deleted: false };
-              const pendingDelete = draft.deleted === true && !savedPrefs[item.key]?.deleted;
-              return <tr key={item.key} style={{ background: pendingDelete ? "#fff7ed" : "#fff", opacity: pendingDelete ? 0.55 : 1 }}>
-                <td style={td}><input aria-label={item.item_name + " 선택"} type="checkbox" checked={selectedItems.includes(item.key)} onChange={() => toggleSelected(item.key)} /></td>
-                <td style={td}><b>{item.item_name}</b>{pendingDelete && <div style={{ color: "#b45309", fontSize: 11 }}>저장하면 삭제</div>}</td>
-                <td style={td}>{money(item.quantity)}개</td><td style={td}>{money(item.sales)}원</td>
-                <td style={td}><label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}><input type="checkbox" checked={draft.includeCost} onChange={e => updateDraft(item.key, { includeCost: e.target.checked })} />포함</label></td>
-                <td style={td}>{item.unitCost == null ? <span style={{ color: "#b91c1c" }}>미매칭</span> : money(item.unitCost) + "원"}</td><td style={td}>{item.includeCost ? item.cost == null ? "원가 미매칭" : money(item.cost) + "원" : <span style={{ color: "#9ca3af" }}>제외</span>}</td>
-                <td style={td}><input value={draft.memo} onChange={e => updateDraft(item.key, { memo: e.target.value })} placeholder="메모 입력" style={{ width: 220, maxWidth: "45vw", height: 32, padding: "0 8px", border: "1px solid #d1d5db", borderRadius: 6 }} /></td>
+        {!itemRows.length ? <div style={{ padding: 24, color: "#6b7280" }}>이 기간의 판매 내역이 없습니다.</div> :
+          <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1240, fontSize: 13 }}>
+            <thead><tr style={{ background: "#f9fafb" }}><th style={th}><input aria-label="현재 판매 내역 전체 선택" type="checkbox" checked={itemRows.length > 0 && itemRows.every(row => selectedItems.includes(row.key))} onChange={e => setSelectedItems(e.target.checked ? itemRows.map(row => row.key) : [])} /></th><th style={th}>판매 날짜</th><th style={th}>구매자 닉네임</th><th style={th}>아이템</th><th style={th}>판매가</th><th style={th}>매입금액 포함</th><th style={th}>개당 원가</th><th style={th}>계산 원가</th><th style={th}>메모</th></tr></thead>
+            <tbody>{itemRows.map(row => {
+              const draft = draftPrefs[row.key] || { includeCost: true, memo: "", deleted: false };
+              const pendingDelete = draft.deleted === true && !savedPrefs[row.key]?.deleted;
+              return <tr key={row.key} style={{ background: pendingDelete ? "#fff7ed" : "#fff", opacity: pendingDelete ? 0.55 : 1 }}>
+                <td style={td}><input aria-label={row.item_name + " 선택"} type="checkbox" checked={selectedItems.includes(row.key)} onChange={() => toggleSelected(row.key)} /></td>
+                <td style={td}>{kstDate(row.ordered_at)}</td><td style={td}>{row.buyer_nickname || "(닉네임 없음)"}</td>
+                <td style={td}><b>{row.item_name}</b>{pendingDelete && <div style={{ color: "#b45309", fontSize: 11 }}>저장하면 삭제</div>}</td>
+                <td style={td}>{money(row.item_price)}원</td>
+                <td style={td}><button onClick={() => updateDraft(row.key, { includeCost: !draft.includeCost })} aria-label="매입금액 포함 여부 전환" style={{ ...button, minWidth: 44, padding: "5px 10px", background: draft.includeCost ? "#dcfce7" : "#f3f4f6", borderColor: draft.includeCost ? "#86efac" : "#d1d5db", color: draft.includeCost ? "#166534" : "#6b7280" }}>{draft.includeCost ? "Y" : "N"}</button></td>
+                <td style={td}>{row.unitCost == null ? <span style={{ color: "#b91c1c" }}>미매칭</span> : money(row.unitCost) + "원"}</td>
+                <td style={td}>{row.includeCost ? row.cost == null ? "원가 미매칭" : money(row.cost) + "원" : <span style={{ color: "#9ca3af" }}>제외</span>}</td>
+                <td style={td}><input value={draft.memo} onChange={e => updateDraft(row.key, { memo: e.target.value })} placeholder="메모 입력" style={{ width: 220, maxWidth: "45vw", height: 32, padding: "0 8px", border: "1px solid #d1d5db", borderRadius: 6 }} /></td>
               </tr>;
             })}</tbody>
-            <tfoot><tr style={{ background: "#f9fafb", fontWeight: 800 }}><td style={td} colSpan={2}>합계</td><td style={td}>{money(currentSummary.item_count)}개</td><td style={td}>{money(currentSummary.sales)}원</td><td style={td}>—</td><td style={td}>—</td><td style={td}>{money(knownCost)}원</td><td style={td}>—</td></tr></tfoot>
+            <tfoot><tr style={{ background: "#f9fafb", fontWeight: 800 }}><td style={td} colSpan={4}>합계</td><td style={td}>{money(currentSummary.sales)}원</td><td style={td}>—</td><td style={td}>—</td><td style={td}>{money(knownCost)}원</td><td style={td}>—</td></tr></tfoot>
           </table></div>}
         {deletedItems.length > 0 && <div style={{ padding: 14, borderTop: "1px solid #e5e7eb", fontSize: 12 }}>
-          <b>삭제된 아이템 · {deletedItems.length}개</b>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>{deletedItems.map(([key]) => <span key={key} style={chip}>{allItems.get(key) || key}<button onClick={() => updateDraft(key, { deleted: false })} style={{ border: 0, background: "transparent", cursor: "pointer", color: "#1d4ed8", marginLeft: 5 }}>삭제 취소</button></span>)}</div>
+          <b>삭제된 판매 내역 · {deletedItems.length}건</b>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>{deletedItems.map(([key]) => { const row = allRowsById.get(key); return <span key={key} style={chip}>{row ? kstDate(row.ordered_at) + " · " + row.buyer_nickname + " · " + row.item_name : key}<button onClick={() => updateDraft(key, { deleted: false })} style={{ border: 0, background: "transparent", cursor: "pointer", color: "#1d4ed8", marginLeft: 5 }}>삭제 취소</button></span>; })}</div>
           {hasUnsaved && <small style={{ display: "block", marginTop: 8, color: "#92400e" }}>삭제 취소도 저장 버튼을 눌러 적용하세요.</small>}
         </div>}
       </section>
