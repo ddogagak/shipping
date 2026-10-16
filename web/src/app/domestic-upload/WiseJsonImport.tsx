@@ -51,7 +51,7 @@ export default function WiseJsonImport(){
    const res=await fetch("/api/domestic/wise-json-import",{method:"POST",body:form});
    const data=await res.json();
    if(!res.ok)throw new Error(data.error||"업로드 실패");
-   if(mode==="preview"){setPreview(data);setSelectedNew(data.new_orders.map((x:Candidate)=>x.wise_order_id));setSelectedUpdates((data.update_candidates??[]).map((x:UpdateCandidate)=>x.wise_order_id));setMessage("미리보기 완료. 기존 주문 추정은 닉네임+주문시각 기준이며 확인이 필요합니다.");}
+   if(mode==="preview"){setPreview(data);setSelectedNew([...data.new_orders,...(data.queued_orders??[]).filter((x:Candidate)=>!x.existingDomestic)].map((x:Candidate)=>x.wise_order_id));setSelectedUpdates((data.update_candidates??[]).map((x:UpdateCandidate)=>x.wise_order_id));setMessage("미리보기 완료. 기존 주문 추정은 닉네임+주문시각 기준이며 확인이 필요합니다.");}
    else{const response=await fetch("/api/domestic/wise-json-queue",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"approve_bulk",wise_order_ids:selectedNew})});const result=await response.json();if(!response.ok)throw new Error(result.error||"일괄 등록 실패");setPreview(null);setSelectedNew([]);setMessage(`등록 성공 ${result.saved}건 / 실패 ${result.failed}건`+(result.failed?" : "+result.results.filter((x:{ok:boolean})=>!x.ok).map((x:{wise_order_id:number;error:string})=>x.wise_order_id+" "+x.error).join(", "):""));}
   }catch(e){setMessage(e instanceof Error?e.message:"알 수 없는 오류")}finally{setLoading(false)}
  }
@@ -94,11 +94,11 @@ export default function WiseJsonImport(){
    <div style={{maxHeight:480,overflow:"auto",marginTop:12}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}>
     <thead><tr><th>선택</th><th>분류</th><th>주문 ID</th><th>닉네임</th><th>주문시각</th><th>상품수</th></tr></thead>
     <tbody>{[...preview.new_orders.map(o=>({...o,category:"신규"})),...preview.possible_existing.map(o=>({...o,category:"중복 의심"})),...(preview.queued_orders??[]).filter(o=>!o.existingDomestic).map(o=>({...o,category:"기존 대기"}))].map(o=><tr key={o.category+o.wise_order_id} style={{borderTop:"1px solid #ddd",background:o.category==="신규"?"white":"#f1f5f9"}}>
-     <td><input type="checkbox" disabled={o.category!=="신규"} checked={o.category==="신규"&&selectedNew.includes(o.wise_order_id)} onChange={e=>setSelectedNew(v=>e.target.checked?[...v,o.wise_order_id]:v.filter(id=>id!==o.wise_order_id))}/></td>
+     <td><input type="checkbox" disabled={o.category==="중복 의심"} checked={o.category!=="중복 의심"&&selectedNew.includes(o.wise_order_id)} onChange={e=>setSelectedNew(v=>e.target.checked?[...v,o.wise_order_id]:v.filter(id=>id!==o.wise_order_id))}/></td>
      <td>{o.category}</td><td>{o.wise_order_id}</td><td>{o.nickname}</td><td>{new Date(o.ordered_at).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})}</td><td>{o.items}</td>
     </tr>)}</tbody>
    </table></div>
-   <p>중복 의심 주문과 기존 대기 주문은 선택할 수 없습니다.</p>
+   <p>중복 의심 주문은 선택할 수 없습니다. 기존 대기 주문도 DDOGA 미등록이면 등록 가능합니다.</p>
   </div>}
  </section>
 }
