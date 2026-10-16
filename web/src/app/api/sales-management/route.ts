@@ -41,20 +41,31 @@ function addPurchase(row: any, key: string, target: Map<string, any>) {
 
 export async function GET() {
   try {
-    const [salesRows, purchaseRows] = await Promise.all([
-      readAll("domestic_wise_sales_order", "buyer_nickname,ordered_at,total_amount,item_names,imported_at"),
+    const [itemRows, purchaseRows] = await Promise.all([
+      readAll("domestic_wise_item_photo", "wise_order_id,buyer_nickname,ordered_at,item_name,item_price,imported_at"),
       readAll("purchase_orders", "ordered_at,paid_amount,local_shipping,currency,order_status")
     ]);
+    const orderMap = new Map<string, any>();
+    let lastImportedAt = "";
+    for (const row of itemRows) {
+      const id = String(row.wise_order_id || "");
+      if (!id) continue;
+      const order = orderMap.get(id) || { buyer_nickname: row.buyer_nickname || "", ordered_at: row.ordered_at, item_names: [], total_amount: 0, imported_at: "" };
+      order.item_names.push(String(row.item_name || ""));
+      order.total_amount += money(row.item_price);
+      const imported = String(row.imported_at || "");
+      if (imported > order.imported_at) order.imported_at = imported;
+      if (imported > lastImportedAt) lastImportedAt = imported;
+      orderMap.set(id, order);
+    }
+
     const monthly = new Map<string, any>();
     const quarterly = new Map<string, any>();
     let excludedOrderCount = 0;
-    let lastImportedAt = "";
-    for (const row of salesRows) {
-      const date = kstDate(row.ordered_at);
+    for (const order of orderMap.values()) {
+      const date = kstDate(order.ordered_at);
       if (!date) continue;
-      const imported = String(row.imported_at || "");
-      if (imported && imported > lastImportedAt) lastImportedAt = imported;
-      const haystack = [row.buyer_nickname, ...(Array.isArray(row.item_names) ? row.item_names : [])].join(" ").normalize("NFKC");
+      const haystack = [order.buyer_nickname, ...order.item_names].join(" ").normalize("NFKC");
       if (EXCLUDED.some(keyword => haystack.includes(keyword))) {
         excludedOrderCount++;
         continue;
@@ -63,7 +74,7 @@ export async function GET() {
       const quarterKey = date.slice(0, 4) + "-Q" + (Math.floor((Number(date.slice(5, 7)) - 1) / 3) + 1);
       for (const [map, key] of [[monthly, monthKey], [quarterly, quarterKey]] as const) {
         const bucket = map.get(key) || blank(key);
-        bucket.sales += money(row.total_amount);
+        bucket.sales += money(order.total_amount);
         bucket.order_count += 1;
         map.set(key, bucket);
       }
@@ -82,18 +93,18 @@ export async function GET() {
       monthly: sort(monthly),
       quarterly: sort(quarterly),
       excluded_order_count: excludedOrderCount,
-      sales_order_count: salesRows.length - excludedOrderCount,
+      sales_order_count: orderMap.size - excludedOrderCount,
       last_imported_at: lastImportedAt || null,
       excluded_keywords: EXCLUDED
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "매출 자료를 불러오지 못했습니다.";
-    const migrationRequired = /domestic_wise_sales_order|does not exist|schema cache/i.test(message);
+    const migrationRequired = /domestic_wise_item_photo|does not exist|schema cache/i.test(message);
     return NextResponse.json({
       ok: false,
       migration_required: migrationRequired,
       message: migrationRequired
-        ? "매출관리 DB 업데이트가 필요합니다. Supabase에서 20261016_domestic_wise_sales_orders.sql을 실행한 뒤 Wise 주문 JSON을 다시 저장해 주세요."
+        ? "Wise 상품 캐시 테이블을 찾지 못했습니다. Supabase에서 20261012_domestic_wise_item_photos.sql을 실행해 주세요."
         : message
     }, { status: 500 });
   }
