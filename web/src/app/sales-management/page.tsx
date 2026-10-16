@@ -2,21 +2,30 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
 
-type SoldItem = { item_name: string; quantity: number; sales: number };
-type Buyer = { buyer_nickname: string; sales: number; order_count: number; item_count: number };
-type Period = { key: string; sales: number; order_count: number; item_count: number; items: SoldItem[]; buyers: Buyer[] };
-type Report = { monthly: Period[]; quarterly: Period[]; all_time_buyers: Buyer[]; excluded_item_count: number; included_order_count: number; included_item_count: number; imported_order_count: number; last_imported_at: string | null; default_excluded_keywords: string[]; custom_keywords: string[] };
+type SoldItem = { item_name: string; quantity: number; sales: number; order_ids?: string[] };
+type Buyer = { buyer_nickname: string; sales: number; order_count: number; item_count: number; items?: SoldItem[] };
+type Period = { key: string; sales: number; order_count: number; item_count: number; items: SoldItem[]; buyers: Buyer[]; order_ids?: string[] };
+type Report = { monthly: Period[]; quarterly: Period[]; all_time_buyers: Buyer[]; excluded_item_count: number; included_order_count: number; included_item_count: number; imported_order_count: number; last_imported_at: string | null; default_excluded_keywords: string[]; excluded_keywords: string[] };
 type StockItem = { display_name?: string; product_name?: string; option_text?: string; purchase_quantity?: number; component_count?: number; unit_cost_price?: number };
-const STORAGE_KEY = "ddoga_sales_excluded_keywords";
+type ItemPref = { includeCost: boolean; memo: string; deleted?: boolean };
+type ItemPrefs = Record<string, ItemPref>;
+const KEYWORD_KEY = "ddoga_sales_active_keywords";
+const LEGACY_KEYWORD_KEY = "ddoga_sales_excluded_keywords";
+const ITEM_PREFS_KEY = "ddoga_sales_item_settings";
+const DEFAULT_KEYWORDS = ["야생", "용자", "소장", "양도", "양고", "배송비", "배송료", "택배비", "送料", "shipping fee", "shipping cost", "delivery fee", "postage"];
 const money = (value: number) => Math.round(Number(value || 0)).toLocaleString("ko-KR");
-const pageStyle: CSSProperties = { maxWidth: 1320, margin: "0 auto", padding: 24, color: "#111827" };
+const itemKey = (text: string) => text.normalize("NFKC").toLowerCase().replace(/[\\s\\p{P}\\p{S}]/gu, "");
+const pageStyle: CSSProperties = { maxWidth: 1380, margin: "0 auto", padding: 24, color: "#111827" };
 const button: CSSProperties = { padding: "8px 12px", border: "1px solid #d1d5db", borderRadius: 8, background: "#fff", color: "#111827", textDecoration: "none", fontSize: 13, fontWeight: 700, cursor: "pointer" };
 const card: CSSProperties = { padding: 18, border: "1px solid #e5e7eb", borderRadius: 14, background: "#fff", minHeight: 110 };
 const label: CSSProperties = { color: "#6b7280", fontSize: 13, fontWeight: 700 };
 const value: CSSProperties = { display: "block", marginTop: 10, fontSize: 26, fontWeight: 850, letterSpacing: "-.04em" };
-const th: CSSProperties = { padding: "11px 14px", borderBottom: "1px solid #e5e7eb", color: "#6b7280", whiteSpace: "nowrap", textAlign: "left" };
-const td: CSSProperties = { padding: "12px 14px", borderBottom: "1px solid #f3f4f6", verticalAlign: "top" };
-const normalize = (text: string) => text.normalize("NFKC").toLowerCase().replace(/[\\s\\p{P}\\p{S}]/gu, "");
+const th: CSSProperties = { padding: "11px 12px", borderBottom: "1px solid #e5e7eb", color: "#6b7280", whiteSpace: "nowrap", textAlign: "left" };
+const td: CSSProperties = { padding: "10px 12px", borderBottom: "1px solid #f3f4f6", verticalAlign: "top" };
+const panel: CSSProperties = { border: "1px solid #e5e7eb", borderRadius: 14, overflow: "hidden", background: "#fff", marginBottom: 16 };
+const panelTitle: CSSProperties = { padding: "14px 16px", borderBottom: "1px solid #e5e7eb", fontWeight: 800 };
+const chip: CSSProperties = { padding: "5px 8px", border: "1px solid #e5e7eb", borderRadius: 999, background: "#f9fafb", color: "#4b5563", fontSize: 12, display: "inline-flex", alignItems: "center" };
+
 function periodLabel(key: string) {
   if (key.includes("-Q")) return key.replace("-Q", "년 ").concat("분기");
   return key.replace("-", "년 ") + "월";
@@ -40,7 +49,7 @@ function buildCostIndex(items: StockItem[]) {
     if (display && option && !display.includes(option)) candidates.add(display + " " + option);
     const weight = Math.max(1, Number(row.purchase_quantity || 0) * Math.max(1, Number(row.component_count || 1)));
     for (const candidate of candidates) {
-      const key = normalize(candidate);
+      const key = itemKey(candidate);
       if (!key) continue;
       const group = groups.get(key) || { cost: 0, weight: 0 };
       group.cost += unitCost * weight;
@@ -50,15 +59,47 @@ function buildCostIndex(items: StockItem[]) {
   }
   return new Map(Array.from(groups, ([key, group]) => [key, group.cost / group.weight]));
 }
+function visibleItems(items: SoldItem[], prefs: ItemPrefs) {
+  return (items || []).filter(item => !prefs[itemKey(item.item_name)]?.deleted);
+}
+function summarizeItems(items: SoldItem[]) {
+  const sales = items.reduce((sum, item) => sum + Number(item.sales || 0), 0);
+  const item_count = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  const orderIds = new Set(items.flatMap(item => item.order_ids || []));
+  return { sales, item_count, order_count: orderIds.size };
+}
+function visibleBuyers(buyers: Buyer[], prefs: ItemPrefs) {
+  return (buyers || []).map(buyer => {
+    if (!buyer.items) return buyer;
+    const items = visibleItems(buyer.items, prefs);
+    const summary = summarizeItems(items);
+    return { ...buyer, ...summary, items };
+  }).filter(buyer => buyer.sales > 0);
+}
+function cleanPrefs(value: unknown): ItemPrefs {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const result: ItemPrefs = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (!raw || typeof raw !== "object") continue;
+    const row = raw as Record<string, unknown>;
+    result[key] = { includeCost: row.includeCost !== false, memo: String(row.memo || ""), deleted: row.deleted === true };
+  }
+  return result;
+}
 
 export default function SalesManagementPage() {
   const [report, setReport] = useState<Report | null>(null);
   const [inventory, setInventory] = useState<StockItem[]>([]);
-  const [keywords, setKeywords] = useState<string[]>([]);
+  const [keywords, setKeywords] = useState<string[]>(DEFAULT_KEYWORDS);
   const [keywordInput, setKeywordInput] = useState("");
+  const [savedPrefs, setSavedPrefs] = useState<ItemPrefs>({});
+  const [draftPrefs, setDraftPrefs] = useState<ItemPrefs>({});
+  const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [granularity, setGranularity] = useState<"month" | "quarter">("month");
-  const [selected, setSelected] = useState("");
+  const [selectedPeriod, setSelectedPeriod] = useState("");
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
   const refresh = useCallback(async (terms: string[]) => {
@@ -66,7 +107,7 @@ export default function SalesManagementPage() {
     setError("");
     try {
       const [salesResponse, stockResponse] = await Promise.all([
-        fetch("/api/sales-management", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ custom_keywords: terms }), cache: "no-store" }),
+        fetch("/api/sales-management", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ excluded_keywords: terms }), cache: "no-store" }),
         fetch("/api/sale-inventory", { cache: "no-store" }),
       ]);
       const [salesData, stockData] = await Promise.all([salesResponse.json(), stockResponse.json()]);
@@ -82,33 +123,59 @@ export default function SalesManagementPage() {
   }, []);
 
   useEffect(() => {
-    let terms: string[] = [];
+    let activeTerms = DEFAULT_KEYWORDS;
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      const parsed = stored ? JSON.parse(stored) : [];
-      if (Array.isArray(parsed)) terms = parsed.map(x => String(x || "").trim()).filter(Boolean);
+      const active = localStorage.getItem(KEYWORD_KEY);
+      if (active !== null) {
+        const parsed = JSON.parse(active);
+        if (Array.isArray(parsed)) activeTerms = parsed.map(x => String(x || "").trim()).filter(Boolean);
+      } else {
+        const legacy = JSON.parse(localStorage.getItem(LEGACY_KEYWORD_KEY) || "[]");
+        if (Array.isArray(legacy)) activeTerms = [...new Set([...DEFAULT_KEYWORDS, ...legacy.map(x => String(x || "").trim()).filter(Boolean)])];
+        localStorage.setItem(KEYWORD_KEY, JSON.stringify(activeTerms));
+      }
     } catch {}
-    setKeywords(terms);
-    void refresh(terms);
+    let prefs: ItemPrefs = {};
+    try { prefs = cleanPrefs(JSON.parse(localStorage.getItem(ITEM_PREFS_KEY) || "{}")); } catch {}
+    setKeywords(activeTerms);
+    setSavedPrefs(prefs);
+    setDraftPrefs(prefs);
+    void refresh(activeTerms);
   }, [refresh]);
 
   const periods = useMemo(() => granularity === "month" ? report?.monthly || [] : report?.quarterly || [], [granularity, report]);
-  const selectedKey = periods.some(p => p.key === selected) ? selected : periods[0]?.key || "";
-  const current = periods.find(p => p.key === selectedKey);
+  const selectedKey = periods.some(p => p.key === selectedPeriod) ? selectedPeriod : periods[0]?.key || "";
+  const rawCurrent = periods.find(p => p.key === selectedKey);
+  const currentItems = useMemo(() => visibleItems(rawCurrent?.items || [], savedPrefs), [rawCurrent, savedPrefs]);
+  const currentSummary = useMemo(() => summarizeItems(currentItems), [currentItems]);
+  const currentBuyers = useMemo(() => visibleBuyers(rawCurrent?.buyers || [], savedPrefs), [rawCurrent, savedPrefs]);
+  const allTimeBuyers = useMemo(() => visibleBuyers(report?.all_time_buyers || [], savedPrefs), [report, savedPrefs]);
+  const allTimeByBuyer = useMemo(() => new Map(allTimeBuyers.map(buyer => [buyer.buyer_nickname, buyer])), [allTimeBuyers]);
   const costIndex = useMemo(() => buildCostIndex(inventory), [inventory]);
-  const itemRows = useMemo(() => (current?.items || []).map(item => {
-    const unitCost = costIndex.get(normalize(item.item_name));
-    return { ...item, unitCost: unitCost ?? null, cost: unitCost == null ? null : unitCost * item.quantity };
-  }), [current, costIndex]);
+  const itemRows = useMemo(() => currentItems.map(item => {
+    const key = itemKey(item.item_name);
+    const unitCost = costIndex.get(key);
+    const includeCost = savedPrefs[key]?.includeCost !== false;
+    return { ...item, key, unitCost: unitCost ?? null, includeCost, cost: includeCost && unitCost != null ? unitCost * item.quantity : null };
+  }), [currentItems, costIndex, savedPrefs]);
   const knownCost = itemRows.reduce((sum, item) => sum + (item.cost ?? 0), 0);
-  const unmatchedQuantity = itemRows.reduce((sum, item) => sum + (item.unitCost == null ? item.quantity : 0), 0);
-  const grossAfterCogs = Number(current?.sales || 0) - knownCost;
-  const allTimeByBuyer = useMemo(() => new Map((report?.all_time_buyers || []).map(b => [b.buyer_nickname, b])), [report]);
+  const unmatchedQuantity = itemRows.reduce((sum, item) => sum + (item.includeCost && item.unitCost == null ? item.quantity : 0), 0);
+  const grossAfterCogs = currentSummary.sales - knownCost;
+  const allItems = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const period of [...(report?.monthly || []), ...(report?.quarterly || [])]) {
+      for (const item of period.items) map.set(itemKey(item.item_name), item.item_name);
+    }
+    return map;
+  }, [report]);
+  const deletedItems = Object.entries(savedPrefs).filter(([, pref]) => pref.deleted);
+  const hasUnsaved = JSON.stringify(savedPrefs) !== JSON.stringify(draftPrefs);
 
   const saveKeywords = (next: string[]) => {
     const unique = Array.from(new Set(next.map(x => x.normalize("NFKC").trim()).filter(Boolean))).slice(0, 100);
     setKeywords(unique);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(unique));
+    localStorage.setItem(KEYWORD_KEY, JSON.stringify(unique));
+    setNotice("제외 키워드를 저장했습니다.");
     void refresh(unique);
   };
   const addKeyword = (event: FormEvent) => {
@@ -118,6 +185,34 @@ export default function SalesManagementPage() {
     setKeywordInput("");
     saveKeywords([...keywords, term]);
   };
+  const updateDraft = (key: string, patch: Partial<ItemPref>) => {
+    setDraftPrefs(current => ({ ...current, [key]: { includeCost: current[key]?.includeCost !== false, memo: current[key]?.memo || "", deleted: current[key]?.deleted === true, ...patch } }));
+  };
+  const applyToSelected = (patch: Partial<ItemPref>) => {
+    if (!selectedItems.length) return;
+    setDraftPrefs(current => {
+      const next = { ...current };
+      for (const key of selectedItems) next[key] = { includeCost: next[key]?.includeCost !== false, memo: next[key]?.memo || "", deleted: next[key]?.deleted === true, ...patch };
+      return next;
+    });
+    if (patch.deleted) setSelectedItems([]);
+  };
+  const saveItemSettings = () => {
+    setSaving(true);
+    try {
+      const normalized = cleanPrefs(draftPrefs);
+      localStorage.setItem(ITEM_PREFS_KEY, JSON.stringify(normalized));
+      setSavedPrefs(normalized);
+      setDraftPrefs(normalized);
+      setSelectedItems([]);
+      setNotice("아이템 설정과 메모를 저장했습니다.");
+    } catch {
+      setError("저장하지 못했습니다. 브라우저 저장 공간을 확인해 주세요.");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const toggleSelected = (key: string) => setSelectedItems(current => current.includes(key) ? current.filter(x => x !== key) : [...current, key]);
 
   return <main style={pageStyle}>
     <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 20 }}>
@@ -128,11 +223,11 @@ export default function SalesManagementPage() {
     </header>
 
     <section style={{ padding: 16, marginBottom: 16, border: "1px solid #e5e7eb", borderRadius: 12, background: "#fff" }}>
-      <div style={{ fontWeight: 800, marginBottom: 5 }}>매출에서 제외할 와이스 아이템 키워드</div>
-      <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 12 }}>기본 제외: 야생 · 용자 · 소장 · 양도 · 양고 · 배송비 키워드. 추가한 키워드는 이 브라우저에 저장됩니다.</div>
+      <div style={{ fontWeight: 800, marginBottom: 5 }}>제외할 와이스 아이템 키워드</div>
+      <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 12 }}>키워드의 ×로 삭제, 아래에서 추가할 수 있습니다. 기본 키워드도 삭제할 수 있습니다.</div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-        {(report?.default_excluded_keywords || ["야생", "용자", "소장", "양도", "양고", "배송비", "배송료", "택배비", "送料", "shipping fee", "shipping cost", "delivery fee", "postage"]).map(term => <span key={term} style={chip}>{term}</span>)}
-        {keywords.map(term => <span key={term} style={{ ...chip, background: "#eff6ff", color: "#1d4ed8", borderColor: "#bfdbfe" }}>{term}<button aria-label={term + " 키워드 삭제"} onClick={() => saveKeywords(keywords.filter(x => x !== term))} style={{ border: 0, background: "transparent", color: "inherit", cursor: "pointer", fontWeight: 900, marginLeft: 5 }}>×</button></span>)}
+        {keywords.map(term => <span key={term} style={chip}>{term}<button aria-label={term + " 키워드 삭제"} onClick={() => saveKeywords(keywords.filter(x => x !== term))} style={{ border: 0, background: "transparent", color: "#6b7280", cursor: "pointer", fontWeight: 900, marginLeft: 5 }}>×</button></span>)}
+        {!keywords.length && <span style={{ color: "#9ca3af", fontSize: 12 }}>제외 키워드가 없습니다.</span>}
       </div>
       <form onSubmit={addKeyword} style={{ display: "flex", gap: 8, maxWidth: 520 }}>
         <input value={keywordInput} onChange={e => setKeywordInput(e.target.value)} placeholder="제외할 키워드 추가" style={{ flex: 1, minWidth: 0, height: 36, padding: "0 10px", border: "1px solid #d1d5db", borderRadius: 8 }} />
@@ -143,61 +238,81 @@ export default function SalesManagementPage() {
     <section style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
       <button onClick={() => setGranularity("month")} style={{ ...button, background: granularity === "month" ? "#111827" : "#fff", color: granularity === "month" ? "#fff" : "#111827" }}>월별</button>
       <button onClick={() => setGranularity("quarter")} style={{ ...button, background: granularity === "quarter" ? "#111827" : "#fff", color: granularity === "quarter" ? "#fff" : "#111827" }}>분기별</button>
-      <select aria-label="기간 선택" value={selectedKey} onChange={e => setSelected(e.target.value)} style={{ height: 36, padding: "0 10px", border: "1px solid #d1d5db", borderRadius: 8, background: "#fff", fontWeight: 700 }}>
+      <select aria-label="기간 선택" value={selectedKey} onChange={e => setSelectedPeriod(e.target.value)} style={{ height: 36, padding: "0 10px", border: "1px solid #d1d5db", borderRadius: 8, background: "#fff", fontWeight: 700 }}>
         {periods.map(p => <option value={p.key} key={p.key}>{periodLabel(p.key)}</option>)}
       </select>
-      <span style={{ color: "#6b7280", fontSize: 12 }}>수량·매출은 키워드 제외 후 집계합니다.</span>
+      <span style={{ color: "#6b7280", fontSize: 12 }}>집계는 키워드 제외 후 계산합니다.</span>
     </section>
 
+    {notice && <div style={{ padding: 10, marginBottom: 12, borderRadius: 8, background: "#f0fdf4", color: "#166534", fontSize: 13 }}>{notice}</div>}
     {error && <div role="alert" style={{ padding: 14, marginBottom: 16, borderRadius: 10, background: "#fff7ed", color: "#9a3412", border: "1px solid #fed7aa" }}>{error}</div>}
     {loading && <p style={{ color: "#6b7280" }}>불러오는 중...</p>}
 
     {!loading && !error && report && <>
       <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12 }}>
-        <article style={{ ...card, background: "#eff6ff", borderColor: "#bfdbfe" }}><span style={label}>매출 · {selectedKey ? periodLabel(selectedKey) : "선택 기간"}</span><strong style={{ ...value, color: "#1d4ed8" }}>{money(Number(current?.sales || 0))}원</strong><small style={{ color: "#6b7280" }}>와이스 아이템 금액 · 주문 {money(Number(current?.order_count || 0))}건</small></article>
-        <article style={card}><span style={label}>방송판매재고 기준 사입원가</span><strong style={{ ...value }}>{money(knownCost)}원</strong><small style={{ color: "#6b7280" }}>개당 원가 × 판매수량 · 미매칭 {money(unmatchedQuantity)}개</small></article>
-        <article style={{ ...card, background: "#f0fdf4", borderColor: "#bbf7d0" }}><span style={label}>매출 − 확인된 상품원가</span><strong style={{ ...value, color: grossAfterCogs >= 0 ? "#15803d" : "#b91c1c" }}>{money(grossAfterCogs)}원</strong><small style={{ color: "#6b7280" }}>플랫폼 수수료·세금·미매칭 원가 제외 전 단순 차액</small></article>
+        <article style={{ ...card, background: "#eff6ff", borderColor: "#bfdbfe" }}><span style={label}>매출 · {selectedKey ? periodLabel(selectedKey) : "선택 기간"}</span><strong style={{ ...value, color: "#1d4ed8" }}>{money(currentSummary.sales)}원</strong><small style={{ color: "#6b7280" }}>필터·삭제 적용 · 주문 {money(currentSummary.order_count)}건</small></article>
+        <article style={card}><span style={label}>방송판매재고 기준 사입원가</span><strong style={value}>{money(knownCost)}원</strong><small style={{ color: "#6b7280" }}>원가 포함 아이템만 · 미매칭 {money(unmatchedQuantity)}개</small></article>
+        <article style={{ ...card, background: "#f0fdf4", borderColor: "#bbf7d0" }}><span style={label}>매출 − 확인된 상품원가</span><strong style={{ ...value, color: grossAfterCogs >= 0 ? "#15803d" : "#b91c1c" }}>{money(grossAfterCogs)}원</strong><small style={{ color: "#6b7280" }}>수수료·세금·미매칭 원가 제외 전 차액</small></article>
         <article style={{ ...card, background: "#f9fafb" }}><span style={label}>와이스 통장 입금</span><strong style={{ ...value, fontSize: 20, color: "#6b7280" }}>데이터 연동 대기</strong><small style={{ color: "#6b7280" }}>입금 내역 링크를 받으면 연결합니다.</small></article>
       </section>
 
       <section style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", padding: "12px 14px", margin: "14px 0 20px", background: "#f9fafb", borderRadius: 10, color: "#4b5563", fontSize: 12 }}>
-        <span>가져온 와이스 주문 {money(Number(report.imported_order_count || 0))}건</span><span>집계 주문 {money(Number(report.included_order_count || 0))}건</span><span>제외 아이템 {money(Number(report.excluded_item_count || 0))}개</span><span>마지막 동기화 {kstDate(report.last_imported_at)}</span>
-        <span style={{ marginLeft: "auto" }}>원가가 연결되지 않은 아이템 {money(unmatchedQuantity)}개</span>
+        <span>가져온 와이스 주문 {money(Number(report.imported_order_count || 0))}건</span><span>집계 주문 {money(currentSummary.order_count)}건</span><span>제외 아이템 {money(Number(report.excluded_item_count || 0))}개</span><span>마지막 동기화 {kstDate(report.last_imported_at)}</span>
+        <span style={{ marginLeft: "auto" }}>아이템 설정·메모는 이 브라우저에 저장됩니다.</span>
       </section>
 
       <section style={panel}>
         <div style={panelTitle}>{granularity === "month" ? "월별" : "분기별"} 실적</div>
         {periods.length === 0 ? <div style={{ padding: 24, color: "#6b7280" }}>표시할 자료가 없습니다. 와이스 주문을 동기화해 주세요.</div> :
-          <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 640, fontSize: 13 }}>
+          <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 620, fontSize: 13 }}>
             <thead><tr style={{ background: "#f9fafb" }}><th style={th}>기간</th><th style={th}>매출</th><th style={th}>주문</th><th style={th}>판매수량</th><th style={th}>선택</th></tr></thead>
-            <tbody>{periods.map(p => <tr key={p.key} onClick={() => setSelected(p.key)} style={{ cursor: "pointer", background: p.key === selectedKey ? "#eff6ff" : "#fff" }}>
-              <td style={td}><b>{periodLabel(p.key)}</b></td><td style={td}>{money(p.sales)}원</td><td style={td}>{money(p.order_count)}건</td><td style={td}>{money(p.item_count)}개</td><td style={td}>{p.key === selectedKey ? "●" : ""}</td>
-            </tr>)}</tbody>
+            <tbody>{periods.map(p => { const vis = summarizeItems(visibleItems(p.items, savedPrefs)); return <tr key={p.key} onClick={() => setSelectedPeriod(p.key)} style={{ cursor: "pointer", background: p.key === selectedKey ? "#eff6ff" : "#fff" }}><td style={td}><b>{periodLabel(p.key)}</b></td><td style={td}>{money(vis.sales)}원</td><td style={td}>{money(vis.order_count)}건</td><td style={td}>{money(vis.item_count)}개</td><td style={td}>{p.key === selectedKey ? "●" : ""}</td></tr>; })}</tbody>
           </table></div>}
       </section>
 
       <section style={panel}>
-        <div style={panelTitle}>{selectedKey ? periodLabel(selectedKey) : "선택 기간"}에 판매된 아이템</div>
+        <div style={{ ...panelTitle, display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <span>{selectedKey ? periodLabel(selectedKey) : "선택 기간"} 판매 아이템</span>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <button style={button} disabled={!selectedItems.length} onClick={() => applyToSelected({ deleted: true })}>삭제</button>
+            <button style={button} disabled={!selectedItems.length} onClick={() => applyToSelected({ includeCost: true })}>매입금액에 포함</button>
+            <button style={button} disabled={!selectedItems.length} onClick={() => applyToSelected({ includeCost: false })}>매입금액 제외</button>
+            <button style={{ ...button, background: "#111827", color: "#fff" }} disabled={!hasUnsaved || saving} onClick={saveItemSettings}>{saving ? "저장 중..." : "저장"}</button>
+          </div>
+        </div>
+        {hasUnsaved && <div style={{ padding: "8px 14px", background: "#fffbeb", color: "#92400e", fontSize: 12 }}>저장되지 않은 원가 설정·삭제·메모가 있습니다.</div>}
         {!itemRows.length ? <div style={{ padding: 24, color: "#6b7280" }}>이 기간의 판매 아이템이 없습니다.</div> :
-          <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760, fontSize: 13 }}>
-            <thead><tr style={{ background: "#f9fafb" }}><th style={th}>아이템</th><th style={th}>판매수량</th><th style={th}>매출</th><th style={th}>개당 원가</th><th style={th}>계산된 원가</th></tr></thead>
-            <tbody>{itemRows.map(item => <tr key={item.item_name}><td style={td}><b>{item.item_name}</b></td><td style={td}>{money(item.quantity)}개</td><td style={td}>{money(item.sales)}원</td><td style={td}>{item.unitCost == null ? <span style={{ color: "#b91c1c" }}>미매칭</span> : money(item.unitCost) + "원"}</td><td style={td}>{item.cost == null ? "—" : money(item.cost) + "원"}</td></tr>)}</tbody>
-            <tfoot><tr style={{ background: "#f9fafb", fontWeight: 800 }}><td style={td}>합계</td><td style={td}>{money(Number(current?.item_count || 0))}개</td><td style={td}>{money(Number(current?.sales || 0))}원</td><td style={td}>—</td><td style={td}>{money(knownCost)}원</td></tr></tfoot>
+          <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1100, fontSize: 13 }}>
+            <thead><tr style={{ background: "#f9fafb" }}><th style={th}><input aria-label="현재 아이템 전체 선택" type="checkbox" checked={itemRows.length > 0 && itemRows.every(row => selectedItems.includes(row.key))} onChange={e => setSelectedItems(e.target.checked ? itemRows.map(row => row.key) : [])} /></th><th style={th}>아이템</th><th style={th}>판매수량</th><th style={th}>매출</th><th style={th}>원가 포함</th><th style={th}>개당 원가</th><th style={th}>계산 원가</th><th style={th}>메모</th></tr></thead>
+            <tbody>{itemRows.map(item => {
+              const draft = draftPrefs[item.key] || { includeCost: savedPrefs[item.key]?.includeCost !== false, memo: savedPrefs[item.key]?.memo || "", deleted: false };
+              const pendingDelete = draft.deleted === true && !savedPrefs[item.key]?.deleted;
+              return <tr key={item.key} style={{ background: pendingDelete ? "#fff7ed" : "#fff", opacity: pendingDelete ? 0.55 : 1 }}>
+                <td style={td}><input aria-label={item.item_name + " 선택"} type="checkbox" checked={selectedItems.includes(item.key)} onChange={() => toggleSelected(item.key)} /></td>
+                <td style={td}><b>{item.item_name}</b>{pendingDelete && <div style={{ color: "#b45309", fontSize: 11 }}>저장하면 삭제</div>}</td>
+                <td style={td}>{money(item.quantity)}개</td><td style={td}>{money(item.sales)}원</td>
+                <td style={td}><label style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}><input type="checkbox" checked={draft.includeCost} onChange={e => updateDraft(item.key, { includeCost: e.target.checked })} />포함</label></td>
+                <td style={td}>{item.unitCost == null ? <span style={{ color: "#b91c1c" }}>미매칭</span> : money(item.unitCost) + "원"}</td><td style={td}>{item.includeCost ? item.cost == null ? "원가 미매칭" : money(item.cost) + "원" : <span style={{ color: "#9ca3af" }}>제외</span>}</td>
+                <td style={td}><input value={draft.memo} onChange={e => updateDraft(item.key, { memo: e.target.value })} placeholder="메모 입력" style={{ width: 220, maxWidth: "45vw", height: 32, padding: "0 8px", border: "1px solid #d1d5db", borderRadius: 6 }} /></td>
+              </tr>;
+            })}</tbody>
+            <tfoot><tr style={{ background: "#f9fafb", fontWeight: 800 }}><td style={td} colSpan={2}>합계</td><td style={td}>{money(currentSummary.item_count)}개</td><td style={td}>{money(currentSummary.sales)}원</td><td style={td}>—</td><td style={td}>—</td><td style={td}>{money(knownCost)}원</td><td style={td}>—</td></tr></tfoot>
           </table></div>}
+        {deletedItems.length > 0 && <div style={{ padding: 14, borderTop: "1px solid #e5e7eb", fontSize: 12 }}>
+          <b>삭제된 아이템 · {deletedItems.length}개</b>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>{deletedItems.map(([key]) => <span key={key} style={chip}>{allItems.get(key) || key}<button onClick={() => updateDraft(key, { deleted: false })} style={{ border: 0, background: "transparent", cursor: "pointer", color: "#1d4ed8", marginLeft: 5 }}>삭제 취소</button></span>)}</div>
+          {hasUnsaved && <small style={{ display: "block", marginTop: 8, color: "#92400e" }}>삭제 취소도 저장 버튼을 눌러 적용하세요.</small>}
+        </div>}
       </section>
 
       <section style={panel}>
         <div style={panelTitle}>구매자별 총 구매금액</div>
-        {!current?.buyers?.length ? <div style={{ padding: 24, color: "#6b7280" }}>이 기간의 구매자가 없습니다.</div> :
+        {!currentBuyers.length ? <div style={{ padding: 24, color: "#6b7280" }}>이 기간의 구매자가 없습니다.</div> :
           <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 700, fontSize: 13 }}>
             <thead><tr style={{ background: "#f9fafb" }}><th style={th}>구매자</th><th style={th}>선택 기간 구매금액</th><th style={th}>누적 구매금액</th><th style={th}>누적 주문</th><th style={th}>누적 아이템</th></tr></thead>
-            <tbody>{current.buyers.map(buyer => { const total = allTimeByBuyer.get(buyer.buyer_nickname); return <tr key={buyer.buyer_nickname}><td style={td}><b>{buyer.buyer_nickname}</b></td><td style={td}>{money(buyer.sales)}원</td><td style={td}><b>{money(total?.sales || buyer.sales)}원</b></td><td style={td}>{money(total?.order_count || buyer.order_count)}건</td><td style={td}>{money(total?.item_count || buyer.item_count)}개</td></tr>; })}</tbody>
+            <tbody>{currentBuyers.map(buyer => { const total = allTimeByBuyer.get(buyer.buyer_nickname); return <tr key={buyer.buyer_nickname}><td style={td}><b>{buyer.buyer_nickname}</b></td><td style={td}>{money(buyer.sales)}원</td><td style={td}><b>{money(total?.sales || buyer.sales)}원</b></td><td style={td}>{money(total?.order_count || buyer.order_count)}건</td><td style={td}>{money(total?.item_count || buyer.item_count)}개</td></tr>; })}</tbody>
           </table></div>}
       </section>
     </>}
   </main>;
 }
-
-const chip: CSSProperties = { padding: "5px 9px", border: "1px solid #e5e7eb", borderRadius: 999, background: "#f9fafb", color: "#4b5563", fontSize: 12, display: "inline-flex", alignItems: "center" };
-const panel: CSSProperties = { border: "1px solid #e5e7eb", borderRadius: 14, overflow: "hidden", background: "#fff", marginBottom: 16 };
-const panelTitle: CSSProperties = { padding: "14px 16px", borderBottom: "1px solid #e5e7eb", fontWeight: 800 };
