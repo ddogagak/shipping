@@ -6,12 +6,42 @@
 // @version      1.1
 // @description  ddoga에서 요청하면 와이스 전체 주문 이력을 전달
 // @match        https://wyyyes.com/deliverylist*
+// @match        https://wyyyes.com/expected-settlement-amount*
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==
 (function(){
  "use strict";
  const DDOGA="https://www.ddoga.lol";
+ if(location.pathname.startsWith("/expected-settlement-amount")){
+  let attempts=0;
+  const timer=setInterval(()=>{
+   attempts++;
+   const normalize=(s)=>String(s||"").replace(/\\s+/g," ").trim();
+   const nodes=[...document.querySelectorAll("body *")].filter(node=>node.children.length===0&&normalize(node.textContent)==="누적 정산금액");
+   let amount=null;
+   for(const node of nodes){
+    let parent=node.parentElement;
+    for(let depth=0;parent&&depth<5;depth++,parent=parent.parentElement){
+     const text=normalize(parent.innerText||parent.textContent);
+     const match=text.match(/누적\\s*정산금액[\\s\\S]{0,100}?([\\d,]+)\\s*원/);
+     if(match){amount=Number(match[1].replace(/,/g,""));break;}
+    }
+    if(amount!==null)break;
+   }
+   if(amount===null){
+    const text=normalize(document.body?.innerText);
+    const match=text.match(/누적\\s*정산금액[\\s\\S]{0,100}?([\\d,]+)\\s*원/);
+    if(match)amount=Number(match[1].replace(/,/g,""));
+   }
+   if(Number.isFinite(amount)&&amount>=0&&window.opener){
+    clearInterval(timer);
+    window.opener.postMessage({type:"DDOGA_WISE_SETTLEMENT_AMOUNT",amount},DDOGA);
+   }
+   if(attempts>=60)clearInterval(timer);
+  },1000);
+  return;
+ }
  let auth="";
  const originalFetch=window.fetch;
  window.fetch=function(input,init){
