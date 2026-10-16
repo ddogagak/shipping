@@ -99,6 +99,6 @@ export default function WiseJsonImport(){
     </tr>)}</tbody>
    </table></div>
    <p>중복 의심 주문과 기존 대기 주문은 선택할 수 없습니다.</p>
-  </div>
+  </div>}
  </section>
 }
