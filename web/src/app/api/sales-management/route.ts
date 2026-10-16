@@ -227,7 +227,7 @@ export async function PUT(request: Request) {
       memo: String(row.memo || "").slice(0, 2000),
       is_deleted: row.deleted === true,
       updated_at: new Date().toISOString()
-    })).filter((row: any) => /^\\d+$/.test(row.wise_stock_id));
+    })).filter((row: any) => /^\d+$/.test(row.wise_stock_id));
     if (rows.length !== body.item_settings.length) return NextResponse.json({ ok: false, message: "아이템 식별자가 올바르지 않습니다." }, { status: 400 });
     if (rows.length) {
       const db = createServiceRoleClient();
