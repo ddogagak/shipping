@@ -17,6 +17,25 @@ export async function POST(req:Request){
   if(!Array.isArray(parsed)||!parsed.every(x=>x&&Number.isSafeInteger(x.id)&&Array.isArray(x.stocks)))return NextResponse.json({error:"와이스 주문 배열 형식이 아닙니다."},{status:400});
   const orders=(parsed as RawOrder[]).filter(o=>[10,16,25].includes(Number(o.status)));
   const db=createServiceRoleClient();
+  if(mode==="sales_sync"){
+   const importedAt=new Date().toISOString();
+   const salesRows=(parsed as RawOrder[]).filter(o=>validDate(o.createdAt)).map(o=>({
+    wise_order_id:o.id,
+    buyer_nickname:asText(o.user?.nickname),
+    ordered_at:validDate(o.createdAt)!,
+    wise_status:Number.isSafeInteger(o.status)?o.status:null,
+    item_names:(o.stocks??[]).map(s=>asText(s.name)).filter(Boolean),
+    total_amount:(o.stocks??[]).reduce((sum,s)=>{const n=Number(s.price??0);return sum+(Number.isFinite(n)?n:0)},0),
+    item_count:o.stocks?.length??0,
+    raw_data:{stocks:(o.stocks??[]).map(s=>({id:s.id,name:asText(s.name),price:Number(s.price??0)}))},
+    imported_at:importedAt
+   }));
+   for(const chunk of batches(salesRows)){
+    const {error}=await db.from("domestic_wise_sales_order").upsert(chunk,{onConflict:"wise_order_id"});
+    if(error)throw new Error("와이스 매출 스냅샷 저장 실패: "+error.message);
+   }
+   return NextResponse.json({ok:true,sales_saved:salesRows.length,imported_at:importedAt});
+  }
   const {data:domestic,error:domesticError}=await db.from("domestic_order").select("order_id,customer_order_no,nickname,platform,order_status,first_order_date,source_order_dates");
   if(domesticError) return NextResponse.json({error:"기존 주문 조회 실패",detail:domesticError.message},{status:500});
   const {data:queued,error:queueError}=await db.from("domestic_wise_import_queue").select("wise_order_id");
