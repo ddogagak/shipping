@@ -1,5 +1,5 @@
 "use client";
-import {useEffect,useState} from "react";
+import {useEffect,useState,useRef} from "react";
 const primaryButtonStyle={border:0,borderRadius:10,padding:"10px 14px",background:"#2563eb",color:"#fff",fontWeight:800,cursor:"pointer"} as const;
 const darkButtonStyle={border:0,borderRadius:10,padding:"10px 14px",background:"#111827",color:"#fff",fontWeight:800,cursor:"pointer"} as const;
 const secondaryButtonStyle={border:"1px solid #d1d5db",borderRadius:10,padding:"9px 14px",background:"#fff",color:"#374151",fontWeight:700,cursor:"pointer"} as const;
@@ -9,6 +9,7 @@ export default function WiseJsonImport(){
  const [file,setFile]=useState<File|null>(null);
  const [wiseTab,setWiseTab]=useState<Window|null>(null);
  const [wiseConnected,setWiseConnected]=useState(false);
+ const autoPreviewRef=useRef(false);
  useEffect(()=>{
   const allowedOrigin="https://wyyyes.com";
   function onMessage(event:MessageEvent){
@@ -24,10 +25,11 @@ export default function WiseJsonImport(){
    if(data.orders.length>20000||!data.orders.every((o:unknown)=>o!==null&&typeof o==="object"&&Number.isSafeInteger((o as {id?:number}).id)&&Array.isArray((o as {stocks?:unknown}).stocks)))return;
    const json=JSON.stringify(data.orders);
    if(json.length>15000000){setMessage("전송된 JSON이 15MB를 초과합니다.");return;}
+   autoPreviewRef.current=true;
    setFile(new File([json],"wyyyes-orders.json",{type:"application/json"}));
    setPreview(null);
    setSelectedUpdates([]);
-   setMessage("와이스 주문 "+data.orders.length+"건을 받았어. 미리보기를 눌러 확인해 줘. DB는 아직 변경하지 않았어.");
+   setMessage("와이스 주문 "+data.orders.length+"건을 받았어. 자동 미리보기 중이야. DB는 아직 변경하지 않았어.");
    (event.source as Window).postMessage({type:"DDOGA_WISE_RECEIVED",count:data.orders.length},allowedOrigin);
   }
   window.addEventListener("message",onMessage);
@@ -55,6 +57,7 @@ export default function WiseJsonImport(){
    else{const response=await fetch("/api/domestic/wise-json-queue",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"approve_bulk",wise_order_ids:selectedNew})});const result=await response.json();if(!response.ok)throw new Error(result.error||"일괄 등록 실패");setPreview(null);setSelectedNew([]);setMessage(`등록 성공 ${result.saved}건 / 실패 ${result.failed}건`+(result.failed?" : "+result.results.filter((x:{ok:boolean})=>!x.ok).map((x:{wise_order_id:number;error:string})=>x.wise_order_id+" "+x.error).join(", "):""));}
   }catch(e){setMessage(e instanceof Error?e.message:"알 수 없는 오류")}finally{setLoading(false)}
  }
+ useEffect(()=>{if(file&&autoPreviewRef.current){autoPreviewRef.current=false;void run("preview");}},[file]);
  async function applyUpdates(){
   if(!file||!selectedUpdates.length)return;
   if(!confirm(`선택한 ${selectedUpdates.length}건의 기존 주문 상태를 변경할까요?`))return;
@@ -75,7 +78,7 @@ export default function WiseJsonImport(){
   <input type="file" accept=".json,application/json" onChange={e=>{setFile(e.target.files?.[0]??null);setPreview(null);setMessage("")}}/>
   <div style={{display:"flex",gap:8,marginTop:16}}>
    <button disabled={!file||loading} onClick={()=>run("preview")} style={primaryButtonStyle}>미리보기</button>
-   <button disabled={!file||loading||!preview||!selectedNew.length} onClick={()=>run("save")} style={darkButtonStyle}>선택 {selectedNew.length}건 DDOGA 등록</button>
+   
   </div>
   {message&&<p>{message}</p>}
   {preview&&preview.update_candidates?.length>0&&<div style={{marginTop:18,padding:14,border:"1px solid #cbd5e1",borderRadius:12}}>
@@ -90,10 +93,10 @@ export default function WiseJsonImport(){
   </div>}
   {preview&&<div style={{marginTop:18}}>
    <p>전체 {preview.total}건 / 신규 {preview.new_orders.length}건 / 중복 의심 {preview.possible_existing.length}건 / 기존 대기 {preview.already_queued}건</p>
-   <label><input type="checkbox" checked={(preview.new_orders.length+(preview.queued_orders??[]).filter(o=>!o.existingDomestic).length)>0&&selectedNew.length===preview.new_orders.length+(preview.queued_orders??[]).filter(o=>!o.existingDomestic).length} onChange={e=>setSelectedNew(e.target.checked?[...preview.new_orders,...(preview.queued_orders??[]).filter(o=>!o.existingDomestic)].map(x=>x.wise_order_id):[])}/> 신규 전체 선택 ({selectedNew.length}건)</label>
+   <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:12}}><label><input type="checkbox" checked={(preview.new_orders.length+(preview.queued_orders??[]).filter(o=>!o.existingDomestic).length)>0&&selectedNew.length===preview.new_orders.length+(preview.queued_orders??[]).filter(o=>!o.existingDomestic).length} onChange={e=>setSelectedNew(e.target.checked?[...preview.new_orders,...(preview.queued_orders??[]).filter(o=>!o.existingDomestic)].map(x=>x.wise_order_id):[])}/> 신규 전체 선택 ({selectedNew.length}건)</label><button disabled={loading||!selectedNew.length} onClick={()=>void run("save")} style={darkButtonStyle}>DDOGA 등록</button></div>
    <div style={{maxHeight:480,overflow:"auto",marginTop:12}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}>
     <thead><tr><th>선택</th><th>분류</th><th>주문 ID</th><th>닉네임</th><th>주문시각</th><th>상품수</th></tr></thead>
-    <tbody>{[...preview.new_orders.map(o=>({...o,category:"신규"})),...preview.possible_existing.map(o=>({...o,category:"중복 의심"})),...(preview.queued_orders??[]).filter(o=>!o.existingDomestic).map(o=>({...o,category:"기존 대기"}))].map(o=><tr key={o.category+o.wise_order_id} style={{borderTop:"1px solid #ddd",background:o.category==="신규"?"white":"#f1f5f9"}}>
+    <tbody>{[...preview.new_orders.map(o=>({...o,category:"신규"})),...preview.possible_existing.map(o=>({...o,category:"중복 의심"})),...(preview.queued_orders??[]).filter(o=>!o.existingDomestic).map(o=>({...o,category:"기존 대기"}))].map(o=><tr key={o.category+o.wise_order_id} style={{borderTop:"1px solid #ddd",background:o.category==="중복 의심"?"#e5e7eb":"#fef9c3",color:o.category==="중복 의심"?"#6b7280":"#111827"}}>
      <td><input type="checkbox" disabled={o.category==="중복 의심"} checked={o.category!=="중복 의심"&&selectedNew.includes(o.wise_order_id)} onChange={e=>setSelectedNew(v=>e.target.checked?[...v,o.wise_order_id]:v.filter(id=>id!==o.wise_order_id))}/></td>
      <td>{o.category}</td><td>{o.wise_order_id}</td><td>{o.nickname}</td><td>{new Date(o.ordered_at).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})}</td><td>{o.items}</td>
     </tr>)}</tbody>
