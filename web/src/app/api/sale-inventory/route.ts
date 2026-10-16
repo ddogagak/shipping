@@ -186,6 +186,7 @@ export async function GET() {
                 ? "display"
                 : defaultViewStatus,
           sale_memo: String(ledger?.sale_memo || "").replace(HIDDEN_MARKER, ""),
+          public_comment: String(ledger?.public_comment || "").replace(/[\r\n\t]+/g, " ").trim(),
           sold_out_at: ledger?.sold_out_at || null,
         };
       }),
@@ -291,6 +292,7 @@ export async function PATCH(req: Request) {
     const remaining = viewStatus === "completed" ? 0 : Math.max(0, received - sold);
     const status = viewStatus === "completed" ? "soldout" : "active";
     const cleanMemo = String(body.sale_memo || "").replace(HIDDEN_MARKER, "").trim();
+    const cleanPublicComment = String(body.public_comment || "").replace(/[\r\n\t]+/g, " ").trim().slice(0, 100);
     const storedMemo = viewStatus === "hidden" ? `${HIDDEN_MARKER}${cleanMemo}` : (cleanMemo || null);
     const payload = {
       purchase_item_id: body.purchase_item_id,
@@ -299,6 +301,7 @@ export async function PATCH(req: Request) {
       sold_quantity: sold,
       stock_status: status,
       sale_memo: storedMemo,
+      public_comment: cleanPublicComment || null,
       sold_out_at: status === "soldout" ? (body.sold_out_at || new Date().toISOString()) : null,
     };
 
@@ -320,6 +323,7 @@ export async function PATCH(req: Request) {
       remaining_quantity: remaining,
       view_status: viewStatus,
       sale_memo: cleanMemo,
+      public_comment: cleanPublicComment,
     };
     const pricing = pricingFromPurchase(
       Number(body.actual_purchase_unit_price || 0),
