@@ -4,6 +4,7 @@ import { createServiceRoleClient } from "@/lib/supabase/server";
 export const runtime = "nodejs";
 const DEFAULT_EXCLUDED = ["야생", "용자", "소장", "양도", "양고"];
 const SHIPPING_KEYWORDS = ["배송비", "배송료", "택배비", "送料", "shipping fee", "shipping cost", "delivery fee", "postage"];
+const DEFAULT_KEYWORDS = [...DEFAULT_EXCLUDED, ...SHIPPING_KEYWORDS];
 
 async function readAll(table: string, columns: string) {
   const db = createServiceRoleClient();
@@ -18,7 +19,6 @@ async function readAll(table: string, columns: string) {
   }
   return result;
 }
-
 function kstDate(value: unknown) {
   const date = new Date(String(value || ""));
   if (Number.isNaN(date.getTime())) return "";
@@ -28,52 +28,74 @@ function money(value: unknown) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 }
+function itemKey(value: unknown) {
+  return String(value || "").normalize("NFKC").replace(/\s+/g, "").toLowerCase();
+}
 function blank(key: string) {
-  return { key, sales: 0, order_count: 0, item_count: 0, items: new Map<string, any>(), buyers: new Map<string, any>() };
+  return { key, sales: 0, order_count: 0, item_count: 0, order_ids: new Set<string>(), items: new Map<string, any>(), buyers: new Map<string, any>() };
+}
+function addItem(group: Map<string, any>, item: any, orderId: string) {
+  const itemName = String(item.item_name || "").trim() || "(상품명 없음)";
+  const key = itemKey(itemName);
+  const row = group.get(key) || { item_name: itemName, quantity: 0, sales: 0, order_ids: new Set<string>() };
+  row.quantity += 1;
+  row.sales += money(item.item_price);
+  row.order_ids.add(orderId);
+  group.set(key, row);
+}
+function addBuyer(map: Map<string, any>, buyerName: string, item: any, orderId: string) {
+  const buyer = map.get(buyerName) || { buyer_nickname: buyerName, sales: 0, item_count: 0, order_ids: new Set<string>(), items: new Map<string, any>() };
+  buyer.sales += money(item.item_price);
+  buyer.item_count += 1;
+  buyer.order_ids.add(orderId);
+  addItem(buyer.items, item, orderId);
+  map.set(buyerName, buyer);
 }
 function addPeriod(map: Map<string, any>, key: string, order: any, items: any[]) {
   const bucket = map.get(key) || blank(key);
   const buyerName = String(order.buyer_nickname || "").trim() || "(닉네임 없음)";
-  const orderTotal = items.reduce((sum, item) => sum + money(item.item_price), 0);
-  bucket.sales += orderTotal;
-  bucket.order_count += 1;
-  bucket.item_count += items.length;
-  const buyer = bucket.buyers.get(buyerName) || { buyer_nickname: buyerName, sales: 0, item_count: 0, order_ids: new Set<string>() };
-  buyer.sales += orderTotal;
-  buyer.item_count += items.length;
-  buyer.order_ids.add(String(order.id));
-  bucket.buyers.set(buyerName, buyer);
   for (const item of items) {
-    const itemName = String(item.item_name || "").trim() || "(상품명 없음)";
-    const itemKey = itemName.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
-    const group = bucket.items.get(itemKey) || { item_name: itemName, quantity: 0, sales: 0 };
-    group.quantity += 1;
-    group.sales += money(item.item_price);
-    bucket.items.set(itemKey, group);
+    bucket.sales += money(item.item_price);
+    bucket.item_count += 1;
+    bucket.order_ids.add(String(order.id));
+    addItem(bucket.items, item, String(order.id));
+    addBuyer(bucket.buyers, buyerName, item, String(order.id));
   }
+  bucket.order_count = bucket.order_ids.size;
   map.set(key, bucket);
+}
+function serializeItems(items: Map<string, any>) {
+  return Array.from(items.values()).map((item: any) => ({
+    item_name: item.item_name,
+    quantity: item.quantity,
+    sales: item.sales,
+    order_ids: Array.from(item.order_ids)
+  })).sort((a: any, b: any) => b.sales - a.sales);
+}
+function serializeBuyers(buyers: Map<string, any>) {
+  return Array.from(buyers.values()).map((buyer: any) => ({
+    buyer_nickname: buyer.buyer_nickname,
+    sales: buyer.sales,
+    order_count: buyer.order_ids.size,
+    item_count: buyer.item_count,
+    items: serializeItems(buyer.items)
+  })).sort((a: any, b: any) => b.sales - a.sales);
 }
 function serialize(map: Map<string, any>) {
   return Array.from(map.values()).map(bucket => ({
     key: bucket.key,
     sales: bucket.sales,
-    order_count: bucket.order_count,
+    order_count: bucket.order_ids.size,
     item_count: bucket.item_count,
-    items: Array.from(bucket.items.values()).sort((a: any, b: any) => b.sales - a.sales),
-    buyers: Array.from(bucket.buyers.values()).map((buyer: any) => ({
-      buyer_nickname: buyer.buyer_nickname,
-      sales: buyer.sales,
-      order_count: buyer.order_ids.size,
-      item_count: buyer.item_count
-    })).sort((a: any, b: any) => b.sales - a.sales)
+    items: serializeItems(bucket.items),
+    buyers: serializeBuyers(bucket.buyers)
   })).sort((a, b) => b.key.localeCompare(a.key));
 }
 
-async function buildReport(customKeywords: unknown) {
-  const userKeywords = Array.isArray(customKeywords)
-    ? customKeywords.map(value => String(value || "").normalize("NFKC").trim().slice(0, 80)).filter(Boolean).slice(0, 100)
-    : [];
-  const excludedKeywords = Array.from(new Set([...DEFAULT_EXCLUDED, ...SHIPPING_KEYWORDS, ...userKeywords]));
+async function buildReport(keywordInput: unknown) {
+  const excludedKeywords = Array.isArray(keywordInput)
+    ? Array.from(new Set(keywordInput.map(value => String(value || "").normalize("NFKC").trim().slice(0, 80)).filter(Boolean))).slice(0, 100)
+    : DEFAULT_KEYWORDS;
   const terms = excludedKeywords.map(term => term.toLowerCase());
   const itemRows = await readAll("domestic_wise_item_photo", "wise_order_id,buyer_nickname,ordered_at,item_name,item_price,imported_at");
   const orders = new Map<string, any>();
@@ -111,39 +133,26 @@ async function buildReport(customKeywords: unknown) {
     addPeriod(monthly, monthKey, order, items);
     addPeriod(quarterly, quarterKey, order, items);
     const buyerName = String(order.buyer_nickname || "").trim() || "(닉네임 없음)";
-    const buyer = allTimeBuyers.get(buyerName) || { buyer_nickname: buyerName, sales: 0, item_count: 0, order_ids: new Set<string>() };
-    buyer.sales += items.reduce((sum: number, item: any) => sum + money(item.item_price), 0);
-    buyer.item_count += items.length;
-    buyer.order_ids.add(String(order.id));
-    allTimeBuyers.set(buyerName, buyer);
+    for (const item of items) addBuyer(allTimeBuyers, buyerName, item, String(order.id));
   }
-
-  const buyerRows = Array.from(allTimeBuyers.values()).map((buyer: any) => ({
-    buyer_nickname: buyer.buyer_nickname,
-    sales: buyer.sales,
-    order_count: buyer.order_ids.size,
-    item_count: buyer.item_count
-  })).sort((a: any, b: any) => b.sales - a.sales);
 
   return {
     ok: true,
     monthly: serialize(monthly),
     quarterly: serialize(quarterly),
-    all_time_buyers: buyerRows,
+    all_time_buyers: serializeBuyers(allTimeBuyers),
     excluded_item_count: excludedItemCount,
     included_order_count: includedOrderCount,
     included_item_count: includedItemCount,
     imported_order_count: orders.size,
     last_imported_at: lastImportedAt || null,
     excluded_keywords: excludedKeywords,
-    default_excluded_keywords: [...DEFAULT_EXCLUDED, ...SHIPPING_KEYWORDS],
-    custom_keywords: userKeywords
+    default_excluded_keywords: DEFAULT_KEYWORDS
   };
 }
-
 export async function GET() {
   try {
-    return NextResponse.json(await buildReport([]));
+    return NextResponse.json(await buildReport(undefined));
   } catch (error) {
     return NextResponse.json({ ok: false, message: error instanceof Error ? error.message : "매출 자료를 불러오지 못했습니다." }, { status: 500 });
   }
@@ -151,7 +160,8 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
-    return NextResponse.json(await buildReport(body?.custom_keywords));
+    const input = Array.isArray(body?.excluded_keywords) ? body.excluded_keywords : body?.custom_keywords;
+    return NextResponse.json(await buildReport(input));
   } catch (error) {
     return NextResponse.json({ ok: false, message: error instanceof Error ? error.message : "매출 자료를 불러오지 못했습니다." }, { status: 500 });
   }
