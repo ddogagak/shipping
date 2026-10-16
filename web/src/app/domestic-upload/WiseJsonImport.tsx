@@ -93,9 +93,9 @@ export default function WiseJsonImport(){
  }
  return <section style={{border:"1px solid #e5e7eb",borderRadius:16,padding:20,background:"#fff",marginTop:16}}>
   <h2 style={{marginTop:0}}>와이스 JSON 동기화</h2>
-  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button disabled={loading||pulling} style={secondaryButtonStyle} onClick={()=>{const w=window.open("https://wyyyes.com/deliverylist","ddoga_wise_order_pull");if(w){setWiseTab(w);setWiseConnected(false)}else setMessage("팝업 차단을 해제해줘.")}}>와이스 연결 탭 열기</button><button style={primaryButtonStyle} disabled={!wiseConnected||loading||pulling} onClick={()=>{wiseTab?.postMessage({type:"DDOGA_WISE_PULL_REQUEST"},"https://wyyyes.com");setPulling(true);setActivity("pull");setMessage("와이스 판매목록 가져오는 중 — 응답을 기다리고 있습니다.");pullTimer.current=setTimeout(()=>{setPulling(false);setActivity("");setMessage("와이스 응답이 60초 동안 없습니다. 연결 탭을 확인한 뒤 다시 가져오기를 눌러주세요.")},60000)}}>{pulling?"판매목록 가져오는 중…":"와이스 판매목록 가져오기 (40건)"}</button></div>
+  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button disabled={loading||pulling} style={secondaryButtonStyle} onClick={()=>{const w=window.open("https://wyyyes.com/deliverylist","ddoga_wise_order_pull");if(w){setWiseTab(w);setWiseConnected(false)}else setMessage("팝업 차단을 해제해줘.")}}>와이스 연결 탭 열기</button><button style={primaryButtonStyle} disabled={!wiseConnected||loading||pulling} onClick={()=>{wiseTab?.postMessage({type:"DDOGA_WISE_PULL_REQUEST"},"https://wyyyes.com");setPulling(true);setActivity("pull");setMessage("와이스 판매목록 가져오는 중 — 응답을 기다리고 있습니다.");pullTimer.current=setTimeout(()=>{setPulling(false);setActivity("");setMessage("와이스 응답이 60초 동안 없습니다. 연결 탭을 확인한 뒤 다시 가져오기를 눌러주세요.")},60000)}}>{pulling?"전체 주문 가져오는 중…":"와이스 전체 주문 가져오기"}</button></div>
   <p>{wiseConnected?"🟢 와이스 연결됨":"⚪ 와이스 연결 대기"}</p>
-  <p>신규 주문만 선택해서 DDOGA에 일괄 등록합니다. 중복 의심 주문은 제외하며 기존 합배송은 변경하지 않습니다.</p>
+  <p>전체 주문 이력을 매출자료로 저장할 수 있습니다. DDOGA 신규 주문 등록은 별도로 선택하며, 기존 합배송은 변경하지 않습니다.</p>
   <input disabled={loading||pulling} type="file" accept=".json,application/json" onChange={e=>{setFile(e.target.files?.[0]??null);setPreview(null);setMessage("")}}/>
   <div style={{display:"flex",gap:8,marginTop:16}}>
    <button disabled={!file||loading||pulling} onClick={()=>run("preview")} style={primaryButtonStyle}>{activity==="preview"?"미리보기 가져오는 중…":"미리보기"}</button>
