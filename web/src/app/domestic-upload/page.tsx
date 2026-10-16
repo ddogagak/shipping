@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type CSSProperties } from "react";
 import * as XLSX from "xlsx";
+import Link from "next/link";
 import WiseJsonImport from "./WiseJsonImport";
 
 type Platform = "wise" | "x" | "bunjang";
@@ -230,6 +231,7 @@ export default function DomesticUploadPage() {
 
   return (
     <main style={{ maxWidth: 1280, margin: "0 auto", padding: 24 }}>
+      <nav aria-label="페이지 이동" style={{display:"flex",gap:12,marginBottom:16}}><Link href="/" style={tabStyle(false)}>홈으로</Link><Link href="/domestic-orders" style={tabStyle(false)}>국내 주문 (Domestic Orders)으로</Link></nav>
       <div style={{display:"flex",gap:8,marginBottom:16}}><button type="button" style={tabStyle(uploadTab==="legacy")} onClick={()=>setUploadTab("legacy")}>텍스트 입력</button><button type="button" style={tabStyle(uploadTab==="wise-json")} onClick={()=>setUploadTab("wise-json")}>와이스 JSON 동기화</button></div>
       {uploadTab==="wise-json" ? <WiseJsonImport/> : <>
       <section style={cardStyle}>

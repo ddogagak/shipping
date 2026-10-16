@@ -17,7 +17,7 @@ export async function POST(req:Request){
   if(!Array.isArray(parsed)||!parsed.every(x=>x&&Number.isSafeInteger(x.id)&&Array.isArray(x.stocks)))return NextResponse.json({error:"와이스 주문 배열 형식이 아닙니다."},{status:400});
   const orders=(parsed as RawOrder[]).filter(o=>[10,16,25].includes(Number(o.status)));
   const db=createServiceRoleClient();
-  const {data:domestic,error:domesticError}=await db.from("domestic_order").select("order_id,customer_order_no,nickname,platform,first_order_date,source_order_dates");
+  const {data:domestic,error:domesticError}=await db.from("domestic_order").select("order_id,customer_order_no,nickname,platform,order_status,first_order_date,source_order_dates");
   if(domesticError) return NextResponse.json({error:"기존 주문 조회 실패",detail:domesticError.message},{status:500});
   const {data:queued,error:queueError}=await db.from("domestic_wise_import_queue").select("wise_order_id");
   if(queueError) return NextResponse.json({error:"와이스 신규 주문 대기열 테이블 조회 실패",detail:queueError.message,hint:"Supabase에서 20261012_wise_json_import_queue.sql 마이그레이션을 먼저 실행해야 합니다."},{status:500});
@@ -61,11 +61,12 @@ export async function POST(req:Request){
     if(matched_order_ids.length!==1)return [];
     const order_id=matched_order_ids[0],ship=shippingMap.get(order_id);
     if(!ship)return [];
+    const currentOrder=(domestic??[]).find(d=>String(d.order_id)===order_id);
     const tracking=asText(ship.tracking_number),direct=asText(order.deliveryCompany).toUpperCase()==="DIRECT";
     const changes:Record<string,string|boolean>={};
-    if(direct&&Number(order.status)===25){if(!ship.tracking_registered)changes.tracking_registered=true;changes.order_status="kept";}
+    if(direct&&Number(order.status)===25){if(!ship.tracking_registered)changes.tracking_registered=true;if(currentOrder?.order_status!=="kept")changes.order_status="kept";}
     if(!Object.keys(changes).length)return [];
-    return [{wise_order_id:order.id,order_id,nickname:asText(order.user?.nickname),ordered_at:order.createdAt,wise_status:Number(order.status),delivery_company:order.deliveryCompany,tracking_number:tracking,changes}];
+    return [{wise_order_id:order.id,order_id,nickname:asText(order.user?.nickname),ordered_at:order.createdAt,wise_status:Number(order.status),delivery_company:order.deliveryCompany,tracking_number:tracking,current:{tracking_registered:ship.tracking_registered,shipping_status:ship.shipping_status,order_status:currentOrder?.order_status??null},changes}];
   });
   const uniqueUpdates=[...new Map(updateCandidates.map(x=>[x.wise_order_id,x])).values()];
   if(mode==="apply_updates"){
