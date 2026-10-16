@@ -17,21 +17,21 @@
   let attempts=0;
   const timer=setInterval(()=>{
    attempts++;
-   const normalize=(s)=>String(s||"").replace(/\\s+/g," ").trim();
+   const normalize=(s)=>String(s||"").replace(/\s+/g," ").trim();
    const nodes=[...document.querySelectorAll("body *")].filter(node=>node.children.length===0&&normalize(node.textContent)==="누적 정산금액");
    let amount=null;
    for(const node of nodes){
     let parent=node.parentElement;
     for(let depth=0;parent&&depth<5;depth++,parent=parent.parentElement){
      const text=normalize(parent.innerText||parent.textContent);
-     const match=text.match(/누적\\s*정산금액[\\s\\S]{0,100}?([\\d,]+)\\s*원/);
+     const match=text.match(/누적\s*정산금액[\s\S]{0,100}?([\d,]+)\s*원/);
      if(match){amount=Number(match[1].replace(/,/g,""));break;}
     }
     if(amount!==null)break;
    }
    if(amount===null){
     const text=normalize(document.body?.innerText);
-    const match=text.match(/누적\\s*정산금액[\\s\\S]{0,100}?([\\d,]+)\\s*원/);
+    const match=text.match(/누적\s*정산금액[\s\S]{0,100}?([\d,]+)\s*원/);
     if(match)amount=Number(match[1].replace(/,/g,""));
    }
    if(Number.isFinite(amount)&&amount>=0&&window.opener){
