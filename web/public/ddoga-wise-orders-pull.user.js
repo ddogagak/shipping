@@ -1,6 +1,8 @@
 // ==UserScript==
 // @name         DDOGA Wise orders pull
 // @namespace    https://www.ddoga.lol/
+// @updateURL     https://www.ddoga.lol/ddoga-wise-orders-pull.user.js
+// @downloadURL   https://www.ddoga.lol/ddoga-wise-orders-pull.user.js
 // @version      1.1
 // @description  ddoga에서 요청하면 와이스 전체 주문 이력을 전달
 // @match        https://wyyyes.com/deliverylist*
