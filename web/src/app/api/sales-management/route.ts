@@ -28,15 +28,12 @@ function money(value: unknown) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 }
-function itemKey(value: unknown) {
-  return String(value || "").normalize("NFKC").replace(/\s+/g, "").toLowerCase();
-}
 function blank(key: string) {
-  return { key, sales: 0, order_count: 0, item_count: 0, order_ids: new Set<string>(), items: new Map<string, any>(), buyers: new Map<string, any>() };
+  return { key, sales: 0, order_count: 0, item_count: 0, order_ids: new Set<string>(), items: new Map<string, any>(), buyers: new Map<string, any>(), sales_rows: [] as any[] };
 }
 function addItem(group: Map<string, any>, item: any, orderId: string) {
   const itemName = String(item.item_name || "").trim() || "(상품명 없음)";
-  const key = itemKey(itemName);
+  const key = itemName.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
   const row = group.get(key) || { item_name: itemName, quantity: 0, sales: 0, order_ids: new Set<string>() };
   row.quantity += 1;
   row.sales += money(item.item_price);
@@ -55,11 +52,21 @@ function addPeriod(map: Map<string, any>, key: string, order: any, items: any[])
   const bucket = map.get(key) || blank(key);
   const buyerName = String(order.buyer_nickname || "").trim() || "(닉네임 없음)";
   for (const item of items) {
-    bucket.sales += money(item.item_price);
+    const orderId = String(order.id);
+    const row = {
+      id: String(item.id),
+      order_id: orderId,
+      item_name: item.item_name,
+      item_price: money(item.item_price),
+      buyer_nickname: buyerName,
+      ordered_at: order.ordered_at
+    };
+    bucket.sales += row.item_price;
     bucket.item_count += 1;
-    bucket.order_ids.add(String(order.id));
-    addItem(bucket.items, item, String(order.id));
-    addBuyer(bucket.buyers, buyerName, item, String(order.id));
+    bucket.order_ids.add(orderId);
+    bucket.sales_rows.push(row);
+    addItem(bucket.items, item, orderId);
+    addBuyer(bucket.buyers, buyerName, item, orderId);
   }
   bucket.order_count = bucket.order_ids.size;
   map.set(key, bucket);
@@ -88,7 +95,8 @@ function serialize(map: Map<string, any>) {
     order_count: bucket.order_ids.size,
     item_count: bucket.item_count,
     items: serializeItems(bucket.items),
-    buyers: serializeBuyers(bucket.buyers)
+    buyers: serializeBuyers(bucket.buyers),
+    sales_rows: bucket.sales_rows.sort((a: any, b: any) => String(b.ordered_at).localeCompare(String(a.ordered_at)))
   })).sort((a, b) => b.key.localeCompare(a.key));
 }
 
@@ -97,14 +105,14 @@ async function buildReport(keywordInput: unknown) {
     ? Array.from(new Set(keywordInput.map(value => String(value || "").normalize("NFKC").trim().slice(0, 80)).filter(Boolean))).slice(0, 100)
     : DEFAULT_KEYWORDS;
   const terms = excludedKeywords.map(term => term.toLowerCase());
-  const itemRows = await readAll("domestic_wise_item_photo", "wise_order_id,buyer_nickname,ordered_at,item_name,item_price,imported_at");
+  const itemRows = await readAll("domestic_wise_item_photo", "wise_stock_id,wise_order_id,buyer_nickname,ordered_at,item_name,item_price,imported_at");
   const orders = new Map<string, any>();
   let lastImportedAt = "";
   for (const row of itemRows) {
     const id = String(row.wise_order_id || "");
     if (!id) continue;
     const order = orders.get(id) || { id, buyer_nickname: row.buyer_nickname || "", ordered_at: row.ordered_at, items: [] };
-    order.items.push({ item_name: String(row.item_name || ""), item_price: money(row.item_price) });
+    order.items.push({ id: String(row.wise_stock_id), item_name: String(row.item_name || ""), item_price: money(row.item_price) });
     orders.set(id, order);
     const imported = String(row.imported_at || "");
     if (imported > lastImportedAt) lastImportedAt = imported;
@@ -113,6 +121,7 @@ async function buildReport(keywordInput: unknown) {
   const monthly = new Map<string, any>();
   const quarterly = new Map<string, any>();
   const allTimeBuyers = new Map<string, any>();
+  const allTimeSalesRows: any[] = [];
   let excludedItemCount = 0;
   let includedOrderCount = 0;
   let includedItemCount = 0;
@@ -133,7 +142,17 @@ async function buildReport(keywordInput: unknown) {
     addPeriod(monthly, monthKey, order, items);
     addPeriod(quarterly, quarterKey, order, items);
     const buyerName = String(order.buyer_nickname || "").trim() || "(닉네임 없음)";
-    for (const item of items) addBuyer(allTimeBuyers, buyerName, item, String(order.id));
+    for (const item of items) {
+      addBuyer(allTimeBuyers, buyerName, item, String(order.id));
+      allTimeSalesRows.push({
+        id: String(item.id),
+        order_id: String(order.id),
+        item_name: item.item_name,
+        item_price: money(item.item_price),
+        buyer_nickname: buyerName,
+        ordered_at: order.ordered_at
+      });
+    }
   }
 
   return {
@@ -141,6 +160,7 @@ async function buildReport(keywordInput: unknown) {
     monthly: serialize(monthly),
     quarterly: serialize(quarterly),
     all_time_buyers: serializeBuyers(allTimeBuyers),
+    all_time_sales_rows: allTimeSalesRows.sort((a: any, b: any) => String(b.ordered_at).localeCompare(String(a.ordered_at))),
     excluded_item_count: excludedItemCount,
     included_order_count: includedOrderCount,
     included_item_count: includedItemCount,
