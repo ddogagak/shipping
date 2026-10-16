@@ -16,7 +16,7 @@ function pricingFromPurchase(unitPrice: number, currency: string, componentCount
     : purchase > 0
       ? Math.round(purchase * (EXCHANGE_RATE[currency] ?? EXCHANGE_RATE.CNY) * 1.2 + 5000)
       : 0;
-  const minimumMarginPrice = boxCost > 0 ? Math.round(boxCost * 1.1 * 1.07 + 10000) : 0;
+  const minimumMarginPrice = boxCost > 0 ? (currency === "KRW" ? Math.ceil(boxCost / 0.69) : Math.round(boxCost * 1.1 * 1.07 + 10000)) : 0;
   return {
     boxCost,
     componentCount,
