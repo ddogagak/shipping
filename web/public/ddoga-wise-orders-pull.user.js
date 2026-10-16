@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         DDOGA Wise orders pull
 // @namespace    https://www.ddoga.lol/
-// @version      1.0
-// @description  ddoga에서 요청하면 와이스 최근 주문 40건을 전달
+// @version      1.1
+// @description  ddoga에서 요청하면 와이스 전체 주문 이력을 전달
 // @match        https://wyyyes.com/deliverylist*
 // @run-at       document-start
 // @grant        none
@@ -10,7 +10,6 @@
 (function(){
  "use strict";
  const DDOGA="https://www.ddoga.lol";
- const allowed=new Set([10,16,25]);
  let auth="";
  const originalFetch=window.fetch;
  window.fetch=function(input,init){
@@ -28,7 +27,7 @@
   if(!auth)throw Error("와이스 인증 정보가 아직 없어. 와이스 판매목록을 새로고침해줘.");
   const out=[],ids=new Set(),cursors=new Set();
   let next=null;
-  for(let page=0;page<1000&&out.length<40;page++){
+  for(let page=0;page<1000;page++){
    const url=new URL("/r0.app/sellers/myMarket/orderChains",location.origin);
    if(next)url.searchParams.set("next",next);
    const res=await originalFetch.call(window,url.toString(),{credentials:"include",headers:{Accept:"application/json",Authorization:auth,"x-wyyyes-agent":"web/web (Original)","x-wyyyes-version":"web (Original)/no_ota"}});
@@ -36,12 +35,11 @@
    const data=await res.json();
    if(!Array.isArray(data.result))throw Error("와이스 주문 응답 형식 오류");
    for(const order of data.result){
-    if(!allowed.has(Number(order.status)))continue;
     const id=order.id??order._id;
     if(id==null)throw Error("주문 ID 누락");
     if(ids.has(String(id)))continue;
     ids.add(String(id));out.push(order);
-    if(out.length===40)break;
+    if(out.length>20000)throw Error("주문이 2만건을 넘어 한 번에 동기화할 수 없어.");
    }
    next=data.page?.next;
    if(!next)break;
