@@ -100,7 +100,12 @@ export async function POST(req:Request){
   }
   const photoRows=orders.flatMap(o=>(o.stocks??[]).filter(s=>Number.isSafeInteger(s.id)).map(s=>({wise_stock_id:s.id,wise_order_id:o.id,buyer_nickname:asText(o.user?.nickname),ordered_at:validDate(o.createdAt)??new Date().toISOString(),item_name:asText(s.name),item_price:Number(s.price??0),image_url:s.thumbnail??null})));
   for(const chunk of batches(photoRows)){const {error}=await db.from("domestic_wise_item_photo").upsert(chunk,{onConflict:"wise_stock_id"});if(error)throw new Error("와이스 상품정보 저장 실패: "+error.message)}
-  const fresh=rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued);
+  const selectedRaw=asText(form.get("selected_ids"));
+  const selectedIds=selectedRaw?JSON.parse(selectedRaw):null;
+  if(selectedIds!==null&&(!Array.isArray(selectedIds)||selectedIds.length>40||!selectedIds.every(Number.isSafeInteger)||new Set(selectedIds).size!==selectedIds.length))
+   return NextResponse.json({error:"선택 주문 ID 형식 오류"},{status:400});
+  const allowedIds=selectedIds===null?null:new Set<number>(selectedIds);
+  const fresh=rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued&&(allowedIds===null||allowedIds.has(x.wise_order_id)));
   for(const chunk of batches(fresh)){
    const payload=chunk.map(({order:o,ordered_at,nickname})=>({wise_order_id:o.id,buyer_nickname:nickname,ordered_at,receiver_name:o.receiverName??null,receiver_phone:o.receiverPhoneNum??null,postal_code:o.postNum??null,address:[o.addr1,o.addr2,o.addr3].filter(Boolean).join(" "),item_summary:(o.stocks??[]).map(s=>asText(s.name)).join(" / "),item_total_price:(o.stocks??[]).reduce((sum,s)=>sum+Number(s.price??0),0),item_count:o.stocks?.length??0}));
    const {error}=await db.from("domestic_wise_import_queue").upsert(payload,{onConflict:"wise_order_id",ignoreDuplicates:true});if(error)throw error;
