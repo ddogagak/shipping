@@ -14,7 +14,7 @@ const LEGACY_KEYWORD_KEY = "ddoga_sales_excluded_keywords";
 const ITEM_PREFS_KEY = "ddoga_sales_item_settings";
 const DEFAULT_KEYWORDS = ["야생", "용자", "소장", "양도", "양고", "배송비", "배송료", "택배비", "送料", "shipping fee", "shipping cost", "delivery fee", "postage"];
 const money = (value: number) => Math.round(Number(value || 0)).toLocaleString("ko-KR");
-const itemKey = (text: string) => text.normalize("NFKC").toLowerCase().replace(/[\\s\\p{P}\\p{S}]/gu, "");
+const itemKey = (text: string) => text.normalize("NFKC").toLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
 const pageStyle: CSSProperties = { maxWidth: 1380, margin: "0 auto", padding: 24, color: "#111827" };
 const button: CSSProperties = { padding: "8px 12px", border: "1px solid #d1d5db", borderRadius: 8, background: "#fff", color: "#111827", textDecoration: "none", fontSize: 13, fontWeight: 700, cursor: "pointer" };
 const card: CSSProperties = { padding: 18, border: "1px solid #e5e7eb", borderRadius: 14, background: "#fff", minHeight: 110 };
