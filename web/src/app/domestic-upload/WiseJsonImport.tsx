@@ -71,7 +71,7 @@ export default function WiseJsonImport(){
   <h2 style={{marginTop:0}}>와이스 JSON 동기화</h2>
   <div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button style={secondaryButtonStyle} onClick={()=>{const w=window.open("https://wyyyes.com/deliverylist","ddoga_wise_order_pull");if(w){setWiseTab(w);setWiseConnected(false)}else setMessage("팝업 차단을 해제해줘.")}}>와이스 연결 탭 열기</button><button style={primaryButtonStyle} disabled={!wiseConnected||loading} onClick={()=>{wiseTab?.postMessage({type:"DDOGA_WISE_PULL_REQUEST"},"https://wyyyes.com");setMessage("와이스 주문 조회 중...")}}>와이스 판매목록 가져오기 (40건)</button></div>
   <p>{wiseConnected?"🟢 와이스 연결됨":"⚪ 와이스 연결 대기"}</p>
-  <p>JSON에서 새 주문을 검토 대기열에 추가하고, 모든 주문의 와이스 전용 배송/상태 스냅샷과 상품정보를 갱신합니다. 기존 ddoga 주문과 합배송은 수정하지 않습니다.</p>
+  <p>신규 주문만 선택해서 DDOGA에 일괄 등록합니다. 중복 의심 주문은 제외하며 기존 합배송은 변경하지 않습니다.</p>
   <input type="file" accept=".json,application/json" onChange={e=>{setFile(e.target.files?.[0]??null);setPreview(null);setMessage("")}}/>
   <div style={{display:"flex",gap:8,marginTop:16}}>
    <button disabled={!file||loading} onClick={()=>run("preview")} style={primaryButtonStyle}>미리보기</button>
@@ -88,22 +88,17 @@ export default function WiseJsonImport(){
    </table></div>
    <button disabled={loading||!selectedUpdates.length} onClick={applyUpdates} style={{...darkButtonStyle,marginTop:10}}>선택 {selectedUpdates.length}건 상태 업데이트</button>
   </div>}
-  {preview&&<><p>전체 {preview.total}건 / 신규 후보 {preview.new_orders.length}건 / 기존 주문 추정 {preview.possible_existing.length}건 / 이미 대기열 등록 {preview.already_queued}건</p>
-   <div style={{maxHeight:480,overflow:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}>
-    <thead><tr><th>분류</th><th>와이스 주문 ID</th><th>닉네임</th><th>주문시각</th><th>상품수</th><th>매칭된 ddoga 주문</th></tr></thead>
-    <tbody>{[...preview.new_orders.map(o=>({...o,category:"신규 후보"})),...preview.possible_existing.map(o=>({...o,category:"기존 주문 중복 추정"})),...(preview.queued_orders??[]).filter(o=>!o.existingDomestic).map(o=>({...o,category:"이미 대기열 등록"}))].map(o=><tr key={o.category+o.wise_order_id} style={{borderTop:"1px solid #ddd",background:o.existingDomestic?"#fff7ed":o.alreadyQueued?"#f1f5f9":"white"}}><td>{o.category}</td><td>{o.wise_order_id}</td><td>{o.nickname}</td><td>{new Date(o.ordered_at).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})}</td><td>{o.items}</td><td>{o.matched_order_ids?.join(", ")||"-"}</td></tr>)}</tbody>
+  {preview&&<div style={{marginTop:18}}>
+   <p>전체 {preview.total}건 / 신규 {preview.new_orders.length}건 / 중복 의심 {preview.possible_existing.length}건 / 기존 대기 {preview.already_queued}건</p>
+   <label><input type="checkbox" checked={preview.new_orders.length>0&&selectedNew.length===preview.new_orders.length} onChange={e=>setSelectedNew(e.target.checked?preview.new_orders.map(x=>x.wise_order_id):[])}/> 신규 전체 선택 ({selectedNew.length}건)</label>
+   <div style={{maxHeight:480,overflow:"auto",marginTop:12}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}>
+    <thead><tr><th>선택</th><th>분류</th><th>주문 ID</th><th>닉네임</th><th>주문시각</th><th>상품수</th></tr></thead>
+    <tbody>{[...preview.new_orders.map(o=>({...o,category:"신규"})),...preview.possible_existing.map(o=>({...o,category:"중복 의심"})),...(preview.queued_orders??[]).filter(o=>!o.existingDomestic).map(o=>({...o,category:"기존 대기"}))].map(o=><tr key={o.category+o.wise_order_id} style={{borderTop:"1px solid #ddd",background:o.category==="신규"?"white":"#f1f5f9"}}>
+     <td><input type="checkbox" disabled={o.category!=="신규"} checked={o.category==="신규"&&selectedNew.includes(o.wise_order_id)} onChange={e=>setSelectedNew(v=>e.target.checked?[...v,o.wise_order_id]:v.filter(id=>id!==o.wise_order_id))}/></td>
+     <td>{o.category}</td><td>{o.wise_order_id}</td><td>{o.nickname}</td><td>{new Date(o.ordered_at).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})}</td><td>{o.items}</td>
+    </tr>)}</tbody>
    </table></div>
-   <p style={{color:"#9a3412"}}>기존 주문은 닉네임+주문시각으로 추정합니다. 신규 후보도 중복 가능성이 있으니 확인하세요. JSON 저장 후 아래 대기열에서 주문별로 ddoga 등록할 수 있습니다.</p>
-  </>}
-  <div style={{marginTop:24,borderTop:"1px solid #ddd",paddingTop:16}}>
-   <h3>신규 주문 검토 대기열</h3>
-   <button onClick={loadQueue} style={secondaryButtonStyle}>대기열 조회 / 새로고침</button>
-   {queueError&&<p style={{color:"#b91c1c"}}>{queueError}</p>}
-   <div style={{maxHeight:450,overflow:"auto",marginTop:12}}><table style={{width:"100%",borderCollapse:"collapse"}}>
-    <thead><tr><th>주문 ID</th><th>닉네임</th><th>주문시각</th><th>상품</th><th>금액</th><th>처리</th></tr></thead>
-    <tbody>{queue.map(o=><tr key={o.wise_order_id}><td>{o.wise_order_id}</td><td>{o.buyer_nickname}</td><td>{new Date(o.ordered_at).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})}</td><td title={o.item_summary}>{o.item_count}개 / {o.item_summary?.slice(0,40)}</td><td>{Number(o.item_total_price).toLocaleString()}원</td><td><button onClick={()=>handleQueue(o.wise_order_id,"approve")} style={darkButtonStyle}>ddoga 등록</button> <button onClick={()=>handleQueue(o.wise_order_id,"ignore")} style={secondaryButtonStyle}>제외</button></td></tr>)}</tbody>
-   </table></div>
-   <p>주문별 등록 후 국내 주문 목록에서 수동 합배송하세요. 기존 주문과 중복이 의심되면 등록을 막습니다.</p>
+   <p>중복 의심 주문과 기존 대기 주문은 선택할 수 없습니다.</p>
   </div>
  </section>
 }
