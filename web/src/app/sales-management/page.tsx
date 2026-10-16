@@ -5,14 +5,11 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties, type For
 type SaleRow = { id: string; order_id: string; item_name: string; item_price: number; buyer_nickname: string; ordered_at: string };
 type Buyer = { buyer_nickname: string; sales: number; order_count: number; item_count: number };
 type Period = { key: string; sales: number; order_count: number; item_count: number; sales_rows: SaleRow[] };
-type Report = { monthly: Period[]; quarterly: Period[]; all_time_sales_rows: SaleRow[]; excluded_item_count: number; included_order_count: number; included_item_count: number; imported_order_count: number; last_imported_at: string | null; default_excluded_keywords: string[]; excluded_keywords: string[] };
-type StockItem = { display_name?: string; product_name?: string; option_text?: string; purchase_quantity?: number; component_count?: number; unit_cost_price?: number };
 type ItemPref = { includeCost: boolean; memo: string; deleted?: boolean };
+type ItemSettings = { id: string; includeCost: boolean; memo: string; deleted: boolean };
+type Report = { monthly: Period[]; quarterly: Period[]; all_time_sales_rows: SaleRow[]; excluded_item_count: number; included_order_count: number; included_item_count: number; imported_order_count: number; last_imported_at: string | null; wise_gross_total: number; settings: { cumulative_settled_amount: number; excluded_keywords: string[]; item_settings: ItemSettings[] } };
+type StockItem = { display_name?: string; product_name?: string; option_text?: string; purchase_quantity?: number; component_count?: number; unit_cost_price?: number };
 type ItemPrefs = Record<string, ItemPref>;
-const KEYWORD_KEY = "ddoga_sales_active_keywords";
-const LEGACY_KEYWORD_KEY = "ddoga_sales_excluded_keywords";
-const ITEM_PREFS_KEY = "ddoga_sales_item_settings";
-const DEFAULT_KEYWORDS = ["야생", "용자", "소장", "양도", "양고", "배송비", "배송료", "택배비", "送料", "shipping fee", "shipping cost", "delivery fee", "postage"];
 const money = (value: number) => Math.round(Number(value || 0)).toLocaleString("ko-KR");
 const itemKey = (text: string) => text.normalize("NFKC").toLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
 const pageStyle: CSSProperties = { maxWidth: 1380, margin: "0 auto", padding: 24, color: "#111827" };
@@ -64,11 +61,7 @@ function visibleRows(rows: SaleRow[], prefs: ItemPrefs) {
 }
 function summarizeRows(rows: SaleRow[], prefs: ItemPrefs) {
   const visible = visibleRows(rows, prefs);
-  return {
-    sales: visible.reduce((sum, row) => sum + Number(row.item_price || 0), 0),
-    item_count: visible.length,
-    order_count: new Set(visible.map(row => row.order_id)).size,
-  };
+  return { sales: visible.reduce((sum, row) => sum + Number(row.item_price || 0), 0), item_count: visible.length, order_count: new Set(visible.map(row => row.order_id)).size };
 }
 function buyersFromRows(rows: SaleRow[], prefs: ItemPrefs): Buyer[] {
   const map = new Map<string, { sales: number; orderIds: Set<string>; item_count: number }>();
@@ -77,7 +70,7 @@ function buyersFromRows(rows: SaleRow[], prefs: ItemPrefs): Buyer[] {
     const buyer = map.get(name) || { sales: 0, orderIds: new Set<string>(), item_count: 0 };
     buyer.sales += Number(row.item_price || 0);
     buyer.orderIds.add(row.order_id);
-    buyer.item_count += 1;
+    buyer.item_count++;
     map.set(name, buyer);
   }
   return Array.from(map, ([buyer_nickname, row]) => ({ buyer_nickname, sales: row.sales, order_count: row.orderIds.size, item_count: row.item_count })).sort((a, b) => b.sales - a.sales);
@@ -96,24 +89,26 @@ function cleanPrefs(value: unknown): ItemPrefs {
 export default function SalesManagementPage() {
   const [report, setReport] = useState<Report | null>(null);
   const [inventory, setInventory] = useState<StockItem[]>([]);
-  const [keywords, setKeywords] = useState<string[]>(DEFAULT_KEYWORDS);
+  const [keywords, setKeywords] = useState<string[]>([]);
   const [keywordInput, setKeywordInput] = useState("");
   const [savedPrefs, setSavedPrefs] = useState<ItemPrefs>({});
   const [draftPrefs, setDraftPrefs] = useState<ItemPrefs>({});
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [granularity, setGranularity] = useState<"month" | "quarter">("month");
   const [selectedPeriod, setSelectedPeriod] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [settledAmount, setSettledAmount] = useState(0);
+  const [settledInput, setSettledInput] = useState("0");
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
-  const refresh = useCallback(async (terms: string[]) => {
+  const refresh = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const [salesResponse, stockResponse] = await Promise.all([
-        fetch("/api/sales-management", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ excluded_keywords: terms }), cache: "no-store" }),
+        fetch("/api/sales-management", { cache: "no-store" }),
         fetch("/api/sale-inventory", { cache: "no-store" }),
       ]);
       const [salesData, stockData] = await Promise.all([salesResponse.json(), stockResponse.json()]);
@@ -121,6 +116,14 @@ export default function SalesManagementPage() {
       if (!stockResponse.ok || !stockData.ok) throw new Error(stockData.message || "방송판매재고 원가를 불러오지 못했습니다.");
       setReport(salesData);
       setInventory(Array.isArray(stockData.items) ? stockData.items : []);
+      const amount = Number(salesData.settings?.cumulative_settled_amount || 0);
+      setSettledAmount(amount);
+      setSettledInput(String(amount));
+      setKeywords(Array.isArray(salesData.settings?.excluded_keywords) ? salesData.settings.excluded_keywords : []);
+      const prefs: ItemPrefs = {};
+      for (const row of salesData.settings?.item_settings || []) prefs[String(row.id)] = { includeCost: row.includeCost !== false, memo: String(row.memo || ""), deleted: row.deleted === true };
+      setSavedPrefs(prefs);
+      setDraftPrefs(prefs);
     } catch (e) {
       setError(e instanceof Error ? e.message : "자료를 불러오지 못했습니다.");
     } finally {
@@ -128,26 +131,7 @@ export default function SalesManagementPage() {
     }
   }, []);
 
-  useEffect(() => {
-    let activeTerms = DEFAULT_KEYWORDS;
-    try {
-      const active = localStorage.getItem(KEYWORD_KEY);
-      if (active !== null) {
-        const parsed = JSON.parse(active);
-        if (Array.isArray(parsed)) activeTerms = parsed.map(x => String(x || "").trim()).filter(Boolean);
-      } else {
-        const legacy = JSON.parse(localStorage.getItem(LEGACY_KEYWORD_KEY) || "[]");
-        if (Array.isArray(legacy)) activeTerms = [...new Set([...DEFAULT_KEYWORDS, ...legacy.map(x => String(x || "").trim()).filter(Boolean)])];
-        localStorage.setItem(KEYWORD_KEY, JSON.stringify(activeTerms));
-      }
-    } catch {}
-    let prefs: ItemPrefs = {};
-    try { prefs = cleanPrefs(JSON.parse(localStorage.getItem(ITEM_PREFS_KEY) || "{}")); } catch {}
-    setKeywords(activeTerms);
-    setSavedPrefs(prefs);
-    setDraftPrefs(prefs);
-    void refresh(activeTerms);
-  }, [refresh]);
+  useEffect(() => { void refresh(); }, [refresh]);
 
   const periods = useMemo(() => granularity === "month" ? report?.monthly || [] : report?.quarterly || [], [granularity, report]);
   const selectedKey = periods.some(p => p.key === selectedPeriod) ? selectedPeriod : periods[0]?.key || "";
@@ -162,8 +146,7 @@ export default function SalesManagementPage() {
     const key = row.id;
     const unitCost = costIndex.get(itemKey(row.item_name));
     const includeCost = draftPrefs[key]?.includeCost !== false;
-    const memo = draftPrefs[key]?.memo || "";
-    return { ...row, key, unitCost: unitCost ?? null, includeCost, memo, cost: includeCost && unitCost != null ? unitCost : null };
+    return { ...row, key, unitCost: unitCost ?? null, includeCost, memo: draftPrefs[key]?.memo || "", cost: includeCost && unitCost != null ? unitCost : null };
   }), [currentRows, costIndex, draftPrefs]);
   const knownCost = itemRows.reduce((sum, row) => sum + (row.cost ?? 0), 0);
   const unmatchedQuantity = itemRows.reduce((sum, row) => sum + (row.includeCost && row.unitCost == null ? 1 : 0), 0);
@@ -171,20 +154,39 @@ export default function SalesManagementPage() {
   const allRowsById = useMemo(() => new Map((report?.all_time_sales_rows || []).map(row => [row.id, row])), [report]);
   const deletedItems = Object.entries(savedPrefs).filter(([, pref]) => pref.deleted);
   const hasUnsaved = JSON.stringify(savedPrefs) !== JSON.stringify(draftPrefs);
+  const expectedSettlement = Math.round(Number(report?.wise_gross_total || 0) * 0.94 - settledAmount);
 
-  const saveKeywords = (next: string[]) => {
+  const saveKeywords = async (next: string[]) => {
     const unique = Array.from(new Set(next.map(x => x.normalize("NFKC").trim()).filter(Boolean))).slice(0, 100);
-    setKeywords(unique);
-    localStorage.setItem(KEYWORD_KEY, JSON.stringify(unique));
-    setNotice("제외 키워드를 저장했습니다.");
-    void refresh(unique);
+    try {
+      const response = await fetch("/api/sales-management", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ excluded_keywords: unique }) });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.message || "키워드 저장에 실패했습니다.");
+      setKeywords(unique);
+      setNotice("제외 키워드를 DB에 저장했습니다.");
+      await refresh();
+    } catch (e) { setError(e instanceof Error ? e.message : "키워드 저장에 실패했습니다."); }
   };
   const addKeyword = (event: FormEvent) => {
     event.preventDefault();
     const term = keywordInput.normalize("NFKC").trim();
     if (!term || keywords.some(x => x.toLowerCase() === term.toLowerCase())) return;
     setKeywordInput("");
-    saveKeywords([...keywords, term]);
+    void saveKeywords([...keywords, term]);
+  };
+  const saveSettlement = async (event: FormEvent) => {
+    event.preventDefault();
+    const amount = Number(settledInput.replace(/,/g, ""));
+    if (!Number.isFinite(amount) || amount < 0) { setError("누적 정산금액은 0 이상의 숫자로 입력해 주세요."); return; }
+    try {
+      const response = await fetch("/api/sales-management", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cumulative_settled_amount: amount }) });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.message || "누적 정산금액 저장에 실패했습니다.");
+      setSettledAmount(Number(data.settings.cumulative_settled_amount));
+      setSettledInput(String(data.settings.cumulative_settled_amount));
+      setNotice("누적 정산금액을 DB에 저장했습니다.");
+      setError("");
+    } catch (e) { setError(e instanceof Error ? e.message : "누적 정산금액 저장에 실패했습니다."); }
   };
   const updateDraft = (key: string, patch: Partial<ItemPref>) => {
     setDraftPrefs(current => ({ ...current, [key]: { includeCost: current[key]?.includeCost !== false, memo: current[key]?.memo || "", deleted: current[key]?.deleted === true, ...patch } }));
@@ -198,18 +200,21 @@ export default function SalesManagementPage() {
     });
     if (patch.deleted) setSelectedItems([]);
   };
-  const saveItemSettings = () => {
+  const saveItemSettings = async () => {
     setSaving(true);
     try {
       const normalized = cleanPrefs(draftPrefs);
-      localStorage.setItem(ITEM_PREFS_KEY, JSON.stringify(normalized));
+      const item_settings = Object.entries(normalized).map(([id, row]) => ({ id, includeCost: row.includeCost, memo: row.memo, deleted: row.deleted === true }));
+      const response = await fetch("/api/sales-management", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ item_settings }) });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.message || "아이템 설정 저장에 실패했습니다.");
       setSavedPrefs(normalized);
       setDraftPrefs(normalized);
       setSelectedItems([]);
-      setNotice("아이템 설정과 메모를 저장했습니다.");
+      setNotice("아이템 설정과 메모를 DB에 저장했습니다.");
       setError("");
-    } catch {
-      setError("저장하지 못했습니다. 브라우저 저장 공간을 확인해 주세요.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "아이템 설정 저장에 실패했습니다.");
     } finally {
       setSaving(false);
     }
@@ -226,9 +231,9 @@ export default function SalesManagementPage() {
 
     <section style={{ padding: 16, marginBottom: 16, border: "1px solid #e5e7eb", borderRadius: 12, background: "#fff" }}>
       <div style={{ fontWeight: 800, marginBottom: 5 }}>제외할 와이스 아이템 키워드</div>
-      <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 12 }}>키워드의 ×로 삭제, 아래에서 추가할 수 있습니다. 기본 키워드도 삭제할 수 있습니다.</div>
+      <div style={{ color: "#6b7280", fontSize: 12, marginBottom: 12 }}>키워드의 ×로 삭제, 아래에서 추가할 수 있습니다. 기본 키워드도 삭제할 수 있고 설정은 DB에 저장됩니다.</div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-        {keywords.map(term => <span key={term} style={chip}>{term}<button aria-label={term + " 키워드 삭제"} onClick={() => saveKeywords(keywords.filter(x => x !== term))} style={{ border: 0, background: "transparent", color: "#6b7280", cursor: "pointer", fontWeight: 900, marginLeft: 5 }}>×</button></span>)}
+        {keywords.map(term => <span key={term} style={chip}>{term}<button aria-label={term + " 키워드 삭제"} onClick={() => void saveKeywords(keywords.filter(x => x !== term))} style={{ border: 0, background: "transparent", color: "#6b7280", cursor: "pointer", fontWeight: 900, marginLeft: 5 }}>×</button></span>)}
         {!keywords.length && <span style={{ color: "#9ca3af", fontSize: 12 }}>제외 키워드가 없습니다.</span>}
       </div>
       <form onSubmit={addKeyword} style={{ display: "flex", gap: 8, maxWidth: 520 }}>
@@ -243,7 +248,6 @@ export default function SalesManagementPage() {
       <select aria-label="기간 선택" value={selectedKey} onChange={e => setSelectedPeriod(e.target.value)} style={{ height: 36, padding: "0 10px", border: "1px solid #d1d5db", borderRadius: 8, background: "#fff", fontWeight: 700 }}>
         {periods.map(p => <option value={p.key} key={p.key}>{periodLabel(p.key)}</option>)}
       </select>
-      <span style={{ color: "#6b7280", fontSize: 12 }}>집계는 키워드 제외 후 계산합니다.</span>
     </section>
 
     {notice && <div style={{ padding: 10, marginBottom: 12, borderRadius: 8, background: "#f0fdf4", color: "#166534", fontSize: 13 }}>{notice}</div>}
@@ -252,15 +256,23 @@ export default function SalesManagementPage() {
 
     {!loading && !error && report && <>
       <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12 }}>
-        <article style={{ ...card, background: "#eff6ff", borderColor: "#bfdbfe" }}><span style={label}>매출 · {selectedKey ? periodLabel(selectedKey) : "선택 기간"}</span><strong style={{ ...value, color: "#1d4ed8" }}>{money(currentSummary.sales)}원</strong><small style={{ color: "#6b7280" }}>키워드·삭제 적용 · 주문 {money(currentSummary.order_count)}건</small></article>
-        <article style={card}><span style={label}>방송판매재고 기준 사입원가</span><strong style={value}>{money(knownCost)}원</strong><small style={{ color: "#6b7280" }}>Y 아이템만 계산 · 미매칭 {money(unmatchedQuantity)}개</small></article>
+        <article style={{ ...card, background: "#eff6ff", borderColor: "#bfdbfe" }}><span style={label}>매출 · {selectedKey ? periodLabel(selectedKey) : "선택 기간"}</span><strong style={{ ...value, color: "#1d4ed8" }}>{money(currentSummary.sales)}원</strong><small style={{ color: "#6b7280" }}>필터·삭제 적용 · 주문 {money(currentSummary.order_count)}건</small></article>
+        <article style={card}><span style={label}>방송판매재고 기준 사입원가</span><strong style={value}>{money(knownCost)}원</strong><small style={{ color: "#6b7280" }}>Y 아이템만 · 미매칭 {money(unmatchedQuantity)}개</small></article>
         <article style={{ ...card, background: "#f0fdf4", borderColor: "#bbf7d0" }}><span style={label}>매출 − 확인된 상품원가</span><strong style={{ ...value, color: grossAfterCogs >= 0 ? "#15803d" : "#b91c1c" }}>{money(grossAfterCogs)}원</strong><small style={{ color: "#6b7280" }}>수수료·세금·미매칭 원가 제외 전 차액</small></article>
-        <article style={{ ...card, background: "#f9fafb" }}><span style={label}>와이스 통장 입금</span><strong style={{ ...value, fontSize: 20, color: "#6b7280" }}>데이터 연동 대기</strong><small style={{ color: "#6b7280" }}>입금 내역 링크를 받으면 연결합니다.</small></article>
+        <article style={{ ...card, background: "#f8fafc" }}><span style={label}>와이스 전체 판매금액 · 누적</span><strong style={value}>{money(Number(report.wise_gross_total || 0))}원</strong><small style={{ color: "#6b7280" }}>배송비·키워드·아이템 삭제·원가토글 적용 전 전체</small></article>
+        <article style={{ ...card, background: "#fff7ed", borderColor: "#fed7aa" }}><span style={label}>누적 정산예정액</span><strong style={{ ...value, color: "#c2410c" }}>{money(expectedSettlement)}원</strong><small style={{ color: "#6b7280" }}>전체 판매금액 × 0.94 − 누적 정산금액</small></article>
+        <article style={card}>
+          <span style={label}>누적 정산금액 · 통장 입금완료</span>
+          <form onSubmit={saveSettlement} style={{ display: "flex", gap: 6, marginTop: 8 }}>
+            <input inputMode="decimal" value={settledInput} onChange={e => setSettledInput(e.target.value)} style={{ width: 145, minWidth: 0, height: 34, padding: "0 8px", border: "1px solid #d1d5db", borderRadius: 7 }} />
+            <button type="submit" style={button}>저장</button>
+          </form>
+          <small style={{ display: "block", color: "#6b7280", marginTop: 8 }}>현재 {money(settledAmount)}원</small>
+        </article>
       </section>
 
       <section style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", padding: "12px 14px", margin: "14px 0 20px", background: "#f9fafb", borderRadius: 10, color: "#4b5563", fontSize: 12 }}>
-        <span>가져온 와이스 주문 {money(Number(report.imported_order_count || 0))}건</span><span>집계 주문 {money(currentSummary.order_count)}건</span><span>제외 아이템 {money(Number(report.excluded_item_count || 0))}개</span><span>마지막 동기화 {kstDate(report.last_imported_at)}</span>
-        <span style={{ marginLeft: "auto" }}>아이템 설정·메모는 이 브라우저에 저장됩니다.</span>
+        <span>가져온 와이스 주문 {money(Number(report.imported_order_count || 0))}건</span><span>집계 주문 {money(currentSummary.order_count)}건</span><span>키워드 제외 아이템 {money(Number(report.excluded_item_count || 0))}개</span><span>마지막 동기화 {kstDate(report.last_imported_at)}</span>
       </section>
 
       <section style={panel}>
@@ -291,8 +303,7 @@ export default function SalesManagementPage() {
               const pendingDelete = draft.deleted === true && !savedPrefs[row.key]?.deleted;
               return <tr key={row.key} style={{ background: pendingDelete ? "#fff7ed" : "#fff", opacity: pendingDelete ? 0.55 : 1 }}>
                 <td style={td}><input aria-label={row.item_name + " 선택"} type="checkbox" checked={selectedItems.includes(row.key)} onChange={() => toggleSelected(row.key)} /></td>
-                <td style={td}>{kstDate(row.ordered_at)}</td><td style={td}>{row.buyer_nickname || "(닉네임 없음)"}</td>
-                <td style={td}><b>{row.item_name}</b>{pendingDelete && <div style={{ color: "#b45309", fontSize: 11 }}>저장하면 삭제</div>}</td>
+                <td style={td}>{kstDate(row.ordered_at)}</td><td style={td}>{row.buyer_nickname || "(닉네임 없음)"}</td><td style={td}><b>{row.item_name}</b>{pendingDelete && <div style={{ color: "#b45309", fontSize: 11 }}>저장하면 삭제</div>}</td>
                 <td style={td}>{money(row.item_price)}원</td>
                 <td style={td}><button onClick={() => updateDraft(row.key, { includeCost: !draft.includeCost })} aria-label="매입금액 포함 여부 전환" style={{ ...button, minWidth: 44, padding: "5px 10px", background: draft.includeCost ? "#dcfce7" : "#f3f4f6", borderColor: draft.includeCost ? "#86efac" : "#d1d5db", color: draft.includeCost ? "#166534" : "#6b7280" }}>{draft.includeCost ? "Y" : "N"}</button></td>
                 <td style={td}>{row.unitCost == null ? <span style={{ color: "#b91c1c" }}>미매칭</span> : money(row.unitCost) + "원"}</td>
