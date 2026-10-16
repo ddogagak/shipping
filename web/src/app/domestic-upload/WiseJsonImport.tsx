@@ -8,7 +8,7 @@ type Candidate={wise_order_id:number;nickname:string;ordered_at:string;items:num
 const labels:Record<string,string>={accepted:"입력됨",checked:"재고확인",kept:"직배킵",packaged:"포장완료",done:"완료",start:"시작",excel_exported:"엑셀 추출",uploaded:"운송장 입력",registered:"운송장등록"};
 function stateText(k:string,v:unknown){return k==="tracking_registered"?(v?"Y":"N"):v==null?"미설정":labels[String(v)]??String(v)}
 export default function WiseJsonImport(){
- const [activity,setActivity]=useState<""|"pull"|"preview"|"save"|"update">("");
+ const [activity,setActivity]=useState<""|"pull"|"preview"|"save"|"update"|"sales_sync">("");
  const [pulling,setPulling]=useState(false);
  const pullTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
  function finishPull(){if(pullTimer.current)clearTimeout(pullTimer.current);setPulling(false);setActivity("");}
@@ -52,6 +52,17 @@ export default function WiseJsonImport(){
  const [loading,setLoading]=useState(false);
  const [message,setMessage]=useState("");
  const [preview,setPreview]=useState<{total:number;new_orders:Candidate[];possible_existing:Candidate[];queued_orders:Candidate[];already_queued:number;update_candidates:UpdateCandidate[]}|null>(null);
+ async function syncSales(){
+  if(!file)return;
+  setLoading(true);setActivity("sales_sync");setMessage("와이스 주문 매출자료 저장 중…");
+  try{
+   const form=new FormData();form.append("file",file);form.append("mode","sales_sync");
+   const res=await fetch("/api/domestic/wise-json-import",{method:"POST",body:form});
+   const data=await res.json();if(!res.ok)throw new Error(data.error||"매출자료 저장 실패");
+   setMessage("매출자료 저장 완료: "+Number(data.sales_saved||0).toLocaleString("ko-KR")+"건");
+  }catch(e){setMessage("매출자료 저장 실패: "+(e instanceof Error?e.message:"알 수 없는 오류"))}
+  finally{setLoading(false);setActivity("")}
+ }
  async function run(mode:"preview"|"save"){
   if(!file)return;
   if(mode==="save"&&(!selectedNew.length||!confirm(`선택 ${selectedNew.length}건을 등록할까?`)))return;
@@ -88,6 +99,7 @@ export default function WiseJsonImport(){
   <input disabled={loading||pulling} type="file" accept=".json,application/json" onChange={e=>{setFile(e.target.files?.[0]??null);setPreview(null);setMessage("")}}/>
   <div style={{display:"flex",gap:8,marginTop:16}}>
    <button disabled={!file||loading||pulling} onClick={()=>run("preview")} style={primaryButtonStyle}>{activity==="preview"?"미리보기 가져오는 중…":"미리보기"}</button>
+   <button disabled={!file||loading||pulling} onClick={()=>void syncSales()} style={darkButtonStyle}>{activity==="sales_sync"?"매출자료 저장 중…":"매출자료 저장"}</button>
    
   </div>
   <div role="status" aria-live="polite" aria-busy={loading||pulling} style={{marginTop:16,padding:14,borderRadius:10,background:loading||pulling?"#eff6ff":"#f3f4f6",fontWeight:700}}>{loading||pulling?"⏳ 처리 중: ":"현재 상태: "}{message||"대기 중 — 와이스 판매목록을 가져오거나 JSON 파일을 선택해 주세요."}</div>
