@@ -37,21 +37,22 @@ export default function WiseJsonImport(){
  const [queueError,setQueueError]=useState("");
  async function loadQueue(){try{const r=await fetch("/api/domestic/wise-json-queue");const d=await r.json();if(!r.ok)throw new Error(d.error);setQueue(d.orders??[]);setQueueError("");}catch(e){setQueueError(e instanceof Error?e.message:"조회 실패")}}
  async function handleQueue(id:number,action:"approve"|"ignore"){if(!confirm(action==="approve"?"이 신규 주문을 ddoga 주문으로 등록할까요?":"이 주문을 대기열에서 제외할까요?"))return;try{const r=await fetch("/api/domestic/wise-json-queue",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({wise_order_id:id,action})});const d=await r.json();if(!r.ok)throw new Error(d.error);await loadQueue();setMessage(action==="approve"?`주문 등록 완료: ${d.order_id}`:"대기열에서 제외했습니다.");}catch(e){setMessage(e instanceof Error?e.message:"처리 실패")}}
+ const [selectedNew,setSelectedNew]=useState<number[]>([]);
  const [selectedUpdates,setSelectedUpdates]=useState<number[]>([]);
  const [loading,setLoading]=useState(false);
  const [message,setMessage]=useState("");
  const [preview,setPreview]=useState<{total:number;new_orders:Candidate[];possible_existing:Candidate[];queued_orders:Candidate[];already_queued:number;update_candidates:UpdateCandidate[]}|null>(null);
  async function run(mode:"preview"|"save"){
   if(!file)return;
-  if(mode==="save"&&!confirm("와이스 주문 스냅샷을 갱신하고 신규 주문을 검토 대기열에 등록할까요? ddoga 주문/배송 데이터는 수정하지 않습니다."))return;
+  if(mode==="save"&&(!selectedNew.length||!confirm(`선택 ${selectedNew.length}건을 등록할까?`)))return;
   setLoading(true);setMessage("");
   try{
-   const form=new FormData();form.append("file",file);form.append("mode",mode);
+   const form=new FormData();form.append("file",file);form.append("mode",mode);if(mode==="save")form.append("selected_ids",JSON.stringify(selectedNew));
    const res=await fetch("/api/domestic/wise-json-import",{method:"POST",body:form});
    const data=await res.json();
    if(!res.ok)throw new Error(data.error||"업로드 실패");
-   if(mode==="preview"){setPreview(data);setSelectedUpdates((data.update_candidates??[]).map((x:UpdateCandidate)=>x.wise_order_id));setMessage("미리보기 완료. 기존 주문 추정은 닉네임+주문시각 기준이며 확인이 필요합니다.");}
-   else{setPreview(null);setMessage(`저장 완료: 신규 검토 대기 ${data.queued_new}건 / 와이스 스냅샷 ${data.updated_snapshots}건 / 상품 ${data.updated_items}건. ddoga 주문/배송정보 변경 없음.`);}
+   if(mode==="preview"){setPreview(data);setSelectedNew(data.new_orders.map((x:Candidate)=>x.wise_order_id));setSelectedUpdates((data.update_candidates??[]).map((x:UpdateCandidate)=>x.wise_order_id));setMessage("미리보기 완료. 기존 주문 추정은 닉네임+주문시각 기준이며 확인이 필요합니다.");}
+   else{const response=await fetch("/api/domestic/wise-json-queue",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"approve_bulk",wise_order_ids:selectedNew})});const result=await response.json();if(!response.ok)throw new Error(result.error||"일괄 등록 실패");setPreview(null);setSelectedNew([]);setMessage(`등록 성공 ${result.saved}건 / 실패 ${result.failed}건`+(result.failed?" : "+result.results.filter((x:{ok:boolean})=>!x.ok).map((x:{wise_order_id:number;error:string})=>x.wise_order_id+" "+x.error).join(", "):""));}
   }catch(e){setMessage(e instanceof Error?e.message:"알 수 없는 오류")}finally{setLoading(false)}
  }
  async function applyUpdates(){
@@ -74,7 +75,7 @@ export default function WiseJsonImport(){
   <input type="file" accept=".json,application/json" onChange={e=>{setFile(e.target.files?.[0]??null);setPreview(null);setMessage("")}}/>
   <div style={{display:"flex",gap:8,marginTop:16}}>
    <button disabled={!file||loading} onClick={()=>run("preview")} style={primaryButtonStyle}>미리보기</button>
-   <button disabled={!file||loading||!preview} onClick={()=>run("save")} style={darkButtonStyle}>와이스 DB 갱신 + 신규 대기 등록</button>
+   <button disabled={!file||loading||!preview||!selectedNew.length} onClick={()=>run("save")} style={darkButtonStyle}>선택 {selectedNew.length}건 DDOGA 등록</button>
   </div>
   {message&&<p>{message}</p>}
   {preview&&preview.update_candidates?.length>0&&<div style={{marginTop:18,padding:14,border:"1px solid #cbd5e1",borderRadius:12}}>
