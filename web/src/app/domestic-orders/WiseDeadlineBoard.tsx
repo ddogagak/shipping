@@ -71,8 +71,9 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
     setUpdatedAt(time);
     setNotice("와이스 "+buyers.length+"명 조회 완료 · DB 저장 중...");
     void fetch("/api/domestic/wise-snapshot",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rows:next,complete:true})})
-      .then(async response=>{const data=await response.json();if(!response.ok)throw Error(data.error||"DB 저장 실패");setUpdatedAt(data.updatedAt);localStorage.setItem(CACHE_KEY,JSON.stringify({rows:next,updatedAt:data.updatedAt}));setWiseRows(data.rows||next);setNotice("와이스 "+buyers.length+"명 동기화 · DB 저장 완료");})
-      .catch(error=>setNotice("와이스 조회 완료 · DB 저장 실패: "+String(error.message||error)));
+      .then(async response=>{const data=await response.json();if(!response.ok)throw Error(data.error||"DB 저장 실패");setUpdatedAt(data.updatedAt);localStorage.setItem(CACHE_KEY,JSON.stringify({rows:data.rows||next,updatedAt:data.updatedAt}));setWiseRows(data.rows||next);setNotice("와이스 "+buyers.length+"명 동기화 · DB 저장 완료");})
+      .catch(error=>setNotice("와이스 조회 완료 · DB 저장 실패: "+String(error.message||error)))
+      .finally(()=>setBusy(false));
    }
   };
   window.addEventListener("message",onMessage);
