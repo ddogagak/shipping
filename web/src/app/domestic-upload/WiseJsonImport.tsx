@@ -90,7 +90,7 @@ export default function WiseJsonImport(){
   </div>}
   {preview&&<div style={{marginTop:18}}>
    <p>전체 {preview.total}건 / 신규 {preview.new_orders.length}건 / 중복 의심 {preview.possible_existing.length}건 / 기존 대기 {preview.already_queued}건</p>
-   <label><input type="checkbox" checked={preview.new_orders.length>0&&selectedNew.length===preview.new_orders.length} onChange={e=>setSelectedNew(e.target.checked?preview.new_orders.map(x=>x.wise_order_id):[])}/> 신규 전체 선택 ({selectedNew.length}건)</label>
+   <label><input type="checkbox" checked={(preview.new_orders.length+(preview.queued_orders??[]).filter(o=>!o.existingDomestic).length)>0&&selectedNew.length===preview.new_orders.length+(preview.queued_orders??[]).filter(o=>!o.existingDomestic).length} onChange={e=>setSelectedNew(e.target.checked?[...preview.new_orders,...(preview.queued_orders??[]).filter(o=>!o.existingDomestic)].map(x=>x.wise_order_id):[])}/> 신규 전체 선택 ({selectedNew.length}건)</label>
    <div style={{maxHeight:480,overflow:"auto",marginTop:12}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}>
     <thead><tr><th>선택</th><th>분류</th><th>주문 ID</th><th>닉네임</th><th>주문시각</th><th>상품수</th></tr></thead>
     <tbody>{[...preview.new_orders.map(o=>({...o,category:"신규"})),...preview.possible_existing.map(o=>({...o,category:"중복 의심"})),...(preview.queued_orders??[]).filter(o=>!o.existingDomestic).map(o=>({...o,category:"기존 대기"}))].map(o=><tr key={o.category+o.wise_order_id} style={{borderTop:"1px solid #ddd",background:o.category==="신규"?"white":"#f1f5f9"}}>
