@@ -52,6 +52,8 @@ export async function GET() {
     for (const row of salesRows) {
       const date = kstDate(row.ordered_at);
       if (!date) continue;
+      const imported = String(row.imported_at || "");
+      if (imported && imported > lastImportedAt) lastImportedAt = imported;
       const haystack = [row.buyer_nickname, ...(Array.isArray(row.item_names) ? row.item_names : [])].join(" ").normalize("NFKC");
       if (EXCLUDED.some(keyword => haystack.includes(keyword))) {
         excludedOrderCount++;
@@ -65,8 +67,6 @@ export async function GET() {
         bucket.order_count += 1;
         map.set(key, bucket);
       }
-      const imported = String(row.imported_at || "");
-      if (imported && imported > lastImportedAt) lastImportedAt = imported;
     }
     for (const row of purchaseRows) {
       const date = kstDate(row.ordered_at);
