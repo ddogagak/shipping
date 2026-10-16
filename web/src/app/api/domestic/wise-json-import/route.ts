@@ -93,6 +93,23 @@ export async function POST(req:Request){
   }
   if(mode==="preview")return NextResponse.json({ok:true,total:rows.length,excluded_count:parsed.length-orders.length,new_orders:rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued).map(({order,...x})=>x),possible_existing:rows.filter(x=>x.existingDomestic).map(({order,...x})=>x),already_queued:rows.filter(x=>x.alreadyQueued).length,update_candidates:uniqueUpdates,queued_orders:rows.filter(x=>x.alreadyQueued).map(({order,...x})=>x),notice:"닉네임+주문 분 단위 날짜로 기존 주문을 추정합니다. 동일 분 주문은 검토가 필요합니다."});
   if(mode!=="save")return NextResponse.json({error:"Invalid mode"},{status:400});
+  // Keep a financial snapshot for every order in the Wise export, including completed statuses.
+  const importedAt=new Date().toISOString();
+  const salesRows=(parsed as RawOrder[]).filter(o=>validDate(o.createdAt)).map(o=>({
+   wise_order_id:o.id,
+   buyer_nickname:asText(o.user?.nickname),
+   ordered_at:validDate(o.createdAt)!,
+   wise_status:Number.isSafeInteger(o.status)?o.status:null,
+   item_names:(o.stocks??[]).map(s=>asText(s.name)).filter(Boolean),
+   total_amount:(o.stocks??[]).reduce((sum,s)=>{const n=Number(s.price??0);return sum+(Number.isFinite(n)?n:0)},0),
+   item_count:o.stocks?.length??0,
+   raw_data:{stocks:(o.stocks??[]).map(s=>({id:s.id,name:asText(s.name),price:Number(s.price??0)}))},
+   imported_at:importedAt
+  }));
+  for(const chunk of batches(salesRows)){
+   const {error}=await db.from("domestic_wise_sales_order").upsert(chunk,{onConflict:"wise_order_id"});
+   if(error)throw new Error("와이스 매출 스냅샷 저장 실패: "+error.message);
+  }
   // Never alter existing domestic orders or shipping. Refresh WYYYES-only snapshots and item metadata.
   for(const chunk of batches(orders)){
    const snapshots=chunk.map(o=>({wise_order_id:o.id,wise_status:o.status??null,wise_delivery_company:o.deliveryCompany??null,wise_delivery_code:o.deliveryCode??null,wise_start_at:validDate(o.startAt),wise_updated_at:validDate(o.updatedAt),snapshot_imported_at:new Date().toISOString()}));
@@ -111,7 +128,7 @@ export async function POST(req:Request){
    const payload=chunk.map(({order:o,ordered_at,nickname})=>({wise_order_id:o.id,buyer_nickname:nickname,ordered_at,receiver_name:o.receiverName??null,receiver_phone:o.receiverPhoneNum??null,postal_code:o.postNum??null,address:[o.addr1,o.addr2,o.addr3].filter(Boolean).join(" "),item_summary:(o.stocks??[]).map(s=>asText(s.name)).join(" / "),item_total_price:(o.stocks??[]).reduce((sum,s)=>sum+Number(s.price??0),0),item_count:o.stocks?.length??0}));
    const {error}=await db.from("domestic_wise_import_queue").upsert(payload,{onConflict:"wise_order_id",ignoreDuplicates:true});if(error)throw error;
   }
-  return NextResponse.json({ok:true,queued_new:fresh.length,updated_snapshots:orders.length,updated_items:photoRows.length,excluded_count:parsed.length-orders.length,skipped_existing:rows.filter(x=>x.existingDomestic).length,skipped_queued:rows.filter(x=>x.alreadyQueued).length});
+  return NextResponse.json({ok:true,queued_new:fresh.length,sales_saved:salesRows.length,updated_snapshots:orders.length,updated_items:photoRows.length,excluded_count:parsed.length-orders.length,skipped_existing:rows.filter(x=>x.existingDomestic).length,skipped_queued:rows.filter(x=>x.alreadyQueued).length});
  }catch(e){
   console.error("Wise JSON import failed:",e);
   const err=e as {message?:string;details?:string;hint?:string;code?:string}|null;
