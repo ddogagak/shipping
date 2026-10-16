@@ -157,6 +157,7 @@ export async function GET() {
           product_url: item.product_url,
           purchase_quantity: boxQuantity,
           actual_purchase_unit_price: actualPurchaseUnitPrice,
+          can_fill_purchase_price: item.unit_price == null || Number(item.unit_price) === 0,
           actual_purchase_currency: purchaseCurrency,
           order_paid_amount: Number(order.paid_amount || 0),
           order_local_shipping: Number(order.local_shipping || 0),
@@ -208,6 +209,30 @@ export async function PATCH(req: Request) {
     }
 
     const sb = createServiceRoleClient();
+    // Missing import prices are stored as either NULL or 0. Fill once only.
+    if (body.action === "fill_missing_purchase_price") {
+      const value = body.unit_price;
+      if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+        return NextResponse.json({ ok: false, message: "0보다 큰 매입가를 입력해 주세요." }, { status: 400 });
+      }
+      const { data: item, error: readError } = await sb.from("purchase_items")
+        .select("id,quantity,unit_price").eq("id", body.purchase_item_id).maybeSingle();
+      if (readError) throw readError;
+      if (!item) return NextResponse.json({ ok: false, message: "상품을 찾을 수 없습니다." }, { status: 404 });
+      if (item.unit_price != null && Number(item.unit_price) !== 0) {
+        return NextResponse.json({ ok: false, message: "이미 매입가가 있는 상품은 수정할 수 없습니다." }, { status: 409 });
+      }
+      const lineTotal = value * Number(item.quantity ?? 0);
+      if (!Number.isFinite(lineTotal)) return NextResponse.json({ ok: false, message: "매입가가 너무 큽니다." }, { status: 400 });
+      // The conditional write also prevents concurrent requests from overwriting a filled price.
+      const { data: updated, error: updateError } = await sb.from("purchase_items")
+        .update({ unit_price: value, line_total: lineTotal })
+        .eq("id", body.purchase_item_id).or("unit_price.is.null,unit_price.eq.0")
+        .select("id,unit_price").maybeSingle();
+      if (updateError) throw updateError;
+      if (!updated) return NextResponse.json({ ok: false, message: "다른 작업에서 이미 매입가를 입력했습니다. 새로고침해 주세요." }, { status: 409 });
+      return NextResponse.json({ ok: true, unit_price: updated.unit_price });
+    }
     const hasImage = Object.prototype.hasOwnProperty.call(body, "image_url");
     const imageUrl = hasImage ? (String(body.image_url || "").trim() || null) : undefined;
     const hasDisplayName = Object.prototype.hasOwnProperty.call(body, "display_name");
