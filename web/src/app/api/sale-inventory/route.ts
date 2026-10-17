@@ -251,20 +251,12 @@ export async function PATCH(req: Request) {
     }
 
     if (hasImage) {
-      const productName = String(body.product_name || "").trim();
-      const optionText = String(body.option_text || "").trim();
-      if (productName) {
-        let q = sb.from("purchase_items").update({ image_url: imageUrl }).eq("product_name", productName);
-        q = optionText ? q.eq("option_text", optionText) : q.is("option_text", null);
-        const { error } = await q;
-        if (error) throw error;
-      }
-      if (body.sourcing_inventory_id) {
-        const { error } = await sb.from("inventory_items")
-          .update({ image_url: imageUrl })
-          .eq("id", body.sourcing_inventory_id);
-        if (error) throw error;
-      }
+      // Image changes must only affect the explicitly selected purchase item.
+      // Never update all items sharing a name or overwrite sourcing images.
+      const { error } = await sb.from("purchase_items")
+        .update({ image_url: imageUrl })
+        .eq("id", body.purchase_item_id);
+      if (error) throw error;
     }
 
     if (hasComponentCount && body.sourcing_inventory_id) {
