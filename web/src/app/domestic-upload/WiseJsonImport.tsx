@@ -98,8 +98,8 @@ export default function WiseJsonImport(){
    }
    const updatesById=new Map(preview?.update_candidates.map(x=>[x.candidate_id,x])??[]);
    const reallySaved=successful.filter((x:{candidate_id:string;order_id:string})=>{
-     const expected=String(updatesById.get(x.candidate_id)?.changes.phone??"").replace(/\\D/g,"");
-     const actual=String(verified.get(x.order_id)??"").replace(/\\D/g,"");
+     const expected=String(updatesById.get(x.candidate_id)?.changes.phone??"").replace(/\D/g,"");
+     const actual=String(verified.get(x.order_id)??"").replace(/\D/g,"");
      return expected.length>=8&&actual===expected;
    });
    const verifiedIds=new Set(reallySaved.map((x:{candidate_id:string})=>x.candidate_id));
