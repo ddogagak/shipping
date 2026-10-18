@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 export const runtime="nodejs";
-type RawOrder={id:number;status?:number;deliveryCompany?:string|null;deliveryCode?:string|null;startAt?:string|null;updatedAt?:string|null;createdAt?:string|null;receiverName?:string|null;receiverPhoneNum?:string|null;postNum?:string|null;addr1?:string|null;addr2?:string|null;addr3?:string|null;user?:{nickname?:string|null};stocks?:Array<{id:number;name?:string;price?:number;thumbnail?:string|null}>};
+type RawOrder={id:number;status?:number;deliveryCompany?:string|null;deliveryCode?:string|null;startAt?:string|null;updatedAt?:string|null;createdAt?:string|null;receiverName?:string|null;receiverPhoneNum?:string|null;receiverphonenum?:string|null;virtualPhoneNum?:string|null;virtualphonenum?:string|null;postNum?:string|null;addr1?:string|null;addr2?:string|null;addr3?:string|null;user?:{nickname?:string|null};stocks?:Array<{id:number;name?:string;price?:number;thumbnail?:string|null}>};
 function asText(v:unknown){return String(v??"").trim()}
 function validDate(v:unknown){const s=asText(v);return s&&!Number.isNaN(Date.parse(s))?s:null}
 function kst(v:string){return new Date(v).toLocaleString("sv-SE",{timeZone:"Asia/Seoul"}).slice(0,16)}
@@ -15,6 +15,11 @@ function domesticDateKey(v:unknown){
  return m?[m[1],m[2].padStart(2,"0"),m[3].padStart(2,"0")].join("-")+" "+m[4].padStart(2,"0")+":"+m[5]:"";
 }
 function phoneDigits(v:unknown){return asText(v).replace(/\D/g,"")}
+function validPhone(v:unknown){return phoneDigits(v).length>=8}
+function wisePhone(o:RawOrder){
+ const sources=[o.receiverPhoneNum,o.receiverphonenum,o.virtualPhoneNum,o.virtualphonenum];
+ return asText(sources.find(validPhone));
+}
 function orderNumberKey(v:unknown){return key(asText(v).replace(/-C\d+$/i,""))}
 // Diagnostic metadata only: never return raw phone values from unfamiliar source keys.
 function phoneKeyStats(orders:RawOrder[]){
@@ -148,28 +153,31 @@ export async function POST(req:Request){
   // Nickname alone determines eligible pairs. Only a real, nonempty phone difference is shown.
   const uniqueUpdates=(parsed as RawOrder[]).flatMap(order=>{
     const nickname=asText(order.user?.nickname);
-    const sourcePhone=asText(order.receiverPhoneNum);
-    if(!key(nickname)||phoneDigits(sourcePhone).length<8)return [];
+    const sourcePhone=wisePhone(order);
+    if(!key(nickname)||!sourcePhone)return [];
     return (byNickname.get(key(nickname))??[]).flatMap(d=>{
       const existingPhone=asText(d.phone);
-      if(phoneDigits(sourcePhone)===phoneDigits(existingPhone))return [];
+      if(phoneDigits(existingPhone))return [];
       const changes:Record<string,string>={phone:sourcePhone};
       return [{candidate_id:String(order.id)+"::"+d.order_id,wise_order_id:order.id,order_id:String(d.order_id),nickname,ordered_at:order.createdAt??null,wise_status:Number(order.status),delivery_company:order.deliveryCompany??null,tracking_number:null,current:{tracking_registered:null,shipping_status:null,order_status:d.order_status??null,phone:d.phone??null},changes}];
     });
   });
   const rawOrders=parsed as RawOrder[];
-  const sourceWithPhone=rawOrders.filter(o=>phoneDigits(o.receiverPhoneNum).length>=8);
+  const sourceWithPhone=rawOrders.filter(o=>Boolean(wisePhone(o)));
   const nicknameMatched=rawOrders.filter(o=>key(asText(o.user?.nickname))&&byNicknameAll.has(key(asText(o.user?.nickname))));
   const openNicknameMatched=rawOrders.filter(o=>key(asText(o.user?.nickname))&&byNickname.has(key(asText(o.user?.nickname))));
-  const missingPhoneInOpenMatched=openNicknameMatched.filter(o=>phoneDigits(o.receiverPhoneNum).length<8);
+  const missingPhoneInOpenMatched=openNicknameMatched.filter(o=>!wisePhone(o));
   const samePhonePairs=openNicknameMatched.reduce((sum,o)=>{
-   const digits=phoneDigits(o.receiverPhoneNum);
+   const digits=phoneDigits(wisePhone(o));
    return sum+(digits.length>=8?(byNickname.get(key(asText(o.user?.nickname)))??[]).filter(d=>phoneDigits(d.phone)===digits).length:0);
   },0);
   const phoneDiagnostics={
     wise_orders:rawOrders.length,
     wise_with_nickname:rawOrders.filter(o=>Boolean(key(asText(o.user?.nickname)))).length,
     wise_source_phone_available:sourceWithPhone.length,
+    wise_receiver_phone_available:rawOrders.filter(o=>validPhone(o.receiverPhoneNum)||validPhone(o.receiverphonenum)).length,
+    wise_virtual_phone_available:rawOrders.filter(o=>validPhone(o.virtualPhoneNum)||validPhone(o.virtualphonenum)).length,
+    wise_virtual_phone_field_present:rawOrders.filter(o=>Object.prototype.hasOwnProperty.call(o,"virtualPhoneNum")||Object.prototype.hasOwnProperty.call(o,"virtualphonenum")).length,
     wise_receiver_phone_field_present:rawOrders.filter(o=>Object.prototype.hasOwnProperty.call(o,"receiverPhoneNum")).length,
     ddoga_wise_orders:wiseDomestic.length,
     ddoga_open_orders:wiseDomestic.filter(d=>asText(d.order_status)!=="done"&&!completedShipping.has(String(d.order_id))).length,
@@ -202,7 +210,7 @@ export async function POST(req:Request){
     }
     return NextResponse.json({ok:true,results,updated:results.filter(x=>x.changed).length,unchanged:results.filter(x=>x.ok&&!x.changed).length,failed:results.filter(x=>!x.ok).length});
   }
-  if(mode==="preview")return NextResponse.json({ok:true,total:rows.length,phone_sync_stats:{source_with_phone:allRows.filter(x=>/\d/.test(asText(x.order.receiverPhoneNum))).length,matched_with_phone:allRows.filter(x=>x.existingDomestic&&/\d/.test(asText(x.order.receiverPhoneNum))).length,phone_change_candidates:uniqueUpdates.filter(x=>"phone" in x.changes).length,nickname_matched_candidates:uniqueUpdates.length,unmatched_with_phone:allRows.filter(x=>!x.existingDomestic&&/\d/.test(asText(x.order.receiverPhoneNum))).length},excluded_count:parsed.length-orders.length,new_orders:rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued).map(({order,...x})=>x),possible_existing:rows.filter(x=>x.existingDomestic).map(({order,...x})=>x),already_queued:rows.filter(x=>x.alreadyQueued).length,update_candidates:uniqueUpdates,phone_diagnostics:phoneDiagnostics,queued_orders:rows.filter(x=>x.alreadyQueued).map(({order,...x})=>x),notice:"닉네임이 같고, DDOGA 주문·배송이 미완료이고, 와이스 전화번호가 실제로 달라진 주문만 표시합니다. 선택한 항목의 전화번호만 변경합니다."});
+  if(mode==="preview")return NextResponse.json({ok:true,total:rows.length,phone_sync_stats:{source_with_phone:allRows.filter(x=>Boolean(wisePhone(x.order))).length,matched_with_phone:allRows.filter(x=>x.existingDomestic&&Boolean(wisePhone(x.order))).length,phone_change_candidates:uniqueUpdates.filter(x=>"phone" in x.changes).length,nickname_matched_candidates:uniqueUpdates.length,unmatched_with_phone:allRows.filter(x=>!x.existingDomestic&&Boolean(wisePhone(x.order))).length},excluded_count:parsed.length-orders.length,new_orders:rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued).map(({order,...x})=>x),possible_existing:rows.filter(x=>x.existingDomestic).map(({order,...x})=>x),already_queued:rows.filter(x=>x.alreadyQueued).length,update_candidates:uniqueUpdates,phone_diagnostics:phoneDiagnostics,queued_orders:rows.filter(x=>x.alreadyQueued).map(({order,...x})=>x),notice:"닉네임이 같고 DDOGA 주문·배송 미완료이며 기존 번호가 비어 있을 때, 와이스 receiverPhoneNum 또는 virtualPhoneNum에 유효한 번호가 있으면 변경 후보로 표시합니다. 선택한 번호만 저장합니다."});
   if(mode!=="save")return NextResponse.json({error:"Invalid mode"},{status:400});
   // Keep a financial snapshot for every order in the Wise export, including completed statuses.
   const importedAt=new Date().toISOString();
@@ -236,7 +244,7 @@ export async function POST(req:Request){
   const allowedIds=selectedIds===null?null:new Set<number>(selectedIds);
   const fresh=rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued&&(allowedIds===null||allowedIds.has(x.wise_order_id)));
   for(const chunk of batches(fresh)){
-   const payload=chunk.map(({order:o,ordered_at,nickname})=>({wise_order_id:o.id,buyer_nickname:nickname,ordered_at,receiver_name:o.receiverName??null,receiver_phone:o.receiverPhoneNum??null,postal_code:o.postNum??null,address:[o.addr1,o.addr2,o.addr3].filter(Boolean).join(" "),item_summary:(o.stocks??[]).map(s=>asText(s.name)).join(" / "),item_total_price:(o.stocks??[]).reduce((sum,s)=>sum+Number(s.price??0),0),item_count:o.stocks?.length??0}));
+   const payload=chunk.map(({order:o,ordered_at,nickname})=>({wise_order_id:o.id,buyer_nickname:nickname,ordered_at,receiver_name:o.receiverName??null,receiver_phone:wisePhone(o)||null,postal_code:o.postNum??null,address:[o.addr1,o.addr2,o.addr3].filter(Boolean).join(" "),item_summary:(o.stocks??[]).map(s=>asText(s.name)).join(" / "),item_total_price:(o.stocks??[]).reduce((sum,s)=>sum+Number(s.price??0),0),item_count:o.stocks?.length??0}));
    const {error}=await db.from("domestic_wise_import_queue").upsert(payload,{onConflict:"wise_order_id",ignoreDuplicates:true});if(error)throw error;
   }
   return NextResponse.json({ok:true,queued_new:fresh.length,sales_saved:salesRows.length,updated_snapshots:orders.length,updated_items:photoRows.length,excluded_count:parsed.length-orders.length,skipped_existing:rows.filter(x=>x.existingDomestic).length,skipped_queued:rows.filter(x=>x.alreadyQueued).length});
