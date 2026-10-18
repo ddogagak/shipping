@@ -151,7 +151,6 @@ export async function POST(req:Request){
           .update({phone:c.changes.phone})
           .eq("order_id",c.order_id)
           .eq("platform","wise")
-          .or("phone.is.null,phone.eq.")
           .select("order_id,phone");
         if(e)error=e.message;
         else if(!data?.length)error="주문이 없거나 이미 전화번호가 입력돼 있어. 새로고침 후 확인해 줘.";
