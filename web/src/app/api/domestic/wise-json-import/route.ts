@@ -103,68 +103,42 @@ export async function POST(req:Request){
    return {order:o,wise_order_id:o.id,nickname,ordered_at:date,existingDomestic,matched_order_ids,alreadyQueued:queuedIds.has(o.id),items:o.stocks?.length??0};
   });
   const rows=allRows.filter(x=>[10,16,25].includes(Number(x.order.status)));
-  // Existing ddoga orders: offer explicit, checked status or phone updates only.
-  const existingIds=wiseDomestic.map(d=>String(d.order_id));
-  const shippingRows:Array<{order_id:string;tracking_number:string|null;tracking_registered:boolean|null;shipping_status:string|null}>=[];
-  for(const chunk of batches(existingIds,100)){
-    const {data,error}=await db.from("domestic_shipping").select("order_id,tracking_number,tracking_registered,shipping_status").in("order_id",chunk);
-    if(error)throw new Error("기존 배송정보 조회 실패: "+error.message);
-    shippingRows.push(...(data??[]));
+  const byNickname=new Map<string,typeof wiseDomestic>();
+  for(const d of wiseDomestic){
+    const k=key(asText(d.nickname));if(!k)continue;
+    byNickname.set(k,[...(byNickname.get(k)??[]),d]);
   }
-  const shippingMap=new Map((shippingRows??[]).map(x=>[String(x.order_id),x]));
-  const updateCandidates=allRows.filter(x=>x.existingDomestic).flatMap(({order,matched_order_ids})=>{
-    if(!matched_order_ids.length)return [];
-    const sourcePhone=asText(order.receiverPhoneNum);
-    // An empty DDOGA number becoming populated is a change on its own.
-    // Never require shipping rows, DIRECT status, or an unambiguous combined-order match.
-    const phoneOrderIds=/\d/.test(sourcePhone)
-      ? matched_order_ids.filter(id=>!phoneDigits(domesticById.get(id)?.phone))
-      : [];
-    const order_id=phoneOrderIds[0]??matched_order_ids[0];
-    const ship=shippingMap.get(order_id);
-    const currentOrder=domesticById.get(order_id);
-    const tracking=asText(ship?.tracking_number);
-    const direct=asText(order.deliveryCompany).toUpperCase()==="DIRECT";
-    const changes:Record<string,string|boolean>={};
-    if(phoneOrderIds.length)changes.phone=sourcePhone;
-    // Preserve the existing shipment-status update, but only for unambiguous matches.
-    if(matched_order_ids.length===1&&direct&&Number(order.status)===25){
-      if(ship&&!ship.tracking_registered)changes.tracking_registered=true;
-      if(currentOrder?.order_status!=="kept")changes.order_status="kept";
-    }
-    if(!Object.keys(changes).length)return [];
-    return [{wise_order_id:order.id,order_id,phone_order_ids:phoneOrderIds,nickname:asText(order.user?.nickname),ordered_at:order.createdAt,wise_status:Number(order.status),delivery_company:order.deliveryCompany,tracking_number:tracking,current:{tracking_registered:ship?.tracking_registered??null,shipping_status:ship?.shipping_status??null,order_status:currentOrder?.order_status??null,phone:currentOrder?.phone??null},changes}];
+  const uniqueUpdates=(parsed as RawOrder[]).flatMap(order=>{
+    const nickname=asText(order.user?.nickname);
+    return (byNickname.get(key(nickname))??[]).map(d=>{
+      const sourcePhone=asText(order.receiverPhoneNum),existingPhone=asText(d.phone);
+      const changes:Record<string,string>={};
+      if(phoneDigits(sourcePhone)&&phoneDigits(sourcePhone)!==phoneDigits(existingPhone))changes.phone=sourcePhone;
+      return {candidate_id:String(order.id)+"::"+d.order_id,wise_order_id:order.id,order_id:String(d.order_id),nickname,ordered_at:order.createdAt??null,wise_status:Number(order.status),delivery_company:order.deliveryCompany??null,tracking_number:null,current:{tracking_registered:null,shipping_status:null,order_status:d.order_status??null,phone:d.phone??null},changes};
+    });
   });
-  const uniqueUpdates=[...new Map(updateCandidates.map(x=>[x.wise_order_id,x])).values()];
   if(mode==="apply_updates"){
-    const raw=asText(form.get("selected_ids"));
-    const selected=JSON.parse(raw||"[]");
-    if(!Array.isArray(selected)||!selected.every(Number.isSafeInteger))return NextResponse.json({error:"선택 ID 형식 오류"},{status:400});
-    const allowed=new Set(selected);
+    const chosen:unknown=JSON.parse(asText(form.get("selected_ids"))||"[]");
+    if(!Array.isArray(chosen)||chosen.length>200||!chosen.every(x=>typeof x==="string"))
+      return NextResponse.json({error:"최대 200개 항목 선택 가능"},{status:400});
+    const candidates=uniqueUpdates.filter(c=>chosen.includes(c.candidate_id));
+    if(candidates.length!==chosen.length)return NextResponse.json({error:"선택된 항목 불일치: 미리보기 재실행 필요"},{status:409});
+    if(new Set(candidates.map(c=>c.order_id)).size!==candidates.length)
+      return NextResponse.json({error:"같은 DDOGA 주문이 여러 번 선택됐어. 주문당 한 건만 선택해 줘."},{status:400});
     const results=[];
-    for(const candidate of uniqueUpdates.filter(x=>allowed.has(x.wise_order_id))){
-      const {order_id,changes}=candidate;
-      const {order_status,phone,...shippingChanges}=changes;
-      let failure="";
-      if(order_status){
-        const {error}=await db.from("domestic_order").update({order_status}).eq("order_id",order_id).eq("platform","wise");
-        if(error)failure=error.message;
+    for(const c of candidates){
+      let error="",changed=false;
+      if(c.changes.phone){
+        const {data,error:e}=await db.from("domestic_order").update({phone:c.changes.phone}).eq("order_id",c.order_id).eq("platform","wise").select("order_id");
+        if(e)error=e.message;
+        else if(!data?.length)error="대상 주문 없음";
+        else changed=true;
       }
-      if(!failure&&phone){
-        for(const targetId of candidate.phone_order_ids){
-          const {error}=await db.from("domestic_order").update({phone}).eq("order_id",targetId).eq("platform","wise");
-          if(error){failure=error.message;break;}
-        }
-      }
-      if(!failure&&Object.keys(shippingChanges).length){
-        const {error}=await db.from("domestic_shipping").update(shippingChanges).eq("order_id",order_id);
-        if(error)failure=error.message;
-      }
-      results.push({wise_order_id:candidate.wise_order_id,order_id,ok:!failure,error:failure||null});
+      results.push({candidate_id:c.candidate_id,wise_order_id:c.wise_order_id,order_id:c.order_id,ok:!error,changed,error:error||null});
     }
-    return NextResponse.json({ok:true,results,updated:results.filter(x=>x.ok).length,failed:results.filter(x=>!x.ok).length});
+    return NextResponse.json({ok:true,results,updated:results.filter(x=>x.changed).length,unchanged:results.filter(x=>x.ok&&!x.changed).length,failed:results.filter(x=>!x.ok).length});
   }
-  if(mode==="preview")return NextResponse.json({ok:true,total:rows.length,phone_sync_stats:{source_with_phone:allRows.filter(x=>/\d/.test(asText(x.order.receiverPhoneNum))).length,matched_with_phone:allRows.filter(x=>x.existingDomestic&&/\d/.test(asText(x.order.receiverPhoneNum))).length,phone_change_candidates:uniqueUpdates.filter(x=>"phone" in x.changes).length,unmatched_with_phone:allRows.filter(x=>!x.existingDomestic&&/\d/.test(asText(x.order.receiverPhoneNum))).length},excluded_count:parsed.length-orders.length,new_orders:rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued).map(({order,...x})=>x),possible_existing:rows.filter(x=>x.existingDomestic).map(({order,...x})=>x),already_queued:rows.filter(x=>x.alreadyQueued).length,update_candidates:uniqueUpdates,queued_orders:rows.filter(x=>x.alreadyQueued).map(({order,...x})=>x),notice:"기존 DDOGA 주문번호 및 주문시각으로 대조합니다. 전화번호가 빈 기존 주문은 합배송 및 배송 상태와 관계없이 전화번호 업데이트 대상으로 표시합니다."});
+  if(mode==="preview")return NextResponse.json({ok:true,total:rows.length,phone_sync_stats:{source_with_phone:allRows.filter(x=>/\d/.test(asText(x.order.receiverPhoneNum))).length,matched_with_phone:allRows.filter(x=>x.existingDomestic&&/\d/.test(asText(x.order.receiverPhoneNum))).length,phone_change_candidates:uniqueUpdates.filter(x=>"phone" in x.changes).length,nickname_matched_candidates:uniqueUpdates.length,unmatched_with_phone:allRows.filter(x=>!x.existingDomestic&&/\d/.test(asText(x.order.receiverPhoneNum))).length},excluded_count:parsed.length-orders.length,new_orders:rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued).map(({order,...x})=>x),possible_existing:rows.filter(x=>x.existingDomestic).map(({order,...x})=>x),already_queued:rows.filter(x=>x.alreadyQueued).length,update_candidates:uniqueUpdates,queued_orders:rows.filter(x=>x.alreadyQueued).map(({order,...x})=>x),notice:"기존 주문 수동 업데이트 목록은 닉네임만 같으면 모두 표시합니다. 선택된 행의 전화번호만 수정합니다."});
   if(mode!=="save")return NextResponse.json({error:"Invalid mode"},{status:400});
   // Keep a financial snapshot for every order in the Wise export, including completed statuses.
   const importedAt=new Date().toISOString();
