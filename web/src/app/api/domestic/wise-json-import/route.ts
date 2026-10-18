@@ -21,28 +21,6 @@ function wisePhone(o:RawOrder){
  return asText(sources.find(validPhone));
 }
 function orderNumberKey(v:unknown){return key(asText(v).replace(/-C\d+$/i,""))}
-// Diagnostic metadata only: never return raw phone values from unfamiliar source keys.
-function phoneKeyStats(orders:RawOrder[]){
- const stats=new Map<string,{present:number;withDigits:number}>();
- function walk(o:unknown,prefix:string,depth:number,seen:Set<string>){
-  if(!o||typeof o!=="object"||Array.isArray(o)||depth>2)return;
-  for(const [k,v] of Object.entries(o)){
-   const path=prefix?prefix+"."+k:k;
-   if(/phone|mobile|telephone|contact|telnum/i.test(k)&&!seen.has(path)){
-    seen.add(path);
-    const current=stats.get(path)??{present:0,withDigits:0};
-    current.present++;
-    if(typeof v==="string"||typeof v==="number"){
-     if(phoneDigits(v).length>=8)current.withDigits++;
-    }
-    stats.set(path,current);
-   }
-   if(depth<2&&v&&typeof v==="object"&&!Array.isArray(v))walk(v,path,depth+1,seen);
-  }
- }
- for(const o of orders)walk(o,"",0,new Set());
- return [...stats].map(([field,value])=>({field,...value})).sort((a,b)=>b.withDigits-a.withDigits||b.present-a.present).slice(0,12);
-}
 function batches<T>(a:T[],n=200){const out:T[][]=[];for(let i=0;i<a.length;i+=n)out.push(a.slice(i,i+n));return out}
 export async function POST(req:Request){
  try{
@@ -139,11 +117,6 @@ export async function POST(req:Request){
       if(asText(row.shipping_status)==="done")completedShipping.add(String(row.order_id));
     }
   }
-  const byNicknameAll=new Map<string,typeof wiseDomestic>();
-  for(const d of wiseDomestic){
-    const k=key(asText(d.nickname));if(!k)continue;
-    byNicknameAll.set(k,[...(byNicknameAll.get(k)??[]),d]);
-  }
   const byNickname=new Map<string,typeof wiseDomestic>();
   for(const d of wiseDomestic){
     if(asText(d.order_status)==="done"||completedShipping.has(String(d.order_id)))continue;
@@ -162,33 +135,6 @@ export async function POST(req:Request){
       return [{candidate_id:String(order.id)+"::"+d.order_id,wise_order_id:order.id,order_id:String(d.order_id),nickname,ordered_at:order.createdAt??null,wise_status:Number(order.status),delivery_company:order.deliveryCompany??null,tracking_number:null,current:{tracking_registered:null,shipping_status:null,order_status:d.order_status??null,phone:d.phone??null},changes}];
     });
   });
-  const rawOrders=parsed as RawOrder[];
-  const sourceWithPhone=rawOrders.filter(o=>Boolean(wisePhone(o)));
-  const nicknameMatched=rawOrders.filter(o=>key(asText(o.user?.nickname))&&byNicknameAll.has(key(asText(o.user?.nickname))));
-  const openNicknameMatched=rawOrders.filter(o=>key(asText(o.user?.nickname))&&byNickname.has(key(asText(o.user?.nickname))));
-  const missingPhoneInOpenMatched=openNicknameMatched.filter(o=>!wisePhone(o));
-  const samePhonePairs=openNicknameMatched.reduce((sum,o)=>{
-   const digits=phoneDigits(wisePhone(o));
-   return sum+(digits.length>=8?(byNickname.get(key(asText(o.user?.nickname)))??[]).filter(d=>phoneDigits(d.phone)===digits).length:0);
-  },0);
-  const phoneDiagnostics={
-    wise_orders:rawOrders.length,
-    wise_with_nickname:rawOrders.filter(o=>Boolean(key(asText(o.user?.nickname)))).length,
-    wise_source_phone_available:sourceWithPhone.length,
-    wise_receiver_phone_available:rawOrders.filter(o=>validPhone(o.receiverPhoneNum)||validPhone(o.receiverphonenum)).length,
-    wise_virtual_phone_available:rawOrders.filter(o=>validPhone(o.virtualPhoneNum)||validPhone(o.virtualphonenum)).length,
-    wise_virtual_phone_field_present:rawOrders.filter(o=>Object.prototype.hasOwnProperty.call(o,"virtualPhoneNum")||Object.prototype.hasOwnProperty.call(o,"virtualphonenum")).length,
-    wise_receiver_phone_field_present:rawOrders.filter(o=>Object.prototype.hasOwnProperty.call(o,"receiverPhoneNum")).length,
-    ddoga_wise_orders:wiseDomestic.length,
-    ddoga_open_orders:wiseDomestic.filter(d=>asText(d.order_status)!=="done"&&!completedShipping.has(String(d.order_id))).length,
-    nickname_matched_source_orders:nicknameMatched.length,
-    open_nickname_matched_source_orders:openNicknameMatched.length,
-    open_matched_source_missing_phone:missingPhoneInOpenMatched.length,
-    same_phone_pairs:samePhonePairs,
-    phone_changed_candidates:uniqueUpdates.length,
-    possible_phone_fields:phoneKeyStats(rawOrders),
-    missing_phone_examples:[...new Set(missingPhoneInOpenMatched.map(o=>asText(o.user?.nickname)).filter(Boolean))].slice(0,8)
-  };
   if(mode==="apply_updates"){
     const chosen:unknown=JSON.parse(asText(form.get("selected_ids"))||"[]");
     if(!Array.isArray(chosen)||chosen.length>200||!chosen.every(x=>typeof x==="string"))
@@ -210,7 +156,7 @@ export async function POST(req:Request){
     }
     return NextResponse.json({ok:true,results,updated:results.filter(x=>x.changed).length,unchanged:results.filter(x=>x.ok&&!x.changed).length,failed:results.filter(x=>!x.ok).length});
   }
-  if(mode==="preview")return NextResponse.json({ok:true,total:rows.length,phone_sync_stats:{source_with_phone:allRows.filter(x=>Boolean(wisePhone(x.order))).length,matched_with_phone:allRows.filter(x=>x.existingDomestic&&Boolean(wisePhone(x.order))).length,phone_change_candidates:uniqueUpdates.filter(x=>"phone" in x.changes).length,nickname_matched_candidates:uniqueUpdates.length,unmatched_with_phone:allRows.filter(x=>!x.existingDomestic&&Boolean(wisePhone(x.order))).length},excluded_count:parsed.length-orders.length,new_orders:rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued).map(({order,...x})=>x),possible_existing:rows.filter(x=>x.existingDomestic).map(({order,...x})=>x),already_queued:rows.filter(x=>x.alreadyQueued).length,update_candidates:uniqueUpdates,phone_diagnostics:phoneDiagnostics,queued_orders:rows.filter(x=>x.alreadyQueued).map(({order,...x})=>x),notice:"닉네임이 같고 DDOGA 주문·배송 미완료이며 기존 번호가 비어 있을 때, 와이스 receiverPhoneNum 또는 virtualPhoneNum에 유효한 번호가 있으면 변경 후보로 표시합니다. 선택한 번호만 저장합니다."});
+  if(mode==="preview")return NextResponse.json({ok:true,total:rows.length,excluded_count:parsed.length-orders.length,new_orders:rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued).map(({order,...x})=>x),possible_existing:rows.filter(x=>x.existingDomestic).map(({order,...x})=>x),already_queued:rows.filter(x=>x.alreadyQueued).length,update_candidates:uniqueUpdates,queued_orders:rows.filter(x=>x.alreadyQueued).map(({order,...x})=>x),notice:"닉네임이 같고 DDOGA 주문·배송 미완료이며 기존 번호가 비어 있을 때, 와이스 receiverPhoneNum 또는 virtualPhoneNum에 유효한 번호가 있으면 변경 후보로 표시합니다. 선택한 번호만 저장합니다."});
   if(mode!=="save")return NextResponse.json({error:"Invalid mode"},{status:400});
   // Keep a financial snapshot for every order in the Wise export, including completed statuses.
   const importedAt=new Date().toISOString();
