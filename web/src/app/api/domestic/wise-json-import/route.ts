@@ -6,6 +6,14 @@ function asText(v:unknown){return String(v??"").trim()}
 function validDate(v:unknown){const s=asText(v);return s&&!Number.isNaN(Date.parse(s))?s:null}
 function kst(v:string){return new Date(v).toLocaleString("sv-SE",{timeZone:"Asia/Seoul"}).slice(0,16)}
 function key(v:string){return v.normalize("NFKC").split("(이전")[0].replace(/\s+/g,"").toLowerCase()}
+function domesticDateKey(v:unknown){
+ const s=asText(v);
+ if(!s)return "";
+ // UTC/offset ISO strings use timezone conversion; historic DDOGA display dates are KST local.
+ if(/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:?\d{2})$/i.test(s)&&validDate(s))return kst(s);
+ const m=s.match(/^(\d{4})\s*[.\/-]\s*(\d{1,2})\s*[.\/-]\s*(\d{1,2})\s*(?:\/|T|\s)+\s*(\d{1,2}):(\d{1,2})/);
+ return m?[m[1],m[2].padStart(2,"0"),m[3].padStart(2,"0")].join("-")+" "+m[4].padStart(2,"0")+":"+m[5]:"";
+}
 function batches<T>(a:T[],n=200){const out:T[][]=[];for(let i=0;i<a.length;i+=n)out.push(a.slice(i,i+n));return out}
 export async function POST(req:Request){
  try{
@@ -36,38 +44,47 @@ export async function POST(req:Request){
    }
    return NextResponse.json({ok:true,sales_saved_orders:salesOrders.length,sales_saved_items:salesRows.length,imported_at:importedAt});
   }
-  const {data:domestic,error:domesticError}=await db.from("domestic_order").select("order_id,customer_order_no,nickname,platform,order_status,phone,first_order_date,source_order_dates");
-  if(domesticError) return NextResponse.json({error:"기존 주문 조회 실패",detail:domesticError.message},{status:500});
-  const {data:queued,error:queueError}=await db.from("domestic_wise_import_queue").select("wise_order_id");
-  if(queueError) return NextResponse.json({error:"와이스 신규 주문 대기열 테이블 조회 실패",detail:queueError.message,hint:"Supabase에서 20261012_wise_json_import_queue.sql 마이그레이션을 먼저 실행해야 합니다."},{status:500});
-  const queuedIds=new Set((queued??[]).map(x=>Number(x.wise_order_id)));
+  // Page through all orders; otherwise Supabase's default row cap hides older phone-only changes.
+  const domestic:Array<{order_id:string;customer_order_no:string|null;nickname:string|null;platform:string|null;order_status:string|null;phone:string|null;first_order_date:string|null;source_order_dates:string[]|null}>=[];
+  for(let offset=0;;offset+=500){
+   const {data,error}=await db.from("domestic_order").select("order_id,customer_order_no,nickname,platform,order_status,phone,first_order_date,source_order_dates").order("order_id").range(offset,offset+499);
+   if(error)return NextResponse.json({error:"기존 주문 조회 실패",detail:error.message},{status:500});
+   domestic.push(...(data??[]));
+   if((data??[]).length<500)break;
+  }
+  const queuedIds=new Set<number>();
+  for(let offset=0;;offset+=500){
+   const {data,error}=await db.from("domestic_wise_import_queue").select("wise_order_id").order("wise_order_id").range(offset,offset+499);
+   if(error)return NextResponse.json({error:"와이스 신규 주문 대기열 테이블 조회 실패",detail:error.message,hint:"Supabase에서 20261012_wise_json_import_queue.sql 마이그레이션을 먼저 실행해야 합니다."},{status:500});
+   for(const row of data??[])queuedIds.add(Number(row.wise_order_id));
+   if((data??[]).length<500)break;
+  }
   const domesticKeys=new Map<string,string[]>();
-  const domesticOrderNos=new Map<string,string[]>();
-  for(const d of domestic??[]){
-   if(d.platform!=="wise")continue;
+  const wiseDomestic=domestic.filter(d=>d.platform==="wise");
+  for(const d of wiseDomestic){
    for(const date of [...(Array.isArray(d.source_order_dates)?d.source_order_dates:[]),d.first_order_date]){
-    const m=asText(date).match(/^(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})\s+(\d{1,2}):(\d{1,2})/);
-    if(m){const k=key(asText(d.nickname))+"|"+[m[1],m[2].padStart(2,"0"),m[3].padStart(2,"0")].join("-")+" "+m[4].padStart(2,"0")+":"+m[5];domesticKeys.set(k,[...(domesticKeys.get(k)??[]),String(d.order_id)]);}
-   }
-   const no=asText(d.customer_order_no);if(no)domesticOrderNos.set(no,[...(domesticOrderNos.get(no)??[]),String(d.order_id)]);
-   for(const date of [] as string[]){
+    const dateKey=domesticDateKey(date);
+    if(!dateKey)continue;
+    const k=key(asText(d.nickname))+"|"+dateKey;
+    const ids=domesticKeys.get(k)??[];
+    if(!ids.includes(String(d.order_id)))ids.push(String(d.order_id));
+    domesticKeys.set(k,ids);
    }
   }
-  const rows=orders.filter(x=>validDate(x.createdAt)).map(o=>{
+  // Phone updates must also inspect statuses that are not eligible for NEW order imports.
+  const allRows=(parsed as RawOrder[]).filter(x=>validDate(x.createdAt)).map(o=>{
    const date=validDate(o.createdAt)!;
    const nickname=asText(o.user?.nickname);
    const formatted=kst(date);
-   const mmdd=formatted.slice(5,7)+formatted.slice(8,10);
-   const customerNo="W"+key(nickname)+"_"+mmdd;
    const byDate=domesticKeys.get(key(nickname)+"|"+formatted)??[];
-   const byNo=[...(domestic??[])].filter(d=>d.platform==="wise"&&key(asText(d.nickname))===key(nickname)&&asText(d.customer_order_no).replace(/-C\d+$/i,"").startsWith("W")&&asText(d.customer_order_no).includes("_"+mmdd)).map(d=>String(d.order_id));
-   const exactId=(domestic??[]).filter(d=>String(d.order_id)==="WJSON_"+o.id).map(d=>String(d.order_id));
+   const exactId=wiseDomestic.filter(d=>String(d.order_id)==="WJSON_"+o.id).map(d=>String(d.order_id));
    const matched_order_ids=[...new Set([...exactId,...byDate])];
    const existingDomestic=matched_order_ids.length>0;
    return {order:o,wise_order_id:o.id,nickname,ordered_at:date,existingDomestic,matched_order_ids,alreadyQueued:queuedIds.has(o.id),items:o.stocks?.length??0};
   });
-  // Existing ddoga orders: offer explicit, checked status updates only.
-  const existingIds=(domestic??[]).filter(d=>d.platform==="wise").map(d=>String(d.order_id));
+  const rows=allRows.filter(x=>[10,16,25].includes(Number(x.order.status)));
+  // Existing ddoga orders: offer explicit, checked status or phone updates only.
+  const existingIds=wiseDomestic.map(d=>String(d.order_id));
   const shippingRows:Array<{order_id:string;tracking_number:string|null;tracking_registered:boolean|null;shipping_status:string|null}>=[];
   for(const chunk of batches(existingIds,100)){
     const {data,error}=await db.from("domestic_shipping").select("order_id,tracking_number,tracking_registered,shipping_status").in("order_id",chunk);
@@ -75,15 +92,15 @@ export async function POST(req:Request){
     shippingRows.push(...(data??[]));
   }
   const shippingMap=new Map((shippingRows??[]).map(x=>[String(x.order_id),x]));
-  const updateCandidates=rows.filter(x=>x.existingDomestic).map(x=>({order:x.order,matched_order_ids:x.matched_order_ids})).flatMap(({order,matched_order_ids})=>{
+  const updateCandidates=allRows.filter(x=>x.existingDomestic).map(x=>({order:x.order,matched_order_ids:x.matched_order_ids})).flatMap(({order,matched_order_ids})=>{
     // Never automatically alter ambiguous/combined matches.
     if(matched_order_ids.length!==1)return [];
     const order_id=matched_order_ids[0],ship=shippingMap.get(order_id);
-    const currentOrder=(domestic??[]).find(d=>String(d.order_id)===order_id);
+    const currentOrder=wiseDomestic.find(d=>String(d.order_id)===order_id);
     const tracking=asText(ship?.tracking_number),direct=asText(order.deliveryCompany).toUpperCase()==="DIRECT";
     const changes:Record<string,string|boolean>={};
     const sourcePhone=asText(order.receiverPhoneNum);
-    const phoneMatches=rows.filter(x=>x.matched_order_ids.length===1&&x.matched_order_ids[0]===order_id).map(x=>asText(x.order.receiverPhoneNum)).filter(Boolean);
+    const phoneMatches=allRows.filter(x=>x.matched_order_ids.length===1&&x.matched_order_ids[0]===order_id).map(x=>asText(x.order.receiverPhoneNum)).filter(Boolean);
     const uniquePhones=new Set(phoneMatches.map(x=>x.replace(/\D/g,"")));
     if(sourcePhone&&/\d/.test(sourcePhone)&&uniquePhones.size===1&&sourcePhone.replace(/\D/g,"")!==asText(currentOrder?.phone).replace(/\D/g,""))changes.phone=sourcePhone;
     if(direct&&Number(order.status)===25){if(ship&&!ship.tracking_registered)changes.tracking_registered=true;if(currentOrder?.order_status!=="kept")changes.order_status="kept";}
@@ -117,7 +134,7 @@ export async function POST(req:Request){
     }
     return NextResponse.json({ok:true,results,updated:results.filter(x=>x.ok).length,failed:results.filter(x=>!x.ok).length});
   }
-  if(mode==="preview")return NextResponse.json({ok:true,total:rows.length,excluded_count:parsed.length-orders.length,new_orders:rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued).map(({order,...x})=>x),possible_existing:rows.filter(x=>x.existingDomestic).map(({order,...x})=>x),already_queued:rows.filter(x=>x.alreadyQueued).length,update_candidates:uniqueUpdates,queued_orders:rows.filter(x=>x.alreadyQueued).map(({order,...x})=>x),notice:"닉네임+주문 분 단위 날짜로 기존 주문을 추정합니다. 동일 분 주문은 검토가 필요합니다."});
+  if(mode==="preview")return NextResponse.json({ok:true,total:rows.length,phone_sync_stats:{source_with_phone:allRows.filter(x=>/\d/.test(asText(x.order.receiverPhoneNum))).length,matched_with_phone:allRows.filter(x=>x.existingDomestic&&/\d/.test(asText(x.order.receiverPhoneNum))).length,phone_change_candidates:uniqueUpdates.filter(x=>"phone" in x.changes).length},excluded_count:parsed.length-orders.length,new_orders:rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued).map(({order,...x})=>x),possible_existing:rows.filter(x=>x.existingDomestic).map(({order,...x})=>x),already_queued:rows.filter(x=>x.alreadyQueued).length,update_candidates:uniqueUpdates,queued_orders:rows.filter(x=>x.alreadyQueued).map(({order,...x})=>x),notice:"닉네임+주문 분 단위 날짜로 기존 주문을 추정합니다. 동일 분 주문은 검토가 필요합니다."});
   if(mode!=="save")return NextResponse.json({error:"Invalid mode"},{status:400});
   // Keep a financial snapshot for every order in the Wise export, including completed statuses.
   const importedAt=new Date().toISOString();
