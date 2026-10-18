@@ -36,7 +36,7 @@ export async function POST(req:Request){
    }
    return NextResponse.json({ok:true,sales_saved_orders:salesOrders.length,sales_saved_items:salesRows.length,imported_at:importedAt});
   }
-  const {data:domestic,error:domesticError}=await db.from("domestic_order").select("order_id,customer_order_no,nickname,platform,order_status,first_order_date,source_order_dates");
+  const {data:domestic,error:domesticError}=await db.from("domestic_order").select("order_id,customer_order_no,nickname,platform,order_status,phone,first_order_date,source_order_dates");
   if(domesticError) return NextResponse.json({error:"기존 주문 조회 실패",detail:domesticError.message},{status:500});
   const {data:queued,error:queueError}=await db.from("domestic_wise_import_queue").select("wise_order_id");
   if(queueError) return NextResponse.json({error:"와이스 신규 주문 대기열 테이블 조회 실패",detail:queueError.message,hint:"Supabase에서 20261012_wise_json_import_queue.sql 마이그레이션을 먼저 실행해야 합니다."},{status:500});
@@ -83,6 +83,10 @@ export async function POST(req:Request){
     const currentOrder=(domestic??[]).find(d=>String(d.order_id)===order_id);
     const tracking=asText(ship.tracking_number),direct=asText(order.deliveryCompany).toUpperCase()==="DIRECT";
     const changes:Record<string,string|boolean>={};
+    const sourcePhone=asText(order.receiverPhoneNum);
+    const phoneMatches=rows.filter(x=>x.matched_order_ids.length===1&&x.matched_order_ids[0]===order_id).map(x=>asText(x.order.receiverPhoneNum)).filter(Boolean);
+    const uniquePhones=new Set(phoneMatches.map(x=>x.replace(/\\D/g,"")));
+    if(sourcePhone&&/\\d/.test(sourcePhone)&&uniquePhones.size===1&&sourcePhone.replace(/\\D/g,"")!==asText(currentOrder?.phone).replace(/\\D/g,""))changes.phone=sourcePhone;
     if(direct&&Number(order.status)===25){if(!ship.tracking_registered)changes.tracking_registered=true;if(currentOrder?.order_status!=="kept")changes.order_status="kept";}
     if(!Object.keys(changes).length)return [];
     return [{wise_order_id:order.id,order_id,nickname:asText(order.user?.nickname),ordered_at:order.createdAt,wise_status:Number(order.status),delivery_company:order.deliveryCompany,tracking_number:tracking,current:{tracking_registered:ship.tracking_registered,shipping_status:ship.shipping_status,order_status:currentOrder?.order_status??null},changes}];
@@ -96,10 +100,14 @@ export async function POST(req:Request){
     const results=[];
     for(const candidate of uniqueUpdates.filter(x=>allowed.has(x.wise_order_id))){
       const {order_id,changes}=candidate;
-      const {order_status,...shippingChanges}=changes;
+      const {order_status,phone,...shippingChanges}=changes;
       let failure="";
       if(order_status){
         const {error}=await db.from("domestic_order").update({order_status}).eq("order_id",order_id).eq("platform","wise");
+        if(error)failure=error.message;
+      }
+      if(!failure&&phone){
+        const {error}=await db.from("domestic_order").update({phone}).eq("order_id",order_id).eq("platform","wise");
         if(error)failure=error.message;
       }
       if(!failure&&Object.keys(shippingChanges).length){
