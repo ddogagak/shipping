@@ -51,7 +51,7 @@ export default function WiseJsonImport(){
  const [selectedUpdates,setSelectedUpdates]=useState<string[]>([]);
  const [loading,setLoading]=useState(false);
  const [message,setMessage]=useState("");
- const [preview,setPreview]=useState<{total:number;new_orders:Candidate[];possible_existing:Candidate[];queued_orders:Candidate[];already_queued:number;update_candidates:UpdateCandidate[];phone_diagnostics?:{wise_orders:number;wise_source_phone_available:number;wise_receiver_phone_field_present:number;ddoga_wise_orders:number;ddoga_open_orders:number;nickname_matched_source_orders:number;open_nickname_matched_source_orders:number;open_matched_source_missing_phone:number;same_phone_pairs:number;phone_changed_candidates:number;possible_phone_fields:Array<{field:string;present:number;withDigits:number}>;missing_phone_examples:string[]}}|null>(null);
+ const [preview,setPreview]=useState<{total:number;new_orders:Candidate[];possible_existing:Candidate[];queued_orders:Candidate[];already_queued:number;update_candidates:UpdateCandidate[];phone_diagnostics?:{wise_orders:number;wise_source_phone_available:number;wise_receiver_phone_available:number;wise_virtual_phone_available:number;wise_virtual_phone_field_present:number;wise_receiver_phone_field_present:number;ddoga_wise_orders:number;ddoga_open_orders:number;nickname_matched_source_orders:number;open_nickname_matched_source_orders:number;open_matched_source_missing_phone:number;same_phone_pairs:number;phone_changed_candidates:number;possible_phone_fields:Array<{field:string;present:number;withDigits:number}>;missing_phone_examples:string[]}}|null>(null);
  async function syncSales(){
   if(!file)return;
   setLoading(true);setActivity("sales_sync");setMessage("와이스 주문 매출자료 저장 중…");
@@ -73,7 +73,7 @@ export default function WiseJsonImport(){
    const res=await fetch("/api/domestic/wise-json-import",{method:"POST",body:form});
    const data=await res.json();
    if(!res.ok)throw new Error(data.error||"업로드 실패");
-   if(mode==="preview"){setPreview(data);setSelectedNew([...data.new_orders,...(data.queued_orders??[]).filter((x:Candidate)=>!x.existingDomestic)].map((x:Candidate)=>x.wise_order_id));setSelectedUpdates([]);setMessage("미리보기 완료. 기존 주문 추정은 닉네임+주문시각 기준이며 확인이 필요합니다.");}
+   if(mode==="preview"){setPreview(data);setSelectedNew([...data.new_orders,...(data.queued_orders??[]).filter((x:Candidate)=>!x.existingDomestic)].map((x:Candidate)=>x.wise_order_id));setSelectedUpdates([]);setMessage("미리보기 완료. 기존 주문 변경 목록은 미완료·미배송완료 주문 중 닉네임이 일치하고 DDOGA 전화번호가 빈 건만 표시합니다.");}
    else{setMessage(`선택 ${selectedNew.length}건 DDOGA 등록 중…`);const response=await fetch("/api/domestic/wise-json-queue",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"approve_bulk",wise_order_ids:selectedNew})});const result=await response.json();if(!response.ok)throw new Error(result.error||"일괄 등록 실패");setPreview(null);setSelectedNew([]);setMessage(`등록 성공 ${result.saved}건 / 실패 ${result.failed}건`+(result.failed?" : "+result.results.filter((x:{ok:boolean})=>!x.ok).map((x:{wise_order_id:number;error:string})=>x.wise_order_id+" "+x.error).join(", "):""));}
   }catch(e){setMessage("처리 실패: "+(e instanceof Error?e.message:"알 수 없는 오류"))}finally{setLoading(false);setActivity("")}
  }
@@ -86,7 +86,7 @@ export default function WiseJsonImport(){
    const form=new FormData();form.append("file",file);form.append("mode","apply_updates");form.append("selected_ids",JSON.stringify(selectedUpdates));
    const r=await fetch("/api/domestic/wise-json-import",{method:"POST",body:form});const d=await r.json();
    if(!r.ok)throw new Error(d.error||"변경 실패");
-   setMessage(`상태 업데이트 완료 ${d.updated}건 / 실패 ${d.failed}건`+(d.failed?" — "+d.results.filter((x:{ok:boolean})=>!x.ok).map((x:{order_id:string;error:string})=>x.order_id+": "+x.error).join(", "):""));
+   setMessage(`전화번호 업데이트 완료 ${d.updated}건 / 실패 ${d.failed}건`+(d.failed?" — "+d.results.filter((x:{ok:boolean})=>!x.ok).map((x:{order_id:string;error:string})=>x.order_id+": "+x.error).join(", "):""));
    setSelectedUpdates([]);
    setPreview(prev=>prev?{...prev,update_candidates:prev.update_candidates.filter(x=>!d.results.some((r:{candidate_id:string;ok:boolean})=>r.ok&&r.candidate_id===x.candidate_id))}:prev);
   }catch(e){setMessage("상태 업데이트 실패: "+(e instanceof Error?e.message:"변경 실패"))}finally{setLoading(false);setActivity("")}
@@ -105,7 +105,7 @@ export default function WiseJsonImport(){
   <div role="status" aria-live="polite" aria-busy={loading||pulling} style={{marginTop:16,padding:14,borderRadius:10,background:loading||pulling?"#eff6ff":"#f3f4f6",fontWeight:700}}>{loading||pulling?"⏳ 처리 중: ":"현재 상태: "}{message||"대기 중 — 와이스 판매목록을 가져오거나 JSON 파일을 선택해 주세요."}</div>
   {preview?.phone_diagnostics&&<div style={{padding:12,marginTop:12,border:"1px solid #d1d5db",borderRadius:10}}>
    <strong>전화번호 동기화 진단</strong>
-   <p>와이스 원본 {preview.phone_diagnostics.wise_orders}건 · receiverPhoneNum 필드 있음 {preview.phone_diagnostics.wise_receiver_phone_field_present}건 · 실제 번호 있음 {preview.phone_diagnostics.wise_source_phone_available}건</p>
+   <p>와이스 원본 {preview.phone_diagnostics.wise_orders}건 · receiverPhoneNum 번호 {preview.phone_diagnostics.wise_receiver_phone_available}건 · virtualPhoneNum 번호 {preview.phone_diagnostics.wise_virtual_phone_available}건 · 둘 중 번호 있음 {preview.phone_diagnostics.wise_source_phone_available}건</p>
    <p>DDOGA 와이스 주문 {preview.phone_diagnostics.ddoga_wise_orders}건 · 미완료 {preview.phone_diagnostics.ddoga_open_orders}건 · 닉네임 일치 {preview.phone_diagnostics.nickname_matched_source_orders}건 · 미완료 주문과 닉네임 일치 {preview.phone_diagnostics.open_nickname_matched_source_orders}건</p>
    <p>그중 원본 번호 없음 {preview.phone_diagnostics.open_matched_source_missing_phone}건 · 이미 같은 번호 {preview.phone_diagnostics.same_phone_pairs}쌍 · 실제 변경 후보 {preview.phone_diagnostics.phone_changed_candidates}건</p>
    <p>원본의 전화번호 관련 필드: {preview.phone_diagnostics.possible_phone_fields.length?preview.phone_diagnostics.possible_phone_fields.map(f=>f.field+" (번호 "+f.withDigits+"건)").join(", "):"없음"}</p>
@@ -113,14 +113,14 @@ export default function WiseJsonImport(){
   </div>}
   {preview&&!(preview.update_candidates?.length)&&<p>기존 주문 변경 대상: 0건 — 현재 변경할 항목이 없습니다.</p>}
   {preview&&preview.update_candidates?.length>0&&<div style={{marginTop:18,padding:14,border:"1px solid #cbd5e1",borderRadius:12}}>
-   <h3>기존 주문 상태 업데이트 대상 ({preview.update_candidates.length}건)</h3>
-   <p>체크한 항목만 DDOGA 주문/배송 상태 및 변경된 전화번호를 수정합니다. 신규 주문 등록과 별개입니다.</p>
+   <h3>기존 주문 전화번호 추가 대상 ({preview.update_candidates.length}건)</h3>
+   <p>체크한 주문의 빈 전화번호만 채웁니다. 와이스 receiverPhoneNum이 없으면 virtualPhoneNum을 사용하며 기존 번호와 다른 정보는 유지합니다.</p>
    <label><input disabled={loading||pulling} type="checkbox" checked={selectedUpdates.length===preview.update_candidates.length} onChange={e=>setSelectedUpdates(e.target.checked?preview.update_candidates.map(x=>x.candidate_id):[])}/> 전체 선택</label>
    <div style={{maxHeight:340,overflow:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}>
     <thead><tr><th>선택</th><th>닉네임 / 날짜</th><th>와이스 상태</th><th>ddoga 주문</th><th>현재 DDOGA 상태 → 업데이트 후</th></tr></thead>
     <tbody>{preview.update_candidates.map(x=><tr key={x.candidate_id} style={{borderTop:"1px solid #eee"}}><td><input disabled={loading||pulling} type="checkbox" checked={selectedUpdates.includes(x.candidate_id)} onChange={e=>setSelectedUpdates(v=>e.target.checked?[...v,x.candidate_id]:v.filter(id=>id!==x.candidate_id))}/></td><td>{x.nickname} / {new Date(x.ordered_at).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})}</td><td>{x.wise_status===25?"발송완료 (25)":x.wise_status} / {x.delivery_company==="DIRECT"?"직접배송 (DIRECT)":x.delivery_company||"-"}</td><td>{x.order_id}</td><td>{(["tracking_registered","order_status","shipping_status","phone"] as const).map(k=><div key={k}>{k==="tracking_registered"?"등록":k==="order_status"?"주문상태":k==="phone"?"전화번호":"배송상태"}: {stateText(k,x.current?.[k])} → <strong>{stateText(k,k in x.changes?x.changes[k]:x.current?.[k])}</strong>{!(k in x.changes)&&" (유지)"}</div>)}</td></tr>)}</tbody>
    </table></div>
-   <button disabled={loading||pulling||!selectedUpdates.length} onClick={applyUpdates} style={{...darkButtonStyle,marginTop:10}}>{activity==="update"?"기존 주문 변경사항 적용 중…":`선택 ${selectedUpdates.length}건 상태 업데이트`}</button>
+   <button disabled={loading||pulling||!selectedUpdates.length} onClick={applyUpdates} style={{...darkButtonStyle,marginTop:10}}>{activity==="update"?"기존 주문 변경사항 적용 중…":`선택 ${selectedUpdates.length}건 전화번호 업데이트`}</button>
   </div>}
   {preview&&<div style={{marginTop:18}}>
    <p>전체 {preview.total}건 / 신규 {preview.new_orders.length}건 / 중복 의심 {preview.possible_existing.length}건 / 기존 대기 {preview.already_queued}건</p>
