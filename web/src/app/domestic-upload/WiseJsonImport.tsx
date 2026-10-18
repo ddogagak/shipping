@@ -86,9 +86,27 @@ export default function WiseJsonImport(){
    const form=new FormData();form.append("file",file);form.append("mode","apply_updates");form.append("selected_ids",JSON.stringify(selectedUpdates));
    const r=await fetch("/api/domestic/wise-json-import",{method:"POST",body:form});const d=await r.json();
    if(!r.ok)throw new Error(d.error||"변경 실패");
-   setMessage(`전화번호 업데이트 완료 ${d.updated}건 / 실패 ${d.failed}건`+(d.failed?" — "+d.results.filter((x:{ok:boolean})=>!x.ok).map((x:{order_id:string;error:string})=>x.order_id+": "+x.error).join(", "):""));
+   const successful=(d.results??[]).filter((x:{ok:boolean;changed:boolean})=>x.ok&&x.changed);
+   const targetIds=[...new Set(successful.map((x:{order_id:string})=>x.order_id))] as string[];
+   const verified=new Map<string,string>();
+   for(let i=0;i<targetIds.length;i+=40){
+     const ids=targetIds.slice(i,i+40);
+     const verifyRes=await fetch("/api/domestic/orders?phone_verify_ids="+encodeURIComponent(ids.join(",")),{cache:"no-store"});
+     const verifyBody=await verifyRes.json();
+     if(!verifyRes.ok)throw new Error(verifyBody.error||"주문내역 전화번호 검증 실패");
+     for(const order of verifyBody.orders??[])verified.set(String(order.order_id),String(order.phone??""));
+   }
+   const updatesById=new Map(preview?.update_candidates.map(x=>[x.candidate_id,x])??[]);
+   const reallySaved=successful.filter((x:{candidate_id:string;order_id:string})=>{
+     const expected=String(updatesById.get(x.candidate_id)?.changes.phone??"").replace(/\\D/g,"");
+     const actual=String(verified.get(x.order_id)??"").replace(/\\D/g,"");
+     return expected.length>=8&&actual===expected;
+   });
+   const verifiedIds=new Set(reallySaved.map((x:{candidate_id:string})=>x.candidate_id));
+   const mismatch=successful.length-reallySaved.length;
+   setMessage(`주문내역 DB 검증 완료 ${reallySaved.length}건 / 저장 확인 실패 ${mismatch}건 / API 실패 ${d.failed}건`+(mismatch?" — 저장 확인 안 된 건은 목록에 그대로 남겨뒀어.":""));
    setSelectedUpdates([]);
-   setPreview(prev=>prev?{...prev,update_candidates:prev.update_candidates.filter(x=>!d.results.some((r:{candidate_id:string;ok:boolean})=>r.ok&&r.candidate_id===x.candidate_id))}:prev);
+   setPreview(prev=>prev?{...prev,update_candidates:prev.update_candidates.filter(x=>!verifiedIds.has(x.candidate_id))}:prev);
   }catch(e){setMessage("전화번호 업데이트 실패: "+(e instanceof Error?e.message:"변경 실패"))}finally{setLoading(false);setActivity("")}
  }
  return <section style={{border:"1px solid #e5e7eb",borderRadius:16,padding:20,background:"#fff",marginTop:16}}>
