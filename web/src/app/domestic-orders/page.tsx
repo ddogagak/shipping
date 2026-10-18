@@ -1889,7 +1889,7 @@ export default function DomesticOrdersPage() {
                   const s = shipping(row) || defaultShipping();
 
                   return (
-                    <tr key={row.order_id}>
+                    <tr key={row.order_id} data-order-id={row.order_id}>
                       <td style={tdStyle}>
                         <input
                           type="checkbox"
