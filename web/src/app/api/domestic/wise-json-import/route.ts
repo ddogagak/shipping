@@ -147,10 +147,22 @@ export async function POST(req:Request){
     for(const c of candidates){
       let error="",changed=false;
       if(c.changes.phone){
-        const {data,error:e}=await db.from("domestic_order").update({phone:c.changes.phone}).eq("order_id",c.order_id).eq("platform","wise").select("order_id");
+        const {data,error:e}=await db.from("domestic_order")
+          .update({phone:c.changes.phone})
+          .eq("order_id",c.order_id)
+          .eq("platform","wise")
+          .or("phone.is.null,phone.eq.")
+          .select("order_id,phone");
         if(e)error=e.message;
-        else if(!data?.length)error="대상 주문 없음";
-        else changed=true;
+        else if(!data?.length)error="주문이 없거나 이미 전화번호가 입력돼 있어. 새로고침 후 확인해 줘.";
+        else {
+          const {data:verified,error:readError}=await db.from("domestic_order")
+            .select("phone").eq("order_id",c.order_id).single();
+          if(readError)error="업데이트 후 재조회 실패: "+readError.message;
+          else if(phoneDigits(verified?.phone)!==phoneDigits(c.changes.phone))
+            error="업데이트 후 전화번호가 일치하지 않아. 실제 DB 값을 확인해 줘.";
+          else changed=true;
+        }
       }
       results.push({candidate_id:c.candidate_id,wise_order_id:c.wise_order_id,order_id:c.order_id,ok:!error,changed,error:error||null});
     }
