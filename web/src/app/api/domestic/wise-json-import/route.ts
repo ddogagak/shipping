@@ -79,17 +79,16 @@ export async function POST(req:Request){
     // Never automatically alter ambiguous/combined matches.
     if(matched_order_ids.length!==1)return [];
     const order_id=matched_order_ids[0],ship=shippingMap.get(order_id);
-    if(!ship)return [];
     const currentOrder=(domestic??[]).find(d=>String(d.order_id)===order_id);
-    const tracking=asText(ship.tracking_number),direct=asText(order.deliveryCompany).toUpperCase()==="DIRECT";
+    const tracking=asText(ship?.tracking_number),direct=asText(order.deliveryCompany).toUpperCase()==="DIRECT";
     const changes:Record<string,string|boolean>={};
     const sourcePhone=asText(order.receiverPhoneNum);
     const phoneMatches=rows.filter(x=>x.matched_order_ids.length===1&&x.matched_order_ids[0]===order_id).map(x=>asText(x.order.receiverPhoneNum)).filter(Boolean);
-    const uniquePhones=new Set(phoneMatches.map(x=>x.replace(/\\D/g,"")));
-    if(sourcePhone&&/\\d/.test(sourcePhone)&&uniquePhones.size===1&&sourcePhone.replace(/\\D/g,"")!==asText(currentOrder?.phone).replace(/\\D/g,""))changes.phone=sourcePhone;
-    if(direct&&Number(order.status)===25){if(!ship.tracking_registered)changes.tracking_registered=true;if(currentOrder?.order_status!=="kept")changes.order_status="kept";}
+    const uniquePhones=new Set(phoneMatches.map(x=>x.replace(/\D/g,"")));
+    if(sourcePhone&&/\\d/.test(sourcePhone)&&uniquePhones.size===1&&sourcePhone.replace(/\D/g,"")!==asText(currentOrder?.phone).replace(/\D/g,""))changes.phone=sourcePhone;
+    if(direct&&Number(order.status)===25){if(ship&&!ship.tracking_registered)changes.tracking_registered=true;if(currentOrder?.order_status!=="kept")changes.order_status="kept";}
     if(!Object.keys(changes).length)return [];
-    return [{wise_order_id:order.id,order_id,nickname:asText(order.user?.nickname),ordered_at:order.createdAt,wise_status:Number(order.status),delivery_company:order.deliveryCompany,tracking_number:tracking,current:{tracking_registered:ship.tracking_registered,shipping_status:ship.shipping_status,order_status:currentOrder?.order_status??null},changes}];
+    return [{wise_order_id:order.id,order_id,nickname:asText(order.user?.nickname),ordered_at:order.createdAt,wise_status:Number(order.status),delivery_company:order.deliveryCompany,tracking_number:tracking,current:{tracking_registered:ship?.tracking_registered??null,shipping_status:ship?.shipping_status??null,order_status:currentOrder?.order_status??null,phone:currentOrder?.phone??null},changes}];
   });
   const uniqueUpdates=[...new Map(updateCandidates.map(x=>[x.wise_order_id,x])).values()];
   if(mode==="apply_updates"){
