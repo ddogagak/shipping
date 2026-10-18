@@ -3,7 +3,7 @@ import {useEffect,useState,useRef} from "react";
 const primaryButtonStyle={border:0,borderRadius:10,padding:"10px 14px",background:"#2563eb",color:"#fff",fontWeight:800,cursor:"pointer"} as const;
 const darkButtonStyle={border:0,borderRadius:10,padding:"10px 14px",background:"#111827",color:"#fff",fontWeight:800,cursor:"pointer"} as const;
 const secondaryButtonStyle={border:"1px solid #d1d5db",borderRadius:10,padding:"9px 14px",background:"#fff",color:"#374151",fontWeight:700,cursor:"pointer"} as const;
-type UpdateCandidate={wise_order_id:number;order_id:string;nickname:string;ordered_at:string;wise_status:number;delivery_company:string|null;tracking_number:string;current:{tracking_registered:boolean|null;shipping_status:string|null;order_status:string|null;phone?:string|null};changes:Record<string,string|boolean>};
+type UpdateCandidate={candidate_id:string;wise_order_id:number;order_id:string;nickname:string;ordered_at:string;wise_status:number;delivery_company:string|null;tracking_number:string;current:{tracking_registered:boolean|null;shipping_status:string|null;order_status:string|null;phone?:string|null};changes:Record<string,string|boolean>};
 type Candidate={wise_order_id:number;nickname:string;ordered_at:string;items:number;existingDomestic:boolean;alreadyQueued:boolean;matched_order_ids:string[]};
 const labels:Record<string,string>={accepted:"입력됨",checked:"재고확인",kept:"직배킵",packaged:"포장완료",done:"완료",start:"시작",excel_exported:"엑셀 추출",uploaded:"운송장 입력",registered:"운송장등록"};
 function stateText(k:string,v:unknown){return k==="tracking_registered"?(v?"Y":"N"):v==null?"미설정":labels[String(v)]??String(v)}
@@ -48,7 +48,7 @@ export default function WiseJsonImport(){
  async function loadQueue(){try{const r=await fetch("/api/domestic/wise-json-queue");const d=await r.json();if(!r.ok)throw new Error(d.error);setQueue(d.orders??[]);setQueueError("");}catch(e){setQueueError(e instanceof Error?e.message:"조회 실패")}}
  async function handleQueue(id:number,action:"approve"|"ignore"){if(!confirm(action==="approve"?"이 신규 주문을 ddoga 주문으로 등록할까요?":"이 주문을 대기열에서 제외할까요?"))return;try{const r=await fetch("/api/domestic/wise-json-queue",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({wise_order_id:id,action})});const d=await r.json();if(!r.ok)throw new Error(d.error);await loadQueue();setMessage(action==="approve"?`주문 등록 완료: ${d.order_id}`:"대기열에서 제외했습니다.");}catch(e){setMessage(e instanceof Error?e.message:"처리 실패")}}
  const [selectedNew,setSelectedNew]=useState<number[]>([]);
- const [selectedUpdates,setSelectedUpdates]=useState<number[]>([]);
+ const [selectedUpdates,setSelectedUpdates]=useState<string[]>([]);
  const [loading,setLoading]=useState(false);
  const [message,setMessage]=useState("");
  const [preview,setPreview]=useState<{total:number;new_orders:Candidate[];possible_existing:Candidate[];queued_orders:Candidate[];already_queued:number;update_candidates:UpdateCandidate[]}|null>(null);
@@ -73,7 +73,7 @@ export default function WiseJsonImport(){
    const res=await fetch("/api/domestic/wise-json-import",{method:"POST",body:form});
    const data=await res.json();
    if(!res.ok)throw new Error(data.error||"업로드 실패");
-   if(mode==="preview"){setPreview(data);setSelectedNew([...data.new_orders,...(data.queued_orders??[]).filter((x:Candidate)=>!x.existingDomestic)].map((x:Candidate)=>x.wise_order_id));setSelectedUpdates((data.update_candidates??[]).map((x:UpdateCandidate)=>x.wise_order_id));setMessage("미리보기 완료. 기존 주문 추정은 닉네임+주문시각 기준이며 확인이 필요합니다.");}
+   if(mode==="preview"){setPreview(data);setSelectedNew([...data.new_orders,...(data.queued_orders??[]).filter((x:Candidate)=>!x.existingDomestic)].map((x:Candidate)=>x.wise_order_id));setSelectedUpdates([]);setMessage("미리보기 완료. 기존 주문 추정은 닉네임+주문시각 기준이며 확인이 필요합니다.");}
    else{setMessage(`선택 ${selectedNew.length}건 DDOGA 등록 중…`);const response=await fetch("/api/domestic/wise-json-queue",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"approve_bulk",wise_order_ids:selectedNew})});const result=await response.json();if(!response.ok)throw new Error(result.error||"일괄 등록 실패");setPreview(null);setSelectedNew([]);setMessage(`등록 성공 ${result.saved}건 / 실패 ${result.failed}건`+(result.failed?" : "+result.results.filter((x:{ok:boolean})=>!x.ok).map((x:{wise_order_id:number;error:string})=>x.wise_order_id+" "+x.error).join(", "):""));}
   }catch(e){setMessage("처리 실패: "+(e instanceof Error?e.message:"알 수 없는 오류"))}finally{setLoading(false);setActivity("")}
  }
@@ -88,7 +88,7 @@ export default function WiseJsonImport(){
    if(!r.ok)throw new Error(d.error||"변경 실패");
    setMessage(`상태 업데이트 완료 ${d.updated}건 / 실패 ${d.failed}건`+(d.failed?" — "+d.results.filter((x:{ok:boolean})=>!x.ok).map((x:{order_id:string;error:string})=>x.order_id+": "+x.error).join(", "):""));
    setSelectedUpdates([]);
-   setPreview(prev=>prev?{...prev,update_candidates:prev.update_candidates.filter(x=>!d.results.some((r:{wise_order_id:number;ok:boolean})=>r.ok&&r.wise_order_id===x.wise_order_id))}:prev);
+   setPreview(prev=>prev?{...prev,update_candidates:prev.update_candidates.filter(x=>!d.results.some((r:{wise_order_id:number;ok:boolean})=>r.ok&&r.candidate_id===x.candidate_id))}:prev);
   }catch(e){setMessage("상태 업데이트 실패: "+(e instanceof Error?e.message:"변경 실패"))}finally{setLoading(false);setActivity("")}
  }
  return <section style={{border:"1px solid #e5e7eb",borderRadius:16,padding:20,background:"#fff",marginTop:16}}>
@@ -107,10 +107,10 @@ export default function WiseJsonImport(){
   {preview&&preview.update_candidates?.length>0&&<div style={{marginTop:18,padding:14,border:"1px solid #cbd5e1",borderRadius:12}}>
    <h3>기존 주문 상태 업데이트 대상 ({preview.update_candidates.length}건)</h3>
    <p>체크한 항목만 DDOGA 주문/배송 상태 및 변경된 전화번호를 수정합니다. 신규 주문 등록과 별개입니다.</p>
-   <label><input disabled={loading||pulling} type="checkbox" checked={selectedUpdates.length===preview.update_candidates.length} onChange={e=>setSelectedUpdates(e.target.checked?preview.update_candidates.map(x=>x.wise_order_id):[])}/> 전체 선택</label>
+   <label><input disabled={loading||pulling} type="checkbox" checked={selectedUpdates.length===preview.update_candidates.length} onChange={e=>setSelectedUpdates(e.target.checked?preview.update_candidates.map(x=>x.candidate_id):[])}/> 전체 선택</label>
    <div style={{maxHeight:340,overflow:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}>
     <thead><tr><th>선택</th><th>닉네임 / 날짜</th><th>와이스 상태</th><th>ddoga 주문</th><th>현재 DDOGA 상태 → 업데이트 후</th></tr></thead>
-    <tbody>{preview.update_candidates.map(x=><tr key={x.wise_order_id} style={{borderTop:"1px solid #eee"}}><td><input disabled={loading||pulling} type="checkbox" checked={selectedUpdates.includes(x.wise_order_id)} onChange={e=>setSelectedUpdates(v=>e.target.checked?[...v,x.wise_order_id]:v.filter(id=>id!==x.wise_order_id))}/></td><td>{x.nickname} / {new Date(x.ordered_at).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})}</td><td>{x.wise_status===25?"발송완료 (25)":x.wise_status} / {x.delivery_company==="DIRECT"?"직접배송 (DIRECT)":x.delivery_company||"-"}</td><td>{x.order_id}</td><td>{(["tracking_registered","order_status","shipping_status","phone"] as const).map(k=><div key={k}>{k==="tracking_registered"?"등록":k==="order_status"?"주문상태":k==="phone"?"전화번호":"배송상태"}: {stateText(k,x.current?.[k])} → <strong>{stateText(k,k in x.changes?x.changes[k]:x.current?.[k])}</strong>{!(k in x.changes)&&" (유지)"}</div>)}</td></tr>)}</tbody>
+    <tbody>{preview.update_candidates.map(x=><tr key={x.candidate_id} style={{borderTop:"1px solid #eee"}}><td><input disabled={loading||pulling} type="checkbox" checked={selectedUpdates.includes(x.candidate_id)} onChange={e=>setSelectedUpdates(v=>e.target.checked?[...v,x.wise_order_id]:v.filter(id=>id!==x.wise_order_id))}/></td><td>{x.nickname} / {new Date(x.ordered_at).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})}</td><td>{x.wise_status===25?"발송완료 (25)":x.wise_status} / {x.delivery_company==="DIRECT"?"직접배송 (DIRECT)":x.delivery_company||"-"}</td><td>{x.order_id}</td><td>{(["tracking_registered","order_status","shipping_status","phone"] as const).map(k=><div key={k}>{k==="tracking_registered"?"등록":k==="order_status"?"주문상태":k==="phone"?"전화번호":"배송상태"}: {stateText(k,x.current?.[k])} → <strong>{stateText(k,k in x.changes?x.changes[k]:x.current?.[k])}</strong>{!(k in x.changes)&&" (유지)"}</div>)}</td></tr>)}</tbody>
    </table></div>
    <button disabled={loading||pulling||!selectedUpdates.length} onClick={applyUpdates} style={{...darkButtonStyle,marginTop:10}}>{activity==="update"?"기존 주문 변경사항 적용 중…":`선택 ${selectedUpdates.length}건 상태 업데이트`}</button>
   </div>}
