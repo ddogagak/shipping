@@ -265,7 +265,9 @@ function toExcelRow(row: DomesticOrder) {
     수하인주소2: detailAddress,
     수하인휴대폰: (() => {
       const formatted = formatHanjinPhone(row.phone);
-      return formatted.replace(/\D/g, "").length >= 9 ? formatted : "";
+      return formatted.replace(/\D/g, "").length >= 9
+        ? formatted
+        : "010-6452-8842";
     })(),
     내품수량: Number(row.order_count || 1),
     물품금액: roundedItemPrice,
@@ -1218,11 +1220,6 @@ export default function DomesticOrdersPage() {
       return;
     }
 
-    const missingPhone = selectedRows.filter((row) => String(row.phone || "").replace(/\D/g, "").length < 9);
-    if (missingPhone.length) {
-      alert("로젠용 전화번호가 비어 있는 주문이 "+missingPhone.length+"건 있어. Domestic Orders에서 전화번호를 확인한 후 다시 시도해 줘.");
-      return;
-    }
     const data = selectedRows.map(toExcelRow);
     const worksheet = XLSX.utils.json_to_sheet(data, { header: HEADERS });
 
@@ -1264,11 +1261,6 @@ export default function DomesticOrdersPage() {
   function sendLogenExcel() {
     if (!selectedRows.length) {
       alert("로젠 전송할 주문을 선택해줘.");
-      return;
-    }
-    const missingPhone = selectedRows.filter((row) => String(row.phone || "").replace(/\D/g, "").length < 9);
-    if (missingPhone.length) {
-      alert("로젠용 전화번호가 비어 있는 주문이 "+missingPhone.length+"건 있어. Domestic Orders에서 전화번호를 확인한 후 다시 시도해 줘.");
       return;
     }
     const data = selectedRows.map(toExcelRow);
