@@ -3,7 +3,7 @@ import {useEffect,useState,useRef} from "react";
 const primaryButtonStyle={border:0,borderRadius:10,padding:"10px 14px",background:"#2563eb",color:"#fff",fontWeight:800,cursor:"pointer"} as const;
 const darkButtonStyle={border:0,borderRadius:10,padding:"10px 14px",background:"#111827",color:"#fff",fontWeight:800,cursor:"pointer"} as const;
 const secondaryButtonStyle={border:"1px solid #d1d5db",borderRadius:10,padding:"9px 14px",background:"#fff",color:"#374151",fontWeight:700,cursor:"pointer"} as const;
-type UpdateCandidate={candidate_id:string;wise_order_id:number;order_id:string;nickname:string;ordered_at:string;wise_status:number;delivery_company:string|null;tracking_number:string;current:{tracking_registered:boolean|null;shipping_status:string|null;order_status:string|null;phone?:string|null};changes:Record<string,string|boolean>};
+type UpdateCandidate={candidate_id:string;wise_order_id:number;order_id:string;order_ids:string[];target_count:number;nickname:string;ordered_at:string;wise_status:number;delivery_company:string|null;tracking_number:string;current:{tracking_registered:boolean|null;shipping_status:string|null;order_status:string|null;phone?:string|null};changes:Record<string,string|boolean>};
 type Candidate={wise_order_id:number;nickname:string;ordered_at:string;items:number;existingDomestic:boolean;alreadyQueued:boolean;matched_order_ids:string[]};
 const labels:Record<string,string>={accepted:"입력됨",checked:"재고확인",kept:"직배킵",packaged:"포장완료",done:"완료",start:"시작",excel_exported:"엑셀 추출",uploaded:"운송장 입력",registered:"운송장등록"};
 function stateText(k:string,v:unknown){return k==="tracking_registered"?(v?"Y":"N"):v==null?"미설정":labels[String(v)]??String(v)}
@@ -87,7 +87,7 @@ export default function WiseJsonImport(){
    const r=await fetch("/api/domestic/wise-json-import",{method:"POST",body:form});const d=await r.json();
    if(!r.ok)throw new Error(d.error||"변경 실패");
    const successful=(d.results??[]).filter((x:{ok:boolean;changed:boolean})=>x.ok&&x.changed);
-   const targetIds=[...new Set(successful.map((x:{order_id:string})=>x.order_id))] as string[];
+   const targetIds=[...new Set(successful.flatMap((x:{order_ids:string[]})=>x.order_ids))] as string[];
    const verified=new Map<string,string>();
    for(let i=0;i<targetIds.length;i+=40){
      const ids=targetIds.slice(i,i+40);
@@ -97,14 +97,13 @@ export default function WiseJsonImport(){
      for(const order of verifyBody.orders??[])verified.set(String(order.order_id),String(order.phone??""));
    }
    const updatesById=new Map(preview?.update_candidates.map(x=>[x.candidate_id,x])??[]);
-   const reallySaved=successful.filter((x:{candidate_id:string;order_id:string})=>{
+   const reallySaved=successful.filter((x:{candidate_id:string;order_ids:string[]})=>{
      const expected=String(updatesById.get(x.candidate_id)?.changes.phone??"").replace(/\D/g,"");
-     const actual=String(verified.get(x.order_id)??"").replace(/\D/g,"");
-     return expected.length>=8&&actual===expected;
+     return expected.length>=8&&x.order_ids.every(id=>String(verified.get(id)??"").replace(/\D/g,"")===expected);
    });
    const verifiedIds=new Set(reallySaved.map((x:{candidate_id:string})=>x.candidate_id));
    const mismatch=successful.length-reallySaved.length;
-   setMessage(`주문내역 DB 검증 완료 ${reallySaved.length}건 / 저장 확인 실패 ${mismatch}건 / API 실패 ${d.failed}건`+(mismatch?" — 저장 확인 안 된 건은 목록에 그대로 남겨뒀어.":""));
+   setMessage(`주문내역 DB 검증 완료 ${reallySaved.length}명 / 저장 확인 실패 ${mismatch}건 / API 실패 ${d.failed}건`+(mismatch?" — 저장 확인 안 된 건은 목록에 그대로 남겨뒀어.":""));
    setSelectedUpdates([]);
    setPreview(prev=>prev?{...prev,update_candidates:prev.update_candidates.filter(x=>!verifiedIds.has(x.candidate_id))}:prev);
   }catch(e){setMessage("전화번호 업데이트 실패: "+(e instanceof Error?e.message:"변경 실패"))}finally{setLoading(false);setActivity("")}
@@ -128,7 +127,7 @@ export default function WiseJsonImport(){
    <label><input disabled={loading||pulling} type="checkbox" checked={selectedUpdates.length===preview.update_candidates.length} onChange={e=>setSelectedUpdates(e.target.checked?preview.update_candidates.map(x=>x.candidate_id):[])}/> 전체 선택</label>
    <div style={{maxHeight:340,overflow:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}>
     <thead><tr><th>선택</th><th>닉네임 / 날짜</th><th>와이스 상태</th><th>ddoga 주문</th><th>전화번호 변경</th></tr></thead>
-    <tbody>{preview.update_candidates.map(x=><tr key={x.candidate_id} style={{borderTop:"1px solid #cbd5e1",background:x.changes.phone?"#e0f2fe":"transparent"}}><td><input disabled={loading||pulling} type="checkbox" checked={selectedUpdates.includes(x.candidate_id)} onChange={e=>setSelectedUpdates(v=>e.target.checked?[...v,x.candidate_id]:v.filter(id=>id!==x.candidate_id))}/></td><td>{x.nickname} / {new Date(x.ordered_at).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})}</td><td>{x.wise_status===25?"발송완료 (25)":x.wise_status} / {x.delivery_company==="DIRECT"?"직접배송 (DIRECT)":x.delivery_company||"-"}</td><td>{x.order_id}</td><td><span>{stateText("phone",x.current?.phone)} → <strong style={{display:"inline-block",background:x.changes.phone?"#bae6fd":"transparent",borderRadius:6,padding:x.changes.phone?"4px 8px":"0",color:x.changes.phone?"#075985":"inherit"}}>{stateText("phone",x.changes.phone??x.current?.phone)}</strong></span></td></tr>)}</tbody>
+    <tbody>{preview.update_candidates.map(x=><tr key={x.candidate_id} style={{borderTop:"1px solid #cbd5e1",background:x.changes.phone?"#e0f2fe":"transparent"}}><td><input disabled={loading||pulling} type="checkbox" checked={selectedUpdates.includes(x.candidate_id)} onChange={e=>setSelectedUpdates(v=>e.target.checked?[...v,x.candidate_id]:v.filter(id=>id!==x.candidate_id))}/></td><td>{x.nickname} / {new Date(x.ordered_at).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})}</td><td>{x.wise_status===25?"발송완료 (25)":x.wise_status} / {x.delivery_company==="DIRECT"?"직접배송 (DIRECT)":x.delivery_company||"-"}</td><td>{x.order_ids.join(", ")} ({x.target_count}건)</td><td><span>{stateText("phone",x.current?.phone)} → <strong style={{display:"inline-block",background:x.changes.phone?"#bae6fd":"transparent",borderRadius:6,padding:x.changes.phone?"4px 8px":"0",color:x.changes.phone?"#075985":"inherit"}}>{stateText("phone",x.changes.phone??x.current?.phone)}</strong></span></td></tr>)}</tbody>
    </table></div>
    <button disabled={loading||pulling||!selectedUpdates.length} onClick={applyUpdates} style={{...darkButtonStyle,marginTop:10}}>{activity==="update"?"기존 주문 변경사항 적용 중…":`선택 ${selectedUpdates.length}건 전화번호 업데이트`}</button>
   </div>}
