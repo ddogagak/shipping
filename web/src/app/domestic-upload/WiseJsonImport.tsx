@@ -3,7 +3,7 @@ import {useEffect,useState,useRef} from "react";
 const primaryButtonStyle={border:0,borderRadius:10,padding:"10px 14px",background:"#2563eb",color:"#fff",fontWeight:800,cursor:"pointer"} as const;
 const darkButtonStyle={border:0,borderRadius:10,padding:"10px 14px",background:"#111827",color:"#fff",fontWeight:800,cursor:"pointer"} as const;
 const secondaryButtonStyle={border:"1px solid #d1d5db",borderRadius:10,padding:"9px 14px",background:"#fff",color:"#374151",fontWeight:700,cursor:"pointer"} as const;
-type UpdateCandidate={wise_order_id:number;order_id:string;nickname:string;ordered_at:string;wise_status:number;delivery_company:string|null;tracking_number:string;current:{tracking_registered:boolean|null;shipping_status:string|null;order_status:string|null};changes:Record<string,string|boolean>};
+type UpdateCandidate={wise_order_id:number;order_id:string;nickname:string;ordered_at:string;wise_status:number;delivery_company:string|null;tracking_number:string;current:{tracking_registered:boolean|null;shipping_status:string|null;order_status:string|null;phone?:string|null};changes:Record<string,string|boolean>};
 type Candidate={wise_order_id:number;nickname:string;ordered_at:string;items:number;existingDomestic:boolean;alreadyQueued:boolean;matched_order_ids:string[]};
 const labels:Record<string,string>={accepted:"입력됨",checked:"재고확인",kept:"직배킵",packaged:"포장완료",done:"완료",start:"시작",excel_exported:"엑셀 추출",uploaded:"운송장 입력",registered:"운송장등록"};
 function stateText(k:string,v:unknown){return k==="tracking_registered"?(v?"Y":"N"):v==null?"미설정":labels[String(v)]??String(v)}
@@ -80,8 +80,8 @@ export default function WiseJsonImport(){
  useEffect(()=>{if(file&&autoPreviewRef.current){autoPreviewRef.current=false;void run("preview");}},[file]);
  async function applyUpdates(){
   if(!file||!selectedUpdates.length)return;
-  if(!confirm(`선택한 ${selectedUpdates.length}건의 기존 주문 상태를 변경할까요?`))return;
-  setLoading(true);setActivity("update");setMessage(`기존 주문 ${selectedUpdates.length}건 상태 업데이트 중…`);
+  if(!confirm(`선택한 ${selectedUpdates.length}건의 기존 주문 상태/전화번호 변경사항을 적용할까요?`))return;
+  setLoading(true);setActivity("update");setMessage(`기존 주문 ${selectedUpdates.length}건 변경사항 적용 중…`);
   try{
    const form=new FormData();form.append("file",file);form.append("mode","apply_updates");form.append("selected_ids",JSON.stringify(selectedUpdates));
    const r=await fetch("/api/domestic/wise-json-import",{method:"POST",body:form});const d=await r.json();
@@ -103,16 +103,16 @@ export default function WiseJsonImport(){
    
   </div>
   <div role="status" aria-live="polite" aria-busy={loading||pulling} style={{marginTop:16,padding:14,borderRadius:10,background:loading||pulling?"#eff6ff":"#f3f4f6",fontWeight:700}}>{loading||pulling?"⏳ 처리 중: ":"현재 상태: "}{message||"대기 중 — 와이스 판매목록을 가져오거나 JSON 파일을 선택해 주세요."}</div>
-  {preview&&!(preview.update_candidates?.length)&&<p>기존 주문 상태 업데이트 대상: 0건 — 현재 변경할 항목이 없습니다.</p>}
+  {preview&&!(preview.update_candidates?.length)&&<p>기존 주문 변경 대상: 0건 — 현재 변경할 항목이 없습니다.</p>}
   {preview&&preview.update_candidates?.length>0&&<div style={{marginTop:18,padding:14,border:"1px solid #cbd5e1",borderRadius:12}}>
    <h3>기존 주문 상태 업데이트 대상 ({preview.update_candidates.length}건)</h3>
-   <p>체크한 항목만 ddoga 주문/배송 상태를 수정합니다. 신규 주문 등록과 별개입니다.</p>
+   <p>체크한 항목만 DDOGA 주문/배송 상태 및 변경된 전화번호를 수정합니다. 신규 주문 등록과 별개입니다.</p>
    <label><input disabled={loading||pulling} type="checkbox" checked={selectedUpdates.length===preview.update_candidates.length} onChange={e=>setSelectedUpdates(e.target.checked?preview.update_candidates.map(x=>x.wise_order_id):[])}/> 전체 선택</label>
    <div style={{maxHeight:340,overflow:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",textAlign:"left"}}>
     <thead><tr><th>선택</th><th>닉네임 / 날짜</th><th>와이스 상태</th><th>ddoga 주문</th><th>현재 DDOGA 상태 → 업데이트 후</th></tr></thead>
-    <tbody>{preview.update_candidates.map(x=><tr key={x.wise_order_id} style={{borderTop:"1px solid #eee"}}><td><input disabled={loading||pulling} type="checkbox" checked={selectedUpdates.includes(x.wise_order_id)} onChange={e=>setSelectedUpdates(v=>e.target.checked?[...v,x.wise_order_id]:v.filter(id=>id!==x.wise_order_id))}/></td><td>{x.nickname} / {new Date(x.ordered_at).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})}</td><td>{x.wise_status===25?"발송완료 (25)":x.wise_status} / {x.delivery_company==="DIRECT"?"직접배송 (DIRECT)":x.delivery_company||"-"}</td><td>{x.order_id}</td><td>{(["tracking_registered","order_status","shipping_status"] as const).map(k=><div key={k}>{k==="tracking_registered"?"등록":k==="order_status"?"주문상태":"배송상태"}: {stateText(k,x.current?.[k])} → <strong>{stateText(k,k in x.changes?x.changes[k]:x.current?.[k])}</strong>{!(k in x.changes)&&" (유지)"}</div>)}</td></tr>)}</tbody>
+    <tbody>{preview.update_candidates.map(x=><tr key={x.wise_order_id} style={{borderTop:"1px solid #eee"}}><td><input disabled={loading||pulling} type="checkbox" checked={selectedUpdates.includes(x.wise_order_id)} onChange={e=>setSelectedUpdates(v=>e.target.checked?[...v,x.wise_order_id]:v.filter(id=>id!==x.wise_order_id))}/></td><td>{x.nickname} / {new Date(x.ordered_at).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})}</td><td>{x.wise_status===25?"발송완료 (25)":x.wise_status} / {x.delivery_company==="DIRECT"?"직접배송 (DIRECT)":x.delivery_company||"-"}</td><td>{x.order_id}</td><td>{(["tracking_registered","order_status","shipping_status","phone"] as const).map(k=><div key={k}>{k==="tracking_registered"?"등록":k==="order_status"?"주문상태":k==="phone"?"전화번호":"배송상태"}: {stateText(k,x.current?.[k])} → <strong>{stateText(k,k in x.changes?x.changes[k]:x.current?.[k])}</strong>{!(k in x.changes)&&" (유지)"}</div>)}</td></tr>)}</tbody>
    </table></div>
-   <button disabled={loading||pulling||!selectedUpdates.length} onClick={applyUpdates} style={{...darkButtonStyle,marginTop:10}}>{activity==="update"?"기존 주문 상태 업데이트 중…":`선택 ${selectedUpdates.length}건 상태 업데이트`}</button>
+   <button disabled={loading||pulling||!selectedUpdates.length} onClick={applyUpdates} style={{...darkButtonStyle,marginTop:10}}>{activity==="update"?"기존 주문 변경사항 적용 중…":`선택 ${selectedUpdates.length}건 상태 업데이트`}</button>
   </div>}
   {preview&&<div style={{marginTop:18}}>
    <p>전체 {preview.total}건 / 신규 {preview.new_orders.length}건 / 중복 의심 {preview.possible_existing.length}건 / 기존 대기 {preview.already_queued}건</p>
