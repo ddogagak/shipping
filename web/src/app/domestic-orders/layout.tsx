@@ -28,29 +28,30 @@ export default function DomesticOrdersLayout({ children }: { children: ReactNode
   }, []);
 
   useEffect(() => {
-    function onDoubleClick(event: MouseEvent) {
+    async function onDoubleClick(event: MouseEvent) {
       const target = event.target as HTMLElement | null;
       const cell = target?.closest("td") as HTMLTableCellElement | null;
       const row = cell?.closest("tr") as HTMLTableRowElement | null;
       if (!cell || !row || cell.cellIndex !== 1) return;
 
-      const nickname = cell.textContent?.trim() || "";
-      if (!nickname) return;
-
-      // 현재 Domestic Orders 표에서 고객주문번호는 12번째 열(index 11)에 표시됨.
-      const displayedOrderNo = row.cells[11]?.textContent?.trim() || "";
-      const matched =
-        orders.find(
-          (order) =>
-            (order.customer_order_no || order.order_id) === displayedOrderNo &&
-            (order.nickname || "").trim() === nickname
-        ) || orders.find((order) => (order.nickname || "").trim() === nickname);
-
-      if (matched) {
+      // Use the real DB key instead of a brittle column index or nickname fallback.
+      const orderId = row.dataset.orderId?.trim();
+      if (!orderId) return;
+      try {
+        // Always show current DB delivery information, not the layout's mount-time cache.
+        const res = await fetch("/api/domestic/orders", { cache: "no-store" });
+        if (!res.ok) throw new Error("배송정보 조회 실패");
+        const json = await res.json();
+        const latestOrders = Array.isArray(json.orders) ? json.orders as Order[] : [];
+        const matched = latestOrders.find((order) => order.order_id === orderId);
+        if (!matched) throw new Error("선택한 주문을 최신 DB에서 찾지 못했어.");
+        setOrders(latestOrders);
         setSelected(matched);
         setRecipientName(matched.recipient_name || "");
         setPhone(matched.phone || "");
         setAddress(matched.address || "");
+      } catch (err) {
+        alert(err instanceof Error ? err.message : "배송정보 최신 조회 실패");
       }
     }
 
