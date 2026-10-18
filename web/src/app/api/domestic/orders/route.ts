@@ -51,8 +51,21 @@ function oldestSourceDate(order: any) {
   return Array.from(new Set(dates)).sort()[0] || order?.created_at || null;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const supabase = createServiceRoleClient();
+  // Read exactly the records changed by Wise import through the same API
+  // that Domestic Orders uses, avoiding a misleading write-only success.
+  const url = new URL(req.url);
+  const verifyParam = url.searchParams.get("phone_verify_ids");
+  if (verifyParam !== null) {
+    const ids = [...new Set(verifyParam.split(",").map(id=>id.trim()).filter(Boolean))];
+    if(!ids.length || ids.length>40)
+      return NextResponse.json({error:"전화번호 검증 주문은 1~40건이어야 합니다."},{status:400});
+    const {data,error}=await supabase.from("domestic_order")
+      .select("order_id,phone").in("order_id",ids);
+    if(error)return NextResponse.json({error:"전화번호 저장 확인 조회 실패",detail:error.message},{status:500});
+    return NextResponse.json({ok:true,orders:data??[]},{headers:{"Cache-Control":"private, no-store, max-age=0"}});
+  }
 
   const { data, error } = await supabase
     .from("domestic_order")
