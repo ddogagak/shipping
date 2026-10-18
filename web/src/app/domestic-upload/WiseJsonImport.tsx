@@ -51,7 +51,7 @@ export default function WiseJsonImport(){
  const [selectedUpdates,setSelectedUpdates]=useState<string[]>([]);
  const [loading,setLoading]=useState(false);
  const [message,setMessage]=useState("");
- const [preview,setPreview]=useState<{total:number;new_orders:Candidate[];possible_existing:Candidate[];queued_orders:Candidate[];already_queued:number;update_candidates:UpdateCandidate[]}|null>(null);
+ const [preview,setPreview]=useState<{total:number;new_orders:Candidate[];possible_existing:Candidate[];queued_orders:Candidate[];already_queued:number;update_candidates:UpdateCandidate[];phone_diagnostics?:{wise_orders:number;wise_source_phone_available:number;wise_receiver_phone_field_present:number;ddoga_wise_orders:number;ddoga_open_orders:number;nickname_matched_source_orders:number;open_nickname_matched_source_orders:number;open_matched_source_missing_phone:number;same_phone_pairs:number;phone_changed_candidates:number;possible_phone_fields:Array<{field:string;present:number;withDigits:number}>;missing_phone_examples:string[]}}|null>(null);
  async function syncSales(){
   if(!file)return;
   setLoading(true);setActivity("sales_sync");setMessage("와이스 주문 매출자료 저장 중…");
@@ -103,6 +103,14 @@ export default function WiseJsonImport(){
    
   </div>
   <div role="status" aria-live="polite" aria-busy={loading||pulling} style={{marginTop:16,padding:14,borderRadius:10,background:loading||pulling?"#eff6ff":"#f3f4f6",fontWeight:700}}>{loading||pulling?"⏳ 처리 중: ":"현재 상태: "}{message||"대기 중 — 와이스 판매목록을 가져오거나 JSON 파일을 선택해 주세요."}</div>
+  {preview?.phone_diagnostics&&<div style={{padding:12,marginTop:12,border:"1px solid #d1d5db",borderRadius:10}}>
+   <strong>전화번호 동기화 진단</strong>
+   <p>와이스 원본 {preview.phone_diagnostics.wise_orders}건 · receiverPhoneNum 필드 있음 {preview.phone_diagnostics.wise_receiver_phone_field_present}건 · 실제 번호 있음 {preview.phone_diagnostics.wise_source_phone_available}건</p>
+   <p>DDOGA 와이스 주문 {preview.phone_diagnostics.ddoga_wise_orders}건 · 미완료 {preview.phone_diagnostics.ddoga_open_orders}건 · 닉네임 일치 {preview.phone_diagnostics.nickname_matched_source_orders}건 · 미완료 주문과 닉네임 일치 {preview.phone_diagnostics.open_nickname_matched_source_orders}건</p>
+   <p>그중 원본 번호 없음 {preview.phone_diagnostics.open_matched_source_missing_phone}건 · 이미 같은 번호 {preview.phone_diagnostics.same_phone_pairs}쌍 · 실제 변경 후보 {preview.phone_diagnostics.phone_changed_candidates}건</p>
+   <p>원본의 전화번호 관련 필드: {preview.phone_diagnostics.possible_phone_fields.length?preview.phone_diagnostics.possible_phone_fields.map(f=>f.field+" (번호 "+f.withDigits+"건)").join(", "):"없음"}</p>
+   {preview.phone_diagnostics.open_matched_source_missing_phone>0&&<p>번호 누락 닉네임 예시: {preview.phone_diagnostics.missing_phone_examples.join(", ")}</p>}
+  </div>}
   {preview&&!(preview.update_candidates?.length)&&<p>기존 주문 변경 대상: 0건 — 현재 변경할 항목이 없습니다.</p>}
   {preview&&preview.update_candidates?.length>0&&<div style={{marginTop:18,padding:14,border:"1px solid #cbd5e1",borderRadius:12}}>
    <h3>기존 주문 상태 업데이트 대상 ({preview.update_candidates.length}건)</h3>
