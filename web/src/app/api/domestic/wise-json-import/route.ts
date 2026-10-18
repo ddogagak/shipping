@@ -103,18 +103,31 @@ export async function POST(req:Request){
    return {order:o,wise_order_id:o.id,nickname,ordered_at:date,existingDomestic,matched_order_ids,alreadyQueued:queuedIds.has(o.id),items:o.stocks?.length??0};
   });
   const rows=allRows.filter(x=>[10,16,25].includes(Number(x.order.status)));
+  // Only DDOGA orders still open (neither order completed nor delivered).
+  const completedShipping=new Set<string>();
+  for(const chunk of batches(wiseDomestic.map(d=>String(d.order_id)),100)){
+    const {data,error}=await db.from("domestic_shipping").select("order_id,shipping_status").in("order_id",chunk);
+    if(error)throw new Error("배송상태 조회 실패: "+error.message);
+    for(const row of data??[]){
+      if(asText(row.shipping_status)==="done")completedShipping.add(String(row.order_id));
+    }
+  }
   const byNickname=new Map<string,typeof wiseDomestic>();
   for(const d of wiseDomestic){
+    if(asText(d.order_status)==="done"||completedShipping.has(String(d.order_id)))continue;
     const k=key(asText(d.nickname));if(!k)continue;
     byNickname.set(k,[...(byNickname.get(k)??[]),d]);
   }
+  // Nickname alone determines eligible pairs. Only a real, nonempty phone difference is shown.
   const uniqueUpdates=(parsed as RawOrder[]).flatMap(order=>{
     const nickname=asText(order.user?.nickname);
-    return (byNickname.get(key(nickname))??[]).map(d=>{
-      const sourcePhone=asText(order.receiverPhoneNum),existingPhone=asText(d.phone);
-      const changes:Record<string,string>={};
-      if(phoneDigits(sourcePhone)&&phoneDigits(sourcePhone)!==phoneDigits(existingPhone))changes.phone=sourcePhone;
-      return {candidate_id:String(order.id)+"::"+d.order_id,wise_order_id:order.id,order_id:String(d.order_id),nickname,ordered_at:order.createdAt??null,wise_status:Number(order.status),delivery_company:order.deliveryCompany??null,tracking_number:null,current:{tracking_registered:null,shipping_status:null,order_status:d.order_status??null,phone:d.phone??null},changes};
+    const sourcePhone=asText(order.receiverPhoneNum);
+    if(!key(nickname)||!phoneDigits(sourcePhone))return [];
+    return (byNickname.get(key(nickname))??[]).flatMap(d=>{
+      const existingPhone=asText(d.phone);
+      if(phoneDigits(sourcePhone)===phoneDigits(existingPhone))return [];
+      const changes:Record<string,string>={phone:sourcePhone};
+      return [{candidate_id:String(order.id)+"::"+d.order_id,wise_order_id:order.id,order_id:String(d.order_id),nickname,ordered_at:order.createdAt??null,wise_status:Number(order.status),delivery_company:order.deliveryCompany??null,tracking_number:null,current:{tracking_registered:null,shipping_status:null,order_status:d.order_status??null,phone:d.phone??null},changes}];
     });
   });
   if(mode==="apply_updates"){
@@ -138,7 +151,7 @@ export async function POST(req:Request){
     }
     return NextResponse.json({ok:true,results,updated:results.filter(x=>x.changed).length,unchanged:results.filter(x=>x.ok&&!x.changed).length,failed:results.filter(x=>!x.ok).length});
   }
-  if(mode==="preview")return NextResponse.json({ok:true,total:rows.length,phone_sync_stats:{source_with_phone:allRows.filter(x=>/\d/.test(asText(x.order.receiverPhoneNum))).length,matched_with_phone:allRows.filter(x=>x.existingDomestic&&/\d/.test(asText(x.order.receiverPhoneNum))).length,phone_change_candidates:uniqueUpdates.filter(x=>"phone" in x.changes).length,nickname_matched_candidates:uniqueUpdates.length,unmatched_with_phone:allRows.filter(x=>!x.existingDomestic&&/\d/.test(asText(x.order.receiverPhoneNum))).length},excluded_count:parsed.length-orders.length,new_orders:rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued).map(({order,...x})=>x),possible_existing:rows.filter(x=>x.existingDomestic).map(({order,...x})=>x),already_queued:rows.filter(x=>x.alreadyQueued).length,update_candidates:uniqueUpdates,queued_orders:rows.filter(x=>x.alreadyQueued).map(({order,...x})=>x),notice:"기존 주문 수동 업데이트 목록은 닉네임만 같으면 모두 표시합니다. 선택된 행의 전화번호만 수정합니다."});
+  if(mode==="preview")return NextResponse.json({ok:true,total:rows.length,phone_sync_stats:{source_with_phone:allRows.filter(x=>/\d/.test(asText(x.order.receiverPhoneNum))).length,matched_with_phone:allRows.filter(x=>x.existingDomestic&&/\d/.test(asText(x.order.receiverPhoneNum))).length,phone_change_candidates:uniqueUpdates.filter(x=>"phone" in x.changes).length,nickname_matched_candidates:uniqueUpdates.length,unmatched_with_phone:allRows.filter(x=>!x.existingDomestic&&/\d/.test(asText(x.order.receiverPhoneNum))).length},excluded_count:parsed.length-orders.length,new_orders:rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued).map(({order,...x})=>x),possible_existing:rows.filter(x=>x.existingDomestic).map(({order,...x})=>x),already_queued:rows.filter(x=>x.alreadyQueued).length,update_candidates:uniqueUpdates,queued_orders:rows.filter(x=>x.alreadyQueued).map(({order,...x})=>x),notice:"닉네임이 같고, DDOGA 주문·배송이 미완료이고, 와이스 전화번호가 실제로 달라진 주문만 표시합니다. 선택한 항목의 전화번호만 변경합니다."});
   if(mode!=="save")return NextResponse.json({error:"Invalid mode"},{status:400});
   // Keep a financial snapshot for every order in the Wise export, including completed statuses.
   const importedAt=new Date().toISOString();
