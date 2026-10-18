@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState, type CSSProperties } from "react";
 import * as XLSX from "xlsx";
 import WiseShippingTab from "./WiseShippingTab";
+import LogenTextTab from "./LogenTextTab";
 
 type TrackingPreviewRow = {
   id: string;
@@ -140,7 +141,7 @@ function trackingResultLabel(row: TrackingPreviewRow) {
 }
 
 export default function DomesticTrackingPage() {
-  const [activeTab,setActiveTab] = useState<"excel"|"wise">("excel");
+  const [activeTab,setActiveTab] = useState<"excel"|"wise"|"text">("excel");
   const [fileName, setFileName] = useState("");
   const [rows, setRows] = useState<TrackingPreviewRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -340,9 +341,9 @@ export default function DomesticTrackingPage() {
 
       <div style={{display:"flex",gap:8,marginBottom:16}}>
         <button type="button" onClick={()=>setActiveTab("excel")} style={{...navButtonStyle,background:activeTab==="excel"?"#111827":"#fff",color:activeTab==="excel"?"#fff":"#111827"}}>운송장엑셀 업로드</button>
-        <button type="button" onClick={()=>setActiveTab("wise")} style={{...navButtonStyle,background:activeTab==="wise"?"#111827":"#fff",color:activeTab==="wise"?"#fff":"#111827"}}>와이스 송장 연동</button>
+        <button type="button" onClick={()=>setActiveTab("wise")} style={{...navButtonStyle,background:activeTab==="wise"?"#111827":"#fff",color:activeTab==="wise"?"#fff":"#111827"}}>와이스 송장 연동</button><button type="button" onClick={()=>setActiveTab("text")} style={{...navButtonStyle,background:activeTab==="text"?"#111827":"#fff",color:activeTab==="text"?"#fff":"#111827"}}>로젠 텍스트 입력</button>
       </div>
-      {activeTab==="wise"?<WiseShippingTab/>:<>
+      {activeTab==="wise"?<WiseShippingTab/>:activeTab==="text"?<LogenTextTab/>:<>
       <section style={cardStyle}>
         <label style={uploadBoxStyle}>
           <strong>운송장 엑셀 업로드</strong>
