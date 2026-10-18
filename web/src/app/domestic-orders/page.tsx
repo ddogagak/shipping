@@ -1279,7 +1279,7 @@ export default function DomesticOrdersPage() {
     XLSX.utils.book_append_sheet(workbook, worksheet, "로젠택배");
     const base64 = XLSX.write(workbook, { bookType: "xlsx", type: "base64" });
     window.dispatchEvent(new CustomEvent("ddoga:logen:send", {
-      detail: { base64, filename: `logen_shipping_${Date.now()}.xlsx`, count: data.length },
+      detail: { base64, filename: `logen_shipping_${Date.now()}.xlsx`, count: data.length, selectedIds: selectedRows.map(row => row.order_id) },
     }));
   }
 
