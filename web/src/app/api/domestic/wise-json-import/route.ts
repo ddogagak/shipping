@@ -14,6 +14,8 @@ function domesticDateKey(v:unknown){
  const m=s.match(/^(\d{4})\s*[.\/-]\s*(\d{1,2})\s*[.\/-]\s*(\d{1,2})\s*(?:\/|T|\s)+\s*(\d{1,2}):(\d{1,2})/);
  return m?[m[1],m[2].padStart(2,"0"),m[3].padStart(2,"0")].join("-")+" "+m[4].padStart(2,"0")+":"+m[5]:"";
 }
+function phoneDigits(v:unknown){return asText(v).replace(/\D/g,"")}
+function orderNumberKey(v:unknown){return key(asText(v).replace(/-C\d+$/i,""))}
 function batches<T>(a:T[],n=200){const out:T[][]=[];for(let i=0;i<a.length;i+=n)out.push(a.slice(i,i+n));return out}
 export async function POST(req:Request){
  try{
@@ -61,6 +63,8 @@ export async function POST(req:Request){
   }
   const domesticKeys=new Map<string,string[]>();
   const wiseDomestic=domestic.filter(d=>d.platform==="wise");
+  const domesticById=new Map(wiseDomestic.map(d=>[String(d.order_id),d]));
+  const domesticByOrderNo=new Map<string,string[]>();
   for(const d of wiseDomestic){
    for(const date of [...(Array.isArray(d.source_order_dates)?d.source_order_dates:[]),d.first_order_date]){
     const dateKey=domesticDateKey(date);
@@ -70,15 +74,31 @@ export async function POST(req:Request){
     if(!ids.includes(String(d.order_id)))ids.push(String(d.order_id));
     domesticKeys.set(k,ids);
    }
+   // Match the DDOGA customer order number, not only nickname + minute.
+   const orderNo=orderNumberKey(d.customer_order_no);
+   if(orderNo){
+    const ids=domesticByOrderNo.get(orderNo)??[];
+    if(!ids.includes(String(d.order_id)))ids.push(String(d.order_id));
+    domesticByOrderNo.set(orderNo,ids);
+   }
   }
-  // Phone updates must also inspect statuses that are not eligible for NEW order imports.
+  // Phone-only changes are checked for every Wise status, independently of shipping state.
   const allRows=(parsed as RawOrder[]).filter(x=>validDate(x.createdAt)).map(o=>{
    const date=validDate(o.createdAt)!;
    const nickname=asText(o.user?.nickname);
    const formatted=kst(date);
+   const mmdd=formatted.slice(5,7)+formatted.slice(8,10);
+   const ddogaOrderNo="W"+key(nickname)+"_"+mmdd;
+   const dateDigits=formatted.replace(/\D/g,"");
+   const exactIds=wiseDomestic.filter(d=>String(d.order_id)==="WJSON_"+o.id || orderNumberKey(d.order_id)===orderNumberKey(ddogaOrderNo+"__"+dateDigits) || asText(d.customer_order_no)===String(o.id)).map(d=>String(d.order_id));
    const byDate=domesticKeys.get(key(nickname)+"|"+formatted)??[];
-   const exactId=wiseDomestic.filter(d=>String(d.order_id)==="WJSON_"+o.id).map(d=>String(d.order_id));
-   const matched_order_ids=[...new Set([...exactId,...byDate])];
+   const byOrderNo=(domesticByOrderNo.get(orderNumberKey(ddogaOrderNo))??[]).filter(id=>{
+    const d=domesticById.get(id);
+    if(!d)return false;
+    const dates=[...(Array.isArray(d.source_order_dates)?d.source_order_dates:[]),d.first_order_date].map(domesticDateKey).filter(Boolean);
+    return !dates.length || dates.some(value=>value.slice(0,4)===formatted.slice(0,4));
+   });
+   const matched_order_ids=[...new Set(exactIds.length?exactIds:[...byDate,...byOrderNo])];
    const existingDomestic=matched_order_ids.length>0;
    return {order:o,wise_order_id:o.id,nickname,ordered_at:date,existingDomestic,matched_order_ids,alreadyQueued:queuedIds.has(o.id),items:o.stocks?.length??0};
   });
@@ -92,20 +112,28 @@ export async function POST(req:Request){
     shippingRows.push(...(data??[]));
   }
   const shippingMap=new Map((shippingRows??[]).map(x=>[String(x.order_id),x]));
-  const updateCandidates=allRows.filter(x=>x.existingDomestic).map(x=>({order:x.order,matched_order_ids:x.matched_order_ids})).flatMap(({order,matched_order_ids})=>{
-    // Never automatically alter ambiguous/combined matches.
-    if(matched_order_ids.length!==1)return [];
-    const order_id=matched_order_ids[0],ship=shippingMap.get(order_id);
-    const currentOrder=wiseDomestic.find(d=>String(d.order_id)===order_id);
-    const tracking=asText(ship?.tracking_number),direct=asText(order.deliveryCompany).toUpperCase()==="DIRECT";
-    const changes:Record<string,string|boolean>={};
+  const updateCandidates=allRows.filter(x=>x.existingDomestic).flatMap(({order,matched_order_ids})=>{
+    if(!matched_order_ids.length)return [];
     const sourcePhone=asText(order.receiverPhoneNum);
-    const phoneMatches=allRows.filter(x=>x.matched_order_ids.length===1&&x.matched_order_ids[0]===order_id).map(x=>asText(x.order.receiverPhoneNum)).filter(Boolean);
-    const uniquePhones=new Set(phoneMatches.map(x=>x.replace(/\D/g,"")));
-    if(sourcePhone&&/\d/.test(sourcePhone)&&uniquePhones.size===1&&sourcePhone.replace(/\D/g,"")!==asText(currentOrder?.phone).replace(/\D/g,""))changes.phone=sourcePhone;
-    if(direct&&Number(order.status)===25){if(ship&&!ship.tracking_registered)changes.tracking_registered=true;if(currentOrder?.order_status!=="kept")changes.order_status="kept";}
+    // An empty DDOGA number becoming populated is a change on its own.
+    // Never require shipping rows, DIRECT status, or an unambiguous combined-order match.
+    const phoneOrderIds=/\d/.test(sourcePhone)
+      ? matched_order_ids.filter(id=>!phoneDigits(domesticById.get(id)?.phone))
+      : [];
+    const order_id=phoneOrderIds[0]??matched_order_ids[0];
+    const ship=shippingMap.get(order_id);
+    const currentOrder=domesticById.get(order_id);
+    const tracking=asText(ship?.tracking_number);
+    const direct=asText(order.deliveryCompany).toUpperCase()==="DIRECT";
+    const changes:Record<string,string|boolean>={};
+    if(phoneOrderIds.length)changes.phone=sourcePhone;
+    // Preserve the existing shipment-status update, but only for unambiguous matches.
+    if(matched_order_ids.length===1&&direct&&Number(order.status)===25){
+      if(ship&&!ship.tracking_registered)changes.tracking_registered=true;
+      if(currentOrder?.order_status!=="kept")changes.order_status="kept";
+    }
     if(!Object.keys(changes).length)return [];
-    return [{wise_order_id:order.id,order_id,nickname:asText(order.user?.nickname),ordered_at:order.createdAt,wise_status:Number(order.status),delivery_company:order.deliveryCompany,tracking_number:tracking,current:{tracking_registered:ship?.tracking_registered??null,shipping_status:ship?.shipping_status??null,order_status:currentOrder?.order_status??null,phone:currentOrder?.phone??null},changes}];
+    return [{wise_order_id:order.id,order_id,phone_order_ids:phoneOrderIds,nickname:asText(order.user?.nickname),ordered_at:order.createdAt,wise_status:Number(order.status),delivery_company:order.deliveryCompany,tracking_number:tracking,current:{tracking_registered:ship?.tracking_registered??null,shipping_status:ship?.shipping_status??null,order_status:currentOrder?.order_status??null,phone:currentOrder?.phone??null},changes}];
   });
   const uniqueUpdates=[...new Map(updateCandidates.map(x=>[x.wise_order_id,x])).values()];
   if(mode==="apply_updates"){
@@ -123,8 +151,10 @@ export async function POST(req:Request){
         if(error)failure=error.message;
       }
       if(!failure&&phone){
-        const {error}=await db.from("domestic_order").update({phone}).eq("order_id",order_id).eq("platform","wise");
-        if(error)failure=error.message;
+        for(const targetId of candidate.phone_order_ids){
+          const {error}=await db.from("domestic_order").update({phone}).eq("order_id",targetId).eq("platform","wise");
+          if(error){failure=error.message;break;}
+        }
       }
       if(!failure&&Object.keys(shippingChanges).length){
         const {error}=await db.from("domestic_shipping").update(shippingChanges).eq("order_id",order_id);
@@ -134,7 +164,7 @@ export async function POST(req:Request){
     }
     return NextResponse.json({ok:true,results,updated:results.filter(x=>x.ok).length,failed:results.filter(x=>!x.ok).length});
   }
-  if(mode==="preview")return NextResponse.json({ok:true,total:rows.length,phone_sync_stats:{source_with_phone:allRows.filter(x=>/\d/.test(asText(x.order.receiverPhoneNum))).length,matched_with_phone:allRows.filter(x=>x.existingDomestic&&/\d/.test(asText(x.order.receiverPhoneNum))).length,phone_change_candidates:uniqueUpdates.filter(x=>"phone" in x.changes).length},excluded_count:parsed.length-orders.length,new_orders:rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued).map(({order,...x})=>x),possible_existing:rows.filter(x=>x.existingDomestic).map(({order,...x})=>x),already_queued:rows.filter(x=>x.alreadyQueued).length,update_candidates:uniqueUpdates,queued_orders:rows.filter(x=>x.alreadyQueued).map(({order,...x})=>x),notice:"닉네임+주문 분 단위 날짜로 기존 주문을 추정합니다. 동일 분 주문은 검토가 필요합니다."});
+  if(mode==="preview")return NextResponse.json({ok:true,total:rows.length,phone_sync_stats:{source_with_phone:allRows.filter(x=>/\d/.test(asText(x.order.receiverPhoneNum))).length,matched_with_phone:allRows.filter(x=>x.existingDomestic&&/\d/.test(asText(x.order.receiverPhoneNum))).length,phone_change_candidates:uniqueUpdates.filter(x=>"phone" in x.changes).length,unmatched_with_phone:allRows.filter(x=>!x.existingDomestic&&/\d/.test(asText(x.order.receiverPhoneNum))).length},excluded_count:parsed.length-orders.length,new_orders:rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued).map(({order,...x})=>x),possible_existing:rows.filter(x=>x.existingDomestic).map(({order,...x})=>x),already_queued:rows.filter(x=>x.alreadyQueued).length,update_candidates:uniqueUpdates,queued_orders:rows.filter(x=>x.alreadyQueued).map(({order,...x})=>x),notice:"기존 DDOGA 주문번호 및 주문시각으로 대조합니다. 전화번호가 빈 기존 주문은 합배송 및 배송 상태와 관계없이 전화번호 업데이트 대상으로 표시합니다."});
   if(mode!=="save")return NextResponse.json({error:"Invalid mode"},{status:400});
   // Keep a financial snapshot for every order in the Wise export, including completed statuses.
   const importedAt=new Date().toISOString();
