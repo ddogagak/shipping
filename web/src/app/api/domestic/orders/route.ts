@@ -119,6 +119,120 @@ export async function PATCH(req: Request) {
     ? body.order_ids.map((v: unknown) => String(v ?? "").trim()).filter(Boolean)
     : [];
 
+  // 선택 주문 상태 일괄 변경. 다른 컬럼은 수정하지 않습니다.
+  if (action === "bulk_update_field") {
+    const field = String(body.field || "").trim();
+    const value = String(body.value || "").trim();
+    const allowed: Record<string, string[]> = {
+      order_status: ["accepted", "checked", "kept", "packaged", "done"],
+      request_status: ["none", "keep", "immediate"],
+      shipping_status: ["start", "excel_exported", "uploaded", "registered", "done"],
+    };
+
+    if (!orderIds.length || orderIds.length > 500) {
+      return NextResponse.json({ error: "선택 주문은 1~500건이어야 합니다." }, { status: 400 });
+    }
+    if (!Object.prototype.hasOwnProperty.call(allowed, field) || !allowed[field].includes(value)) {
+      return NextResponse.json({ error: "변경할 상태가 올바르지 않습니다." }, { status: 400 });
+    }
+
+    if (field === "order_status") {
+      if (value === "kept") {
+        const { data: targetOrders, error: readError } = await supabase
+          .from("domestic_order")
+          .select("order_id, source_order_dates, first_order_date, created_at")
+          .in("order_id", orderIds);
+        if (readError) return NextResponse.json({ error: "직배킵 대상 조회 실패", detail: readError.message }, { status: 500 });
+        for (const order of targetOrders || []) {
+          const oldest = oldestSourceDate(order);
+          const { error } = await supabase.from("domestic_order")
+            .update({ order_status: "kept", ...(oldest ? { first_order_date: oldest } : {}), updated_at: now })
+            .eq("order_id", order.order_id);
+          if (error) return NextResponse.json({ error: "직배킵 일괄 저장 실패", detail: error.message }, { status: 500 });
+        }
+      } else {
+        const { error } = await supabase.from("domestic_order")
+          .update({ order_status: value, updated_at: now }).in("order_id", orderIds);
+        if (error) return NextResponse.json({ error: "주문상태 일괄 저장 실패", detail: error.message }, { status: 500 });
+      }
+    } else if (field === "request_status") {
+      const { error } = await supabase.from("domestic_order")
+        .update({ request_status: value, updated_at: now }).in("order_id", orderIds);
+      if (error) return NextResponse.json({ error: "요청상태 일괄 저장 실패", detail: error.message }, { status: 500 });
+    } else {
+      const update: Record<string, unknown> = {
+        shipping_status: value,
+        updated_at: now,
+        ...(value === "start" ? { tracking_registered: false } : {}),
+        ...(value === "excel_exported" ? { excel_exported_at: now } : {}),
+      };
+      const { error } = await supabase.from("domestic_shipping")
+        .update(update).in("order_id", orderIds);
+      if (error) return NextResponse.json({ error: "배송상태 일괄 저장 실패", detail: error.message }, { status: 500 });
+      if (value === "done") {
+        const { error: orderError } = await supabase.from("domestic_order")
+          .update({ order_status: "done", updated_at: now }).in("order_id", orderIds);
+        if (orderError) return NextResponse.json({ error: "배송완료 저장 후 주문완료 연동 실패", detail: orderError.message }, { status: 500 });
+      }
+    }
+    return NextResponse.json({ ok: true, updated: orderIds.length, field, value });
+  }
+
+  // 선택 주문의 N 변경은 DDOGA 표시만 변경합니다. 와이스 발송취소는 수행하지 않습니다.
+  if (action === "bulk_set_registration_n") {
+    if (!orderIds.length || orderIds.length > 500) {
+      return NextResponse.json({ error: "선택 주문은 1~500건이어야 합니다." }, { status: 400 });
+    }
+    const { error } = await supabase.from("domestic_shipping")
+      .update({ tracking_registered: false, updated_at: now })
+      .in("order_id", orderIds);
+    if (error) return NextResponse.json({ error: "선택 주문 N 변경 실패", detail: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true, updated: orderIds.length, tracking_registered: false });
+  }
+
+  // 운송장 단건 수정/삭제. 기존 Y를 잘못 유지하지 않도록 번호 변경 시 N으로 초기화.
+  if (action === "update_tracking_number") {
+    const orderId = String(body.order_id || "").trim();
+    const trackingNumber = String(body.tracking_number ?? "").trim();
+    if (!orderId || trackingNumber.length > 100) {
+      return NextResponse.json({ error: "주문번호가 없거나 운송장번호가 너무 깁니다." }, { status: 400 });
+    }
+    const { data: previous, error: readError } = await supabase
+      .from("domestic_shipping")
+      .select("tracking_number, tracking_registered, shipping_status")
+      .eq("order_id", orderId)
+      .single();
+    if (readError || !previous) return NextResponse.json({ error: "기존 운송장 조회 실패", detail: readError?.message }, { status: 500 });
+    const changed = String(previous.tracking_number || "").trim() !== trackingNumber;
+    if (!changed) return NextResponse.json({ ok: true, unchanged: true, tracking_registered: previous.tracking_registered });
+
+    const previousStatus = String(previous.shipping_status || "start");
+    const nextStatus =
+      previousStatus === "registered"
+        ? (trackingNumber ? "uploaded" : "start")
+        : previousStatus === "uploaded" && !trackingNumber
+          ? "start"
+          : previousStatus;
+
+    const { error: updateError } = await supabase.from("domestic_shipping")
+      .update({
+        tracking_number: trackingNumber || null,
+        tracking_registered: false,
+        shipping_status: nextStatus,
+        updated_at: now,
+      })
+      .eq("order_id", orderId);
+    if (updateError) return NextResponse.json({ error: "운송장 저장 실패", detail: updateError.message }, { status: 500 });
+
+    return NextResponse.json({
+      ok: true,
+      tracking_number: trackingNumber || null,
+      tracking_registered: false,
+      shipping_status: nextStatus,
+      registration_reset: previous.tracking_registered === true,
+    });
+  }
+
   // [요청상태 저장 수정]
   // 요청상태 전용 저장. 다른 주문/배송 상태와 독립적으로 처리합니다.
   if (action === "update_request_status") {
