@@ -395,6 +395,14 @@ export default function DomesticOrdersPage() {
   const [memoModalRow, setMemoModalRow] = useState<Row | null>(null);
   const [memoModalValue, setMemoModalValue] = useState("");
   const [memoModalSaving, setMemoModalSaving] = useState(false);
+  const [trackingModalRow, setTrackingModalRow] = useState<Row | null>(null);
+  const [trackingModalValue, setTrackingModalValue] = useState("");
+  const [trackingModalSaving, setTrackingModalSaving] = useState(false);
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchRegistration, setBatchRegistration] = useState("");
+  const [batchOrderStatus, setBatchOrderStatus] = useState("");
+  const [batchRequestStatus, setBatchRequestStatus] = useState("");
+  const [batchShippingStatus, setBatchShippingStatus] = useState("");
   const [openItemTooltipId, setOpenItemTooltipId] = useState<string | null>(null);
   const [photoOrder, setPhotoOrder] = useState<Row | null>(null);
 
@@ -954,6 +962,90 @@ export default function DomesticOrdersPage() {
     }
 
     await load();
+  }
+
+  async function applyBatch(field: "order_status" | "request_status" | "shipping_status", value: string) {
+    if (!selectedIds.length || !value || batchBusy) return;
+    if (!confirm(`선택 ${selectedIds.length}건의 ${field === "order_status" ? "주문상태" : field === "request_status" ? "요청상태" : "배송상태"}를 ${value}로 변경할까?`)) return;
+    setBatchBusy(true);
+    try {
+      const res = await fetch("/api/domestic/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "bulk_update_field", field, value, order_ids: selectedIds }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.detail || json.error || "일괄 변경 실패");
+      await load();
+      setMessage(`선택 ${json.updated}건 상태 변경 완료`);
+      if (field === "order_status") setBatchOrderStatus("");
+      if (field === "request_status") setBatchRequestStatus("");
+      if (field === "shipping_status") setBatchShippingStatus("");
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "일괄 변경 실패");
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+
+  async function applyBatchRegistration() {
+    if (!selectedIds.length || !batchRegistration || batchBusy) return;
+    if (batchRegistration === "Y") {
+      setBatchRegistration("");
+      await registerSelectedTracking();
+      return;
+    }
+    if (!confirm(`선택 ${selectedIds.length}건을 DDOGA 등록 N으로 변경할까? (와이스의 발송 내역은 취소되지 않아)`)) return;
+    setBatchBusy(true);
+    try {
+      const res = await fetch("/api/domestic/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "bulk_set_registration_n", order_ids: selectedIds }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.detail || json.error || "등록 N 변경 실패");
+      await load();
+      setMessage(`선택 ${json.updated}건 DDOGA 등록 N 변경 완료 (와이스는 변경되지 않음)`);
+      setBatchRegistration("");
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "등록 N 변경 실패");
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+
+  function openTrackingModal(row: Row) {
+    setTrackingModalRow(row);
+    setTrackingModalValue(shipping(row)?.tracking_number || "");
+  }
+
+  async function saveTrackingModal(value: string) {
+    if (!trackingModalRow || trackingModalSaving) return;
+    const previous = shipping(trackingModalRow)?.tracking_number || "";
+    if (value.trim() !== previous.trim() &&
+        !confirm("운송장 변경/삭제 시 DDOGA 등록 상태는 N으로 바뀌어. 와이스에 이미 등록된 송장은 자동 변경되지 않아. 계속할까?")) return;
+    setTrackingModalSaving(true);
+    try {
+      const res = await fetch("/api/domestic/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update_tracking_number",
+          order_id: trackingModalRow.order_id,
+          tracking_number: value.trim(),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.detail || json.error || "운송장 수정 실패");
+      setTrackingModalRow(null);
+      await load();
+      setMessage("운송장 저장 완료" + (json.registration_reset ? " · DDOGA 등록 N으로 변경됨" : ""));
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "운송장 수정 실패");
+    } finally {
+      setTrackingModalSaving(false);
+    }
   }
 
   function openMemoModal(row: Row) {
@@ -1752,29 +1844,27 @@ export default function DomesticOrdersPage() {
               선택 {selectedIds.length}건 삭제
             </button>
 
-            <button type="button" onClick={() => patch("kept")} style={keepButtonStyle}>
-              직배킵 처리
-            </button>
-
-            <button type="button" onClick={() => patch("packaged")} style={orangeButtonStyle}>
-              포장완료 처리
-            </button>
-
-            <button type="button" onClick={() => patch("registered")} style={purpleButtonStyle}>
-              운송장등록 처리
-            </button>
-
-            <button type="button" onClick={() => patch("done")} style={greenButtonStyle}>
-              배송완료 처리
-            </button>
-            <button
-              type="button"
-              onClick={() => void registerSelectedTracking()}
-              disabled={bulkRegistering || savingRowId !== null || !selectedRows.some(row => !shipping(row)?.tracking_registered)}
-              style={purpleButtonStyle}
-            >
-              {bulkRegistering ? "Y등록 처리 중..." : "전체 Y등록"}
-            </button>
+            <label style={formLabelStyle}>
+              등록 (N/Y)
+              <select aria-label="등록 상태 선택" style={selectStyle} value={batchRegistration} onChange={event => setBatchRegistration(event.target.value)}>
+                <option value="">선택</option><option value="N">N</option><option value="Y">Y (와이스 등록)</option>
+              </select>
+              <button type="button" style={blackButtonStyle} disabled={!batchRegistration || !selectedIds.length || batchBusy || bulkRegistering} onClick={() => void applyBatchRegistration()}>적용</button>
+            </label>
+            {([
+              { name: "주문상태", options: ORDER_STATUS_OPTIONS, value: batchOrderStatus, set: setBatchOrderStatus, field: "order_status" },
+              { name: "요청상태", options: REQUEST_STATUS_OPTIONS, value: batchRequestStatus, set: setBatchRequestStatus, field: "request_status" },
+              { name: "배송상태", options: SHIPPING_STATUS_OPTIONS, value: batchShippingStatus, set: setBatchShippingStatus, field: "shipping_status" },
+            ] as const).map(group => (
+              <label key={group.field} style={formLabelStyle}>
+                {group.name}
+                <select aria-label={group.name + " 선택"} style={selectStyle} value={group.value} onChange={event => group.set(event.target.value)}>
+                  <option value="">선택</option>
+                  {group.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+                <button type="button" style={blackButtonStyle} disabled={!group.value || !selectedIds.length || batchBusy || bulkRegistering} onClick={() => void applyBatch(group.field, group.value)}>적용</button>
+              </label>
+            ))}
           </div>
         </div>
       </section>
@@ -2201,16 +2291,16 @@ export default function DomesticOrdersPage() {
                         </select>
                       </td>
 
-                      <td style={tdStyle}>
+                      <td style={{ ...tdStyle, cursor: "pointer" }}
+                        onDoubleClick={() => openTrackingModal(row)}
+                        title="운송장번호 더블클릭해서 수정/삭제">
                         <input
                           value={s.tracking_number || ""}
-                          onChange={(event) =>
-                            updateShippingValue(row.order_id, {
-                              tracking_number: event.target.value,
-                            })
-                          }
-                          style={trackingInputStyle}
-                          placeholder="운송장번호"
+                          readOnly
+                          onDoubleClick={(event) => { event.stopPropagation(); openTrackingModal(row); }}
+                          onClick={(event) => { if (event.detail === 1) event.currentTarget.select(); }}
+                          style={{ ...trackingInputStyle, cursor: "pointer", background: "#fff" }}
+                          placeholder="더블클릭하여 입력"
                         />
                       </td>
 
@@ -2298,6 +2388,26 @@ export default function DomesticOrdersPage() {
         )}
       </section>
           {photoOrder ? <DomesticItemPhotoModal orderId={photoOrder.order_id} nickname={photoOrder.nickname || ""} onClose={() => setPhotoOrder(null)} /> : null}
+          {trackingModalRow ? (
+            <div style={memoBackdropStyle} onMouseDown={() => !trackingModalSaving && setTrackingModalRow(null)}>
+              <div style={memoModalStyle} onMouseDown={(event) => event.stopPropagation()}>
+                <div style={memoModalHeaderStyle}>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: "#6b7280" }}>운송장 수정 / 삭제</div>
+                    <h2 style={{ margin: "3px 0 0", fontSize: 21 }}>{trackingModalRow.nickname || displayOrderNo(trackingModalRow)}</h2>
+                  </div>
+                  <button type="button" style={memoCloseButtonStyle} disabled={trackingModalSaving} onClick={() => setTrackingModalRow(null)}>×</button>
+                </div>
+                <input style={{ ...wideInputStyle, fontSize: 18 }} autoFocus value={trackingModalValue} onChange={event => setTrackingModalValue(event.target.value)} placeholder="운송장번호 입력" />
+                <p style={{ fontSize: 12, color: "#6b7280" }}>번호 변경 또는 삭제 시 DDOGA의 등록 상태는 N으로 바뀝니다. 와이스에 이미 등록된 송장은 자동 변경되지 않습니다.</p>
+                <div style={{ display: "flex", justifyContent: "flex-end", flexWrap: "wrap", gap: 8 }}>
+                  <button type="button" style={redButtonStyle} disabled={trackingModalSaving} onClick={() => void saveTrackingModal("")}>운송장 삭제</button>
+                  <button type="button" style={memoCancelButtonStyle} disabled={trackingModalSaving} onClick={() => setTrackingModalRow(null)}>취소</button>
+                  <button type="button" style={memoSaveButtonStyle} disabled={trackingModalSaving} onClick={() => void saveTrackingModal(trackingModalValue)}>{trackingModalSaving ? "저장중..." : "수정 저장"}</button>
+                </div>
+              </div>
+            </div>
+          ) : null}
           {memoModalRow ? (
         <div style={memoBackdropStyle} onMouseDown={() => setMemoModalRow(null)}>
           <div style={memoModalStyle} onMouseDown={(event) => event.stopPropagation()}>
