@@ -1142,10 +1142,11 @@ export default function DomesticOrdersPage() {
     const wiseRows = targets.filter(row => row.platform.toLowerCase() === "wise");
     // 클릭 시 한 번만 열어 모바일의 후속 팝업 차단을 피한다.
     const popup = wiseRows.length
-      ? window.open("https://wyyyes.com/shipping-waiting-user-list", "ddoga_wise_shipping")
+      ? window.open("about:blank", "_blank")
       : null;
     const results = new Map<string, {ok:boolean;error?:string}>();
     let saved = 0;
+    let bridgeError = "";
     const failures: string[] = [];
     try {
       if (wiseRows.length && !popup) {
@@ -1156,13 +1157,17 @@ export default function DomesticOrdersPage() {
         await new Promise<void>(resolve => {
           let stage: "ready" | "preview" | "register" = "ready";
           let finished = false;
+          try { popup.opener = window; } catch (_) {}
           let timer: ReturnType<typeof setTimeout>;
           const finish = (error?:string) => {
             if (finished) return;
             finished = true;
+            if (error && stage !== "register") bridgeError = error;
             clearTimeout(timer);
             clearInterval(pingTimer);
             window.removeEventListener("message", onMessage);
+            window.removeEventListener("focus", ping);
+            document.removeEventListener("visibilitychange", ping);
             for (const row of wiseRows) {
               if (!results.has(row.order_id)) results.set(row.order_id, {
                 ok:false, error:error || "와이스 등록 결과 확인 실패"
@@ -1172,13 +1177,20 @@ export default function DomesticOrdersPage() {
           };
           const resetTimeout = () => {
             clearTimeout(timer);
-            timer = setTimeout(() => finish("와이스 응답 시간 초과. 실제 등록 상태를 확인해줘."), 120000);
+            timer = setTimeout(() => finish(
+              stage === "ready"
+                ? "와이스 스크립트 연결 응답 없음. 새 와이스 탭에서 스크립트 실행 여부를 확인해줘. DDOGA는 N으로 유지했어."
+                : stage === "preview"
+                  ? "와이스 주문 조회 응답 시간 초과. DDOGA는 N으로 유지했어."
+                  : "와이스 등록 결과 응답 시간 초과. 와이스 실제 등록 상태를 확인해줘."
+            ), 120000);
           };
           const onMessage = (event:MessageEvent) => {
             if (finished || event.origin !== "https://wyyyes.com" || event.source !== popup) return;
             const data = event.data;
             if (data?.type === "DDOGA_WISE_SHIP_READY" && stage === "ready") {
               stage = "preview";
+              setMessage("전체 Y등록: 연결됨 · 와이스 주문 조회 중...");
               resetTimeout();
               popup.postMessage({type:"DDOGA_WISE_SHIP_PREVIEW_REQUEST",orders:wiseRows.map(row => ({
                 order_id:row.order_id, nickname:row.nickname,
@@ -1198,6 +1210,7 @@ export default function DomesticOrdersPage() {
               }
               if (!ids.length) { finish(); return; }
               stage = "register";
+              setMessage(`전체 Y등록: 와이스 ${ids.length}건 순차 등록 중...`);
               resetTimeout();
               popup.postMessage({type:"DDOGA_WISE_SHIP_REGISTER_REQUEST",order_ids:ids}, "https://wyyyes.com");
             } else if (data?.type === "DDOGA_WISE_SHIP_SYNC" && stage === "register") {
@@ -1215,15 +1228,31 @@ export default function DomesticOrdersPage() {
               finish();
             }
           };
+          const ping = () => {
+            if (!finished && stage === "ready" && !popup.closed) {
+              popup.postMessage({type:"DDOGA_WISE_SHIP_PING"}, "https://wyyyes.com");
+            }
+          };
           window.addEventListener("message", onMessage);
+          window.addEventListener("focus", ping);
+          document.addEventListener("visibilitychange", ping);
           const pingTimer = setInterval(() => {
             if (popup.closed) { finish("와이스 연결창이 닫혔어."); return; }
             if (stage === "ready") popup.postMessage({type:"DDOGA_WISE_SHIP_PING"}, "https://wyyyes.com");
           }, 600);
           resetTimeout();
           setMessage("전체 Y등록: 와이스 연결 대기 중...");
-          popup.postMessage({type:"DDOGA_WISE_SHIP_PING"}, "https://wyyyes.com");
+          // 수신 준비를 마친 뒤 이동한다. 예전 탭의 opener/스크립트 상태를 재사용하지 않는다.
+          try {
+            popup.location.replace("https://wyyyes.com/shipping-waiting-user-list");
+          } catch (_) {
+            finish("와이스 연결창을 열지 못했어. DDOGA는 N으로 유지했어.");
+          }
         });
+      }
+      if (bridgeError) {
+        setMessage(bridgeError);
+        return;
       }
       // 기존 단건 N→Y와 동일: 와이스 결과와 별개로 DDOGA 등록 Y를 저장한다.
       for (const row of targets) {
