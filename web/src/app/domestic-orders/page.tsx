@@ -4,7 +4,7 @@
 import Link from "next/link";
 import DomesticItemPhotoModal from "./DomesticItemPhotoModal";
 import WiseDeadlineBoard from "./WiseDeadlineBoard";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import * as XLSX from "xlsx";
 
 type ShippingInfo = {
@@ -388,6 +388,8 @@ function compareRows(a: Row, b: Row, key: SortKey, direction: SortDirection) {
 export default function DomesticOrdersPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [message, setMessage] = useState("");
+  const [bulkRegistering, setBulkRegistering] = useState(false);
+  const registrationLock = useRef(false);
   const [loading, setLoading] = useState(false);
   const [savingRowId, setSavingRowId] = useState<string | null>(null);
   const [memoModalRow, setMemoModalRow] = useState<Row | null>(null);
@@ -1126,7 +1128,140 @@ export default function DomesticOrdersPage() {
     });
   }
 
+
+  async function registerSelectedTracking() {
+    if (registrationLock.current || savingRowId) return;
+    const pending = selectedRows.filter(row => !shipping(row)?.tracking_registered);
+    const targets = pending.filter(row => String(shipping(row)?.tracking_number || "").trim());
+    if (!targets.length) {
+      setMessage("체크한 주문 중 송장번호가 있는 등록 N 주문이 없어.");
+      return;
+    }
+    registrationLock.current = true;
+    setBulkRegistering(true);
+    const wiseRows = targets.filter(row => row.platform.toLowerCase() === "wise");
+    // 클릭 시 한 번만 열어 모바일의 후속 팝업 차단을 피한다.
+    const popup = wiseRows.length
+      ? window.open("https://wyyyes.com/shipping-waiting-user-list", "ddoga_wise_shipping")
+      : null;
+    const results = new Map<string, {ok:boolean;error?:string}>();
+    let saved = 0;
+    const failures: string[] = [];
+    try {
+      if (wiseRows.length && !popup) {
+        setMessage("와이스 팝업이 차단됐어. 팝업을 허용한 뒤 다시 눌러줘.");
+        return;
+      }
+      if (popup) {
+        await new Promise<void>(resolve => {
+          let stage: "ready" | "preview" | "register" = "ready";
+          let finished = false;
+          let timer: ReturnType<typeof setTimeout>;
+          const finish = (error?:string) => {
+            if (finished) return;
+            finished = true;
+            clearTimeout(timer);
+            clearInterval(pingTimer);
+            window.removeEventListener("message", onMessage);
+            for (const row of wiseRows) {
+              if (!results.has(row.order_id)) results.set(row.order_id, {
+                ok:false, error:error || "와이스 등록 결과 확인 실패"
+              });
+            }
+            resolve();
+          };
+          const resetTimeout = () => {
+            clearTimeout(timer);
+            timer = setTimeout(() => finish("와이스 응답 시간 초과. 실제 등록 상태를 확인해줘."), 120000);
+          };
+          const onMessage = (event:MessageEvent) => {
+            if (finished || event.origin !== "https://wyyyes.com" || event.source !== popup) return;
+            const data = event.data;
+            if (data?.type === "DDOGA_WISE_SHIP_READY" && stage === "ready") {
+              stage = "preview";
+              resetTimeout();
+              popup.postMessage({type:"DDOGA_WISE_SHIP_PREVIEW_REQUEST",orders:wiseRows.map(row => ({
+                order_id:row.order_id, nickname:row.nickname,
+                tracking_number:String(shipping(row)?.tracking_number || "").trim()
+              }))}, "https://wyyyes.com");
+            } else if (data?.type === "DDOGA_WISE_SHIP_PROGRESS") {
+              resetTimeout();
+              setMessage(String(data.message || "전체 Y등록 처리 중..."));
+            } else if (data?.type === "DDOGA_WISE_SHIP_PREVIEW" && stage === "preview") {
+              if (data.error) { finish(String(data.error)); return; }
+              const matches = Array.isArray(data.matches) ? data.matches : [];
+              const ids: string[] = [];
+              for (const row of wiseRows) {
+                const match = matches.find((item:{order_id:string}) => item.order_id === row.order_id);
+                if (match?.status === "ready") ids.push(row.order_id);
+                else results.set(row.order_id, {ok:false,error:match?.reason || "와이스 주문 매칭 실패"});
+              }
+              if (!ids.length) { finish(); return; }
+              stage = "register";
+              resetTimeout();
+              popup.postMessage({type:"DDOGA_WISE_SHIP_REGISTER_REQUEST",order_ids:ids}, "https://wyyyes.com");
+            } else if (data?.type === "DDOGA_WISE_SHIP_SYNC" && stage === "register") {
+              const row = wiseRows.find(row => row.order_id === data.row?.order_id);
+              if (row && String(shipping(row)?.tracking_number || "").trim() === data.row.tracking_number) {
+                results.set(row.order_id, {ok:true});
+                resetTimeout();
+              }
+            } else if (data?.type === "DDOGA_WISE_SHIP_RESULT" && stage === "register") {
+              for (const item of Array.isArray(data.results) ? data.results : []) {
+                if (wiseRows.some(row => row.order_id === item.order_id)) {
+                  results.set(item.order_id, {ok:Boolean(item.ok),error:item.error});
+                }
+              }
+              finish();
+            }
+          };
+          window.addEventListener("message", onMessage);
+          const pingTimer = setInterval(() => {
+            if (popup.closed) { finish("와이스 연결창이 닫혔어."); return; }
+            if (stage === "ready") popup.postMessage({type:"DDOGA_WISE_SHIP_PING"}, "https://wyyyes.com");
+          }, 600);
+          resetTimeout();
+          setMessage("전체 Y등록: 와이스 연결 대기 중...");
+          popup.postMessage({type:"DDOGA_WISE_SHIP_PING"}, "https://wyyyes.com");
+        });
+      }
+      // 기존 단건 N→Y와 동일: 와이스 결과와 별개로 DDOGA 등록 Y를 저장한다.
+      for (const row of targets) {
+        setSavingRowId(row.order_id);
+        setMessage(`전체 Y등록: DDOGA 저장 ${targets.indexOf(row) + 1}/${targets.length}`);
+        const wiseResult = results.get(row.order_id);
+        if (wiseResult && !wiseResult.ok) {
+          failures.push(`${row.nickname || row.order_id}: 와이스 — ${wiseResult.error || "실패"}`);
+        }
+        try {
+          const res = await fetch("/api/domestic/orders", {
+            method:"PATCH", headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({action:"register_tracking",order_id:row.order_id})
+          });
+          const json = await res.json();
+          if (!res.ok) throw Error(json.detail || json.error || "DDOGA 저장 실패");
+          updateShippingValue(row.order_id, {
+            shipping_status:json.shipping_status || "registered", tracking_registered:true
+          });
+          saved++;
+        } catch (error) {
+          failures.push(`${row.nickname || row.order_id}: DDOGA — ${error instanceof Error ? error.message : "저장 실패"}`);
+        }
+      }
+      await load();
+      setMessage(`전체 Y등록 완료 · DDOGA Y ${saved}건 · 송장번호 없음 제외 ${pending.length - targets.length}건` +
+        (failures.length ? " · 확인 필요: " + failures.join(" / ") : ""));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "전체 Y등록 실패");
+    } finally {
+      setSavingRowId(null);
+      setBulkRegistering(false);
+      registrationLock.current = false;
+    }
+  }
+
   async function registerTracking(row: Row) {
+    if (registrationLock.current) return;
     const s = shipping(row) || defaultShipping();
     const trackingNumber = String(s.tracking_number || "").trim();
 
@@ -1135,6 +1270,7 @@ export default function DomesticOrdersPage() {
       return;
     }
 
+    registrationLock.current = true;
     setSavingRowId(row.order_id);
     const isWise = String(row.platform || "").toLowerCase() === "wise";
     // 브라우저 팝업 차단을 피하기 위해 클릭 직후 연결창부터 연다.
@@ -1187,6 +1323,7 @@ export default function DomesticOrdersPage() {
       await load();
     } finally {
       setSavingRowId(null);
+      registrationLock.current = false;
     }
   }
 
@@ -1601,6 +1738,14 @@ export default function DomesticOrdersPage() {
             <button type="button" onClick={() => patch("done")} style={greenButtonStyle}>
               배송완료 처리
             </button>
+            <button
+              type="button"
+              onClick={() => void registerSelectedTracking()}
+              disabled={bulkRegistering || savingRowId !== null || !selectedRows.some(row => !shipping(row)?.tracking_registered)}
+              style={purpleButtonStyle}
+            >
+              {bulkRegistering ? "Y등록 처리 중..." : "전체 Y등록"}
+            </button>
           </div>
         </div>
       </section>
@@ -1956,7 +2101,7 @@ export default function DomesticOrdersPage() {
                               ? registrationToggleYesStyle
                               : registrationToggleNoStyle),
                           }}
-                          disabled={savingRowId === row.order_id}
+                          disabled={bulkRegistering || savingRowId !== null}
                           title={
                             Boolean(s.tracking_registered)
                               ? "운송장 등록됨"
