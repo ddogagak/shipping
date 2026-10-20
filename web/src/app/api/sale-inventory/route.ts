@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { extractSourceProductId } from "@/lib/purchases/product-id";
+import { resolveInventorySku, uniqueInventoryBySku } from "@/lib/inventory/match-by-sku";
 import { buildInternalSku, getSeriesCode, getSourceProductKey, getSourceSiteCode } from "@/lib/inventory/internal-sku";
 
 export const runtime = "nodejs";
@@ -70,6 +71,7 @@ export async function GET() {
     if (sourcingError) throw sourcingError;
     if (ledgerError) throw ledgerError;
 
+    const sourcingBySku = uniqueInventoryBySku(sourcingRows ?? []);
     const sourcingById = new Map<string, any>();
     const byProductId = new Map<string, any[]>();
     const byUrl = new Map<string, any[]>();
@@ -89,11 +91,13 @@ export async function GET() {
     const items = (orders ?? []).flatMap((order: any) =>
       (order.purchase_items ?? []).map((item: any) => {
         const productId = String(item.source_product_id || "").trim() || extractSourceProductId(item.product_url) || "";
-        let sourcing = item.sourcing_inventory_id ? sourcingById.get(String(item.sourcing_inventory_id)) : null;
+        const fixedSku = String(item.internal_sku || "").trim();
+        // A stored SKU always wins. Never silently fall back to an unrelated source.
+        let sourcing = fixedSku ? (sourcingBySku.get(fixedSku) || null) : (item.sourcing_inventory_id ? sourcingById.get(String(item.sourcing_inventory_id)) : null);
         const productCandidates = productId ? (byProductId.get(productId) || []) : [];
         const urlCandidates = byUrl.get(String(item.product_url || "").trim()) || [];
 
-        if (!sourcing) {
+        if (!fixedSku && !sourcing) {
           if (productCandidates.length === 1) sourcing = productCandidates[0];
           else if (urlCandidates.length === 1) sourcing = urlCandidates[0];
           else {
@@ -124,7 +128,11 @@ export async function GET() {
           purchaseCurrency,
           item.component_count ?? domesticMeta?.component_count ?? sourcing?.component_count,
         );
-        const imageUrl = item.image_url || domesticMeta?.image_url || sourcing?.image_url || null;
+        // For a uniquely matched SKU, sourcing owns the canonical image.
+        // Unmatched/duplicate SKU and no-SKU items keep their currently stored image.
+        const imageUrl = fixedSku && sourcing?.image_url
+          ? sourcing.image_url
+          : item.image_url || domesticMeta?.image_url || (!fixedSku ? sourcing?.image_url : null) || null;
         const defaultViewStatus = imageUrl ? "display" : "hidden";
 
         // 기존에 이미 완료 처리된 항목도 판매박스=입고박스, 재고=0으로 실제 DB를 보정한다.
@@ -152,7 +160,7 @@ export async function GET() {
           shop_name: order.shop_name,
           product_name: item.product_name,
           display_name: item.display_name_ko || sourcing?.item_name || item.product_name,
-          internal_sku: String(item.internal_sku || "").trim() || sourcing?.resolved_internal_sku || null,
+          internal_sku: fixedSku || sourcing?.resolved_internal_sku || null,
           option_text: item.option_text,
           product_url: item.product_url,
           purchase_quantity: boxQuantity,
@@ -161,7 +169,7 @@ export async function GET() {
           actual_purchase_currency: purchaseCurrency,
           order_paid_amount: Number(order.paid_amount || 0),
           order_local_shipping: Number(order.local_shipping || 0),
-          sourcing_inventory_id: sourcing?.id || null,
+          sourcing_inventory_id: sourcing?.id || (fixedSku ? item.sourcing_inventory_id : null) || null,
           image_url: imageUrl,
           lineup_image_url: sourcing?.lineup_image_url || domesticMeta?.lineup_image_url || null,
           series_name: sourcing?.series_name || domesticMeta?.series_name || null,
