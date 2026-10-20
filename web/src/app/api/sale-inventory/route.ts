@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { extractSourceProductId } from "@/lib/purchases/product-id";
-import { resolveInventorySku, uniqueInventoryBySku } from "@/lib/inventory/match-by-sku";
+import { resolveInventorySku } from "@/lib/inventory/match-by-sku";
 import { buildInternalSku, getSeriesCode, getSourceProductKey, getSourceSiteCode } from "@/lib/inventory/internal-sku";
 
 export const runtime = "nodejs";
@@ -71,7 +71,11 @@ export async function GET() {
     if (sourcingError) throw sourcingError;
     if (ledgerError) throw ledgerError;
 
-    const sourcingBySku = uniqueInventoryBySku(sourcingRows ?? []);
+    const sourcingBySku = new Map<string, any[]>();
+    for (const row of sourcingRows ?? []) {
+      const key = resolveInventorySku(row);
+      if (key) sourcingBySku.set(key, [...(sourcingBySku.get(key) || []), row]);
+    }
     const sourcingById = new Map<string, any>();
     const byProductId = new Map<string, any[]>();
     const byUrl = new Map<string, any[]>();
@@ -93,7 +97,13 @@ export async function GET() {
         const productId = String(item.source_product_id || "").trim() || extractSourceProductId(item.product_url) || "";
         const fixedSku = String(item.internal_sku || "").trim();
         // A stored SKU always wins. Never silently fall back to an unrelated source.
-        let sourcing = fixedSku ? (sourcingBySku.get(fixedSku) || null) : (item.sourcing_inventory_id ? sourcingById.get(String(item.sourcing_inventory_id)) : null);
+        const skuCandidates = fixedSku ? (sourcingBySku.get(fixedSku) || []) : [];
+        let sourcing = fixedSku
+          ? (skuCandidates.find((row: any) => String(row.id) === String(item.sourcing_inventory_id) && row.image_url)
+            || skuCandidates.find((row: any) => row.image_url)
+            || skuCandidates[0]
+            || null)
+          : (item.sourcing_inventory_id ? sourcingById.get(String(item.sourcing_inventory_id)) : null);
         const productCandidates = productId ? (byProductId.get(productId) || []) : [];
         const urlCandidates = byUrl.get(String(item.product_url || "").trim()) || [];
 
