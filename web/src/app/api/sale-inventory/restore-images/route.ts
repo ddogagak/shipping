@@ -18,14 +18,17 @@ async function allRows(sb: ReturnType<typeof createServiceRoleClient>, table: st
 
 async function plan() {
   const sb = createServiceRoleClient();
-  const [sourceRows, items] = await Promise.all([
+  const [sourceRows, items, receivedOrders] = await Promise.all([
     allRows(sb, "inventory_items", "id,internal_sku,image_url,source_url,source_site_code,source_product_id,option_seq,series_name"),
-    allRows(sb, "purchase_items", "id,internal_sku,image_url,sourcing_inventory_id"),
+    allRows(sb, "purchase_items", "id,purchase_order_id,internal_sku,image_url,sourcing_inventory_id"),
+    allRows(sb, "purchase_orders", "id,order_status"),
   ]);
+  const receivedOrderIds = new Set(receivedOrders.filter((order) => order.order_status === "입고완료").map((order) => String(order.id)));
+  const broadcastItems = items.filter((item) => receivedOrderIds.has(String(item.purchase_order_id)));
   const bySku = uniqueInventoryBySku(sourceRows);
   const changes: { purchase_item_id: string; sku: string; previous_image_url: string | null; restored_image_url: string; original_sourcing_inventory_id: string | null; restored_sourcing_inventory_id: string }[] = [];
   let unnumbered = 0, unmatched = 0, unchanged = 0;
-  for (const item of items) {
+  for (const item of broadcastItems) {
     const sku = String(item.internal_sku || "").trim();
     if (!sku) { unnumbered++; continue; }
     const source = bySku.get(sku);
