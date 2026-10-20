@@ -49,7 +49,9 @@ function verifiedLinkedSku(item: PurchaseRow, source: SourceRow): boolean {
   if (itemUrl && sourceUrl && itemUrl === sourceUrl) return true;
   const itemProductId = String(item.source_product_id || "").trim() || extractSourceProductId(item.product_url) || "";
   const sourceProductId = String(source.source_product_id || "").trim() || extractSourceProductId(source.source_url) || "";
-  return Boolean(itemProductId && sourceProductId && itemProductId === sourceProductId);
+  const itemHost = (() => { try { return new URL(String(item.product_url || "")).hostname.toLowerCase(); } catch { return ""; } })();
+  const sourceHost = (() => { try { return new URL(String(source.source_url || "")).hostname.toLowerCase(); } catch { return ""; } })();
+  return Boolean(itemHost && sourceHost && itemHost === sourceHost && itemProductId && sourceProductId && itemProductId === sourceProductId);
 }
 
 function addReason(counts: Record<string, number>, key: string) {
