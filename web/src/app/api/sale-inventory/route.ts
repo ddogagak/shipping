@@ -169,7 +169,7 @@ export async function GET() {
           ordered_at: order.ordered_at,
           shop_name: order.shop_name,
           product_name: item.product_name,
-          display_name: item.display_name_ko || sourcing?.item_name || item.product_name,
+          display_name: ledger?.display_name ?? sourcing?.item_name ?? item.display_name_ko ?? item.product_name,
           internal_sku: fixedSku || sourcing?.resolved_internal_sku || null,
           option_text: item.option_text,
           product_url: item.product_url,
@@ -261,13 +261,6 @@ export async function PATCH(req: Request) {
       ? Math.max(0, Math.trunc(Number(body.component_count || 0)))
       : undefined;
 
-    if (hasDisplayName) {
-      const { error } = await sb.from("purchase_items")
-        .update({ display_name_ko: displayName })
-        .eq("id", body.purchase_item_id);
-      if (error) throw error;
-    }
-
     if (hasImage) {
       // Image changes must only affect the explicitly selected purchase item.
       // Never update all items sharing a name or overwrite sourcing images.
@@ -306,6 +299,7 @@ export async function PATCH(req: Request) {
     const storedMemo = viewStatus === "hidden" ? `${HIDDEN_MARKER}${cleanMemo}` : (cleanMemo || null);
     const payload = {
       purchase_item_id: body.purchase_item_id,
+      ...(hasDisplayName ? { display_name: displayName } : {}),
       sale_price: body.sale_price === "" || body.sale_price == null ? null : Number(body.sale_price),
       remaining_quantity: remaining,
       sold_quantity: sold,
