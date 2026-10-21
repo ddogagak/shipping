@@ -3,7 +3,7 @@
 // @namespace    https://www.ddoga.lol/
 // @updateURL     https://www.ddoga.lol/ddoga-wise-orders-pull.user.js
 // @downloadURL   https://www.ddoga.lol/ddoga-wise-orders-pull.user.js
-// @version      1.2
+// @version      1.3
 // @description  와이스 주문 전체 이력과 누적 정산금액을 ddoga에 전달
 // @match        https://wyyyes.com/deliverylist*
 // @match        https://wyyyes.com/expected-settlement-amount*
@@ -14,31 +14,35 @@
  "use strict";
  const DDOGA="https://www.ddoga.lol";
  if(location.pathname.startsWith("/expected-settlement-amount")){
-  let attempts=0;
+  let attempts=0, lastAmount=null, stableCount=0;
+  const normalize=(s)=>String(s||"").replace(/\s+/g," ").trim();
   const timer=setInterval(()=>{
    attempts++;
-   const normalize=(s)=>String(s||"").replace(/\s+/g," ").trim();
    const nodes=[...document.querySelectorAll("body *")].filter(node=>node.children.length===0&&normalize(node.textContent)==="누적 정산금액");
    let amount=null;
    for(const node of nodes){
     let parent=node.parentElement;
     for(let depth=0;parent&&depth<5;depth++,parent=parent.parentElement){
-     const text=normalize(parent.innerText||parent.textContent);
-     const match=text.match(/누적\s*정산금액[\s\S]{0,100}?([\d,]+)\s*원/);
+     const match=normalize(parent.innerText||parent.textContent).match(/누적\s*정산금액[\s\S]{0,100}?([\d,]+)\s*원/);
      if(match){amount=Number(match[1].replace(/,/g,""));break;}
     }
     if(amount!==null)break;
    }
    if(amount===null){
-    const text=normalize(document.body?.innerText);
-    const match=text.match(/누적\s*정산금액[\s\S]{0,100}?([\d,]+)\s*원/);
+    const match=normalize(document.body?.innerText).match(/누적\s*정산금액[\s\S]{0,100}?([\d,]+)\s*원/);
     if(match)amount=Number(match[1].replace(/,/g,""));
    }
-   if(Number.isFinite(amount)&&amount>=0&&window.opener){
-    clearInterval(timer);
-    window.opener.postMessage({type:"DDOGA_WISE_SETTLEMENT_AMOUNT",amount},DDOGA);
-   }
-   if(attempts>=60)clearInterval(timer);
+   // 0 may be a placeholder while the remote page is loading.
+   if(Number.isFinite(amount)&&amount>0&&document.readyState==="complete"){
+    stableCount=amount===lastAmount?stableCount+1:1;
+    lastAmount=amount;
+    if(stableCount>=3&&window.opener){
+     clearInterval(timer);
+     window.opener.postMessage({type:"DDOGA_WISE_SETTLEMENT_AMOUNT",amount},DDOGA);
+     return;
+    }
+   }else{lastAmount=null;stableCount=0;}
+   if(attempts>=90)clearInterval(timer);
   },1000);
   return;
  }
