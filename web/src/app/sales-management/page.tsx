@@ -205,7 +205,7 @@ export default function SalesManagementPage() {
     const receive = async (event: MessageEvent) => {
       if (event.origin !== "https://wyyyes.com" || event.source !== popup || event.data?.type !== "DDOGA_WISE_SETTLEMENT_AMOUNT") return;
       const amount = Number(event.data.amount);
-      if (!Number.isFinite(amount) || amount < 0) { cleanup(); setError("와이스에서 받은 정산금액이 올바르지 않습니다."); return; }
+      if (!Number.isFinite(amount) || amount <= 0) { cleanup(); setError("와이스 정산금액이 아직 준비되지 않았거나 0원입니다. 기존 금액은 유지했습니다."); return; }
       cleanup();
       popup.close();
       try {
