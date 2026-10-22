@@ -412,6 +412,7 @@ export default function DomesticOrdersPage() {
   const [requestStatuses, setRequestStatuses] = useState<string[]>([]);
   const [shippingStatuses, setShippingStatuses] = useState<string[]>([
     "start",
+    "ready",
     "excel_exported",
     "uploaded",
     "registered",
