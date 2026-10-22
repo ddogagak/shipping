@@ -106,6 +106,7 @@ const REQUEST_STATUS_OPTIONS = [
 
 const SHIPPING_STATUS_OPTIONS = [
   { value: "start", label: "시작" },
+  { value: "ready", label: "준비" },
   { value: "excel_exported", label: "엑셀 추출" },
   { value: "uploaded", label: "운송장 입력" },
   { value: "registered", label: "운송장등록" },
