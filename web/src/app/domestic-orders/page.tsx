@@ -1614,6 +1614,16 @@ export default function DomesticOrdersPage() {
       return;
     }
 
+    // 집하 전 선접수는 배송상태 '준비'인 주문만 허용한다.
+    const ineligible = selectedRows.filter(row => (shipping(row)?.shipping_status || "start") !== "ready");
+    if (ineligible.length) {
+      alert("로젠전송은 배송상태가 '준비'인 주문만 가능해. 다른 상태 " + ineligible.length + "건을 먼저 확인해줘.");
+      return;
+    }
+    if (selectedRows.some(row => !String(row.phone || "").trim())) {
+      alert("전화번호가 없는 주문이 있어. 📦 준비에서 안심번호를 먼저 확인해줘.");
+      return;
+    }
     const data = selectedRows.map(toExcelRow);
     const worksheet = XLSX.utils.json_to_sheet(data, { header: HEADERS });
 
