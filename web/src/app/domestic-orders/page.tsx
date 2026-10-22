@@ -1274,10 +1274,9 @@ export default function DomesticOrdersPage() {
       const msg = event.data;
       if (!msg || msg.token !== token || phase === "finished") return;
       if (msg.type === "DDOGA_WISE_PREP_READY" && (phase === "ready" || phase === "reconnecting")) {
-        if (msg.version !== "2.4.2" && msg.version !== "2.4.3" && msg.version !== "2.4.4") {
-          finish("📦 준비: Wise Bridge 2.4.2 이상 설치 필요 (현재 " + String(msg.version || "버전 불명") + ")");
-          return;
-        }
+        // 구버전 브리지가 동시에 떠도 첫 READY에 잘못 연결되지 않게 무시한다.
+        // 최신 2.4.5 전용 요청만 발급 작업을 시작할 수 있다.
+        if (msg.version !== "2.4.5") return;
         if (!msg.instance || (phase === "reconnecting" && msg.instance === wiseInstance)) return;
         // 동일 팝업의 기존 문서는 무시하고, 새로고침 후 새 문서와만 재연결한다.
         wiseInstance = msg.instance;
@@ -1285,8 +1284,9 @@ export default function DomesticOrdersPage() {
         if (timeoutTimer) clearTimeout(timeoutTimer);
         timeoutTimer = setTimeout(() => finish("📦 준비 처리 시간 초과. 와이스 창과 결과를 확인해줘."), 240000);
         popup.postMessage({
-          type: "DDOGA_WISE_PREP_REQUEST",
+          type: "DDOGA_WISE_PREP_REQUEST_V245",
           token,
+          instance: wiseInstance,
           orders: waiting.map(row => ({order_id:row.order_id,nickname:row.nickname}))
         }, "https://wyyyes.com");
       } else if (msg.type === "DDOGA_WISE_PREP_RECONNECT" && phase === "processing") {
@@ -1346,7 +1346,7 @@ export default function DomesticOrdersPage() {
     };
 
     window.addEventListener("message", onMessage);
-    timeoutTimer = setTimeout(() => finish("📦 준비 연결 실패. 와이스 로그인과 Wise Bridge 2.4.2 이상 설치를 확인해줘."), 25000);
+    timeoutTimer = setTimeout(() => finish("📦 준비 연결 실패. 와이스 로그인과 Wise Bridge 2.4.5 설치를 확인해줘."), 25000);
     pingTimer = setInterval(() => {
       if (popup.closed) {
         finish("와이스 창이 닫혀서 준비 작업을 중단했어.");
