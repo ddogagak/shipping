@@ -1272,7 +1272,13 @@ export default function DomesticOrdersPage() {
       const msg = event.data;
       if (!msg || msg.token !== token || phase === "finished") return;
       if (msg.type === "DDOGA_WISE_PREP_READY" && phase === "ready") {
+        if (msg.version !== "2.4.0") {
+          finish("📦 준비: Wise Bridge 2.4.0 설치 필요 (현재 " + String(msg.version || "버전 불명") + ")");
+          return;
+        }
         phase = "processing";
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        timeoutTimer = setTimeout(() => finish("📦 준비 처리 시간 초과. 와이스 창과 결과를 확인해줘."), 240000);
         popup.postMessage({
           type: "DDOGA_WISE_PREP_REQUEST",
           token,
@@ -1324,7 +1330,7 @@ export default function DomesticOrdersPage() {
     };
 
     window.addEventListener("message", onMessage);
-    timeoutTimer = setTimeout(() => finish("📦 준비 시간 초과. 와이스 로그인과 탬퍼몽키 2.3을 확인해줘."), 150000);
+    timeoutTimer = setTimeout(() => finish("📦 준비 연결 실패. 와이스 로그인과 Wise Bridge 2.4.0 설치를 확인해줘."), 25000);
     pingTimer = setInterval(() => {
       if (popup.closed) {
         finish("와이스 창이 닫혀서 준비 작업을 중단했어.");
