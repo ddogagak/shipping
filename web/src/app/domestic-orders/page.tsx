@@ -1223,6 +1223,118 @@ export default function DomesticOrdersPage() {
   }
 
 
+  async function prepareSelectedWisePhones() {
+    const targets = selectedRows.filter(row => String(row.platform || "").toLowerCase() === "wise");
+    if (!targets.length) {
+      setMessage("체크한 주문 중 와이스 주문이 없어.");
+      return;
+    }
+    const waiting = targets.filter(row =>
+      String(row.order_status || "") !== "done" &&
+      String(shipping(row)?.shipping_status || "") !== "done" &&
+      !String(row.phone || "").trim()
+    );
+    if (!waiting.length) {
+      setMessage("선택한 와이스 주문 중 전화번호가 비어 있는 미완료 주문이 없어.");
+      return;
+    }
+    if (waiting.length > 100) {
+      setMessage("한 번에 100건까지만 준비할 수 있어.");
+      return;
+    }
+    if (!window.confirm("선택한 와이스 주문 " + waiting.length + "건의 안심번호를 확인하고 준비 상태로 바꿀까?")) return;
+
+    // 클릭 동기 구간에서 창을 열어 모바일/Firefox 팝업 차단을 피합니다.
+    const popup = window.open("https://wyyyes.com/shipping-waiting-user-list", "ddoga_wise_shipping");
+    if (!popup) {
+      setMessage("와이스 팝업이 차단됐어. 팝업을 허용해줘.");
+      return;
+    }
+    setBatchBusy(true);
+    setMessage("📦 준비: 와이스 연결 및 안심번호 확인 중...");
+    const token = String(Date.now()) + "-" + Math.random().toString(36).slice(2);
+    let phase: "ready" | "processing" | "finished" = "ready";
+    let pingTimer: ReturnType<typeof setInterval> | undefined;
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const finish = (notice: string) => {
+      if (phase === "finished") return;
+      phase = "finished";
+      if (pingTimer) clearInterval(pingTimer);
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      window.removeEventListener("message", onMessage);
+      setBatchBusy(false);
+      setMessage(notice);
+    };
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== "https://wyyyes.com" || event.source !== popup) return;
+      const msg = event.data;
+      if (!msg || msg.token !== token || phase === "finished") return;
+      if (msg.type === "DDOGA_WISE_PREP_READY" && phase === "ready") {
+        phase = "processing";
+        popup.postMessage({
+          type: "DDOGA_WISE_PREP_REQUEST",
+          token,
+          orders: waiting.map(row => ({order_id:row.order_id,nickname:row.nickname}))
+        }, "https://wyyyes.com");
+      } else if (msg.type === "DDOGA_WISE_PREP_PROGRESS" && phase === "processing") {
+        setMessage("📦 준비: " + String(msg.message || "와이스 처리 중"));
+      } else if (msg.type === "DDOGA_WISE_PREP_RESULT" && phase === "processing") {
+        phase = "finished";
+        if (pingTimer) clearInterval(pingTimer);
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        window.removeEventListener("message", onMessage);
+        const results = Array.isArray(msg.results) ? msg.results : [];
+        const selected = new Map(waiting.map(row => [row.order_id, String(row.nickname || "")]));
+        const entries = results.filter((x: any) =>
+          x?.ok && typeof x.phone === "string" &&
+          selected.get(x.order_id) === x.nickname &&
+          /^050\d{8,9}$/.test(x.phone)
+        ).map((x: any) => ({order_id:x.order_id,nickname:x.nickname,phone:x.phone}));
+        const failures = results.filter((x: any) => !x?.ok)
+          .map((x: any) => String(x.nickname || x.order_id) + ": " + String(x.reason || "실패"));
+        if (msg.error) failures.push(String(msg.error));
+        void (async () => {
+          try {
+            if (entries.length) {
+              const res = await fetch("/api/domestic/preparation", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({entries})
+              });
+              const json = await res.json();
+              if (!res.ok) throw Error(json.detail || json.error || "안심번호 저장 실패");
+              const saved = (json.results || []).filter((x: any) => x.ok).length;
+              failures.push(...(json.results || []).filter((x: any) => !x.ok)
+                .map((x: any) => String(x.order_id) + ": " + String(x.reason || "저장 실패")));
+              await load();
+              setMessage("📦 준비 완료: " + saved + "건 / " + waiting.length + "건" +
+                (failures.length ? " · 확인 필요: " + failures.slice(0, 6).join(" / ") : ""));
+            } else {
+              setMessage("📦 준비: 확인된 안심번호 없음. " + failures.slice(0, 6).join(" / "));
+            }
+          } catch (error) {
+            setMessage("📦 준비 저장 실패: " + String(error instanceof Error ? error.message : error));
+          } finally {
+            setBatchBusy(false);
+          }
+        })();
+      }
+    };
+
+    window.addEventListener("message", onMessage);
+    timeoutTimer = setTimeout(() => finish("📦 준비 시간 초과. 와이스 로그인과 탬퍼몽키 2.3을 확인해줘."), 150000);
+    pingTimer = setInterval(() => {
+      if (popup.closed) {
+        finish("와이스 창이 닫혀서 준비 작업을 중단했어.");
+      } else if (phase === "ready") {
+        popup.postMessage({type:"DDOGA_WISE_PREP_PING",token}, "https://wyyyes.com");
+      }
+    }, 650);
+    popup.postMessage({type:"DDOGA_WISE_PREP_PING",token}, "https://wyyyes.com");
+  }
+
   async function registerSelectedTracking() {
     if (registrationLock.current || savingRowId) return;
     const pending = selectedRows.filter(row => !shipping(row)?.tracking_registered);
@@ -1830,7 +1942,7 @@ export default function DomesticOrdersPage() {
               🚚 로젠전송
             </button>
 
-            <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("ddoga:pickup:open"))} style={blackButtonStyle}>
+            <button type="button" onClick={() => void prepareSelectedWisePhones()} disabled={batchBusy || bulkRegistering || !selectedIds.length} style={blackButtonStyle}>
               📦 준비
             </button>
 
