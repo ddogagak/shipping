@@ -126,7 +126,7 @@ export async function PATCH(req: Request) {
     const allowed: Record<string, string[]> = {
       order_status: ["accepted", "checked", "kept", "packaged", "done"],
       request_status: ["none", "keep", "immediate"],
-      shipping_status: ["start", "excel_exported", "uploaded", "registered", "done"],
+      shipping_status: ["start", "ready", "excel_exported", "uploaded", "registered", "done"],
     };
 
     if (!orderIds.length || orderIds.length > 500) {
