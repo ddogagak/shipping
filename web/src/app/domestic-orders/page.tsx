@@ -1682,9 +1682,20 @@ export default function DomesticOrdersPage() {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "로젠택배");
     const base64 = XLSX.write(workbook, { bookType: "xlsx", type: "base64" });
-    window.dispatchEvent(new CustomEvent("ddoga:logen:send", {
-      detail: { base64, filename: `logen_shipping_${Date.now()}.xlsx`, count: data.length, selectedIds: selectedRows.map(row => row.order_id) },
-    }));
+    const transferId = `logen_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const payload = { transferId, base64, filename: `logen_shipping_${Date.now()}.xlsx`, count: data.length, selectedIds: selectedRows.map(row => row.order_id) };
+    // DOM bridge: 이벤트 리스너가 늦게 등록되거나 격리되는 브라우저에서도 전달.
+    let bridge = document.getElementById("ddoga-logen-payload") as HTMLTextAreaElement | null;
+    if (!bridge) {
+      bridge = document.createElement("textarea");
+      bridge.id = "ddoga-logen-payload";
+      bridge.style.display = "none";
+      document.body.appendChild(bridge);
+    }
+    bridge.value = JSON.stringify(payload);
+    bridge.setAttribute("data-transfer-id", transferId);
+    window.dispatchEvent(new CustomEvent("ddoga:logen:send", { detail: payload }));
+    setMessage("🚚 로젠 엑셀 " + data.length + "건 전달 요청됨 · 로젠에 직접 로그인해서 🚚 주문접수 버튼을 눌러줘.");
   }
 
   async function exportHanjinExcel() {
