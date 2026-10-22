@@ -290,7 +290,7 @@ export async function PATCH(req: Request) {
     if(invalid.length) return NextResponse.json({error:"준비 상태·연락처·미등록 조건 불일치",order_ids:invalid},{status:409});
     const results=[];
     for(const id of ids){
-      if(byShip.get(id).shipping_status==="excel_exported"){
+      if(byShip.get(id)?.shipping_status==="excel_exported"){
         results.push({order_id:id,ok:true,already:true});
         continue;
       }
