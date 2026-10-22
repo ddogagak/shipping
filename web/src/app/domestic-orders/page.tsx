@@ -1253,7 +1253,9 @@ export default function DomesticOrdersPage() {
     setBatchBusy(true);
     setMessage("📦 준비: 와이스 연결 및 안심번호 확인 중...");
     const token = String(Date.now()) + "-" + Math.random().toString(36).slice(2);
-    let phase: "ready" | "processing" | "finished" = "ready";
+    let phase: "ready" | "processing" | "reconnecting" | "finished" = "ready";
+    let wiseInstance = "";
+    let reconnectAttempts = 0;
     let pingTimer: ReturnType<typeof setInterval> | undefined;
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -1271,11 +1273,14 @@ export default function DomesticOrdersPage() {
       if (event.origin !== "https://wyyyes.com" || event.source !== popup) return;
       const msg = event.data;
       if (!msg || msg.token !== token || phase === "finished") return;
-      if (msg.type === "DDOGA_WISE_PREP_READY" && phase === "ready") {
-        if (msg.version !== "2.4.0") {
-          finish("📦 준비: Wise Bridge 2.4.0 설치 필요 (현재 " + String(msg.version || "버전 불명") + ")");
+      if (msg.type === "DDOGA_WISE_PREP_READY" && (phase === "ready" || phase === "reconnecting")) {
+        if (msg.version !== "2.4.2") {
+          finish("📦 준비: Wise Bridge 2.4.2 설치 필요 (현재 " + String(msg.version || "버전 불명") + ")");
           return;
         }
+        if (!msg.instance || (phase === "reconnecting" && msg.instance === wiseInstance)) return;
+        // 동일 팝업의 기존 문서는 무시하고, 새로고침 후 새 문서와만 재연결한다.
+        wiseInstance = msg.instance;
         phase = "processing";
         if (timeoutTimer) clearTimeout(timeoutTimer);
         timeoutTimer = setTimeout(() => finish("📦 준비 처리 시간 초과. 와이스 창과 결과를 확인해줘."), 240000);
@@ -1284,6 +1289,17 @@ export default function DomesticOrdersPage() {
           token,
           orders: waiting.map(row => ({order_id:row.order_id,nickname:row.nickname}))
         }, "https://wyyyes.com");
+      } else if (msg.type === "DDOGA_WISE_PREP_RECONNECT" && phase === "processing") {
+        if (msg.instance !== wiseInstance) return;
+        if (reconnectAttempts >= 2) {
+          finish("📦 준비: 자동 인증 재연결 2회 실패. 와이스 로그인 상태를 확인해줘. 번호 발급은 재요청하지 않았어.");
+          return;
+        }
+        reconnectAttempts++;
+        phase = "reconnecting";
+        setMessage("📦 준비: 와이스 인증 자동 재연결 중 (" + reconnectAttempts + "/2) · 창을 닫지 마.");
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        timeoutTimer = setTimeout(() => finish("📦 준비: 와이스 자동 재연결 시간 초과. 로그인 상태를 확인해줘."), 60000);
       } else if (msg.type === "DDOGA_WISE_PREP_PROGRESS" && phase === "processing") {
         setMessage("📦 준비: " + String(msg.message || "와이스 처리 중"));
       } else if (msg.type === "DDOGA_WISE_PREP_RESULT" && phase === "processing") {
@@ -1330,11 +1346,11 @@ export default function DomesticOrdersPage() {
     };
 
     window.addEventListener("message", onMessage);
-    timeoutTimer = setTimeout(() => finish("📦 준비 연결 실패. 와이스 로그인과 Wise Bridge 2.4.0 설치를 확인해줘."), 25000);
+    timeoutTimer = setTimeout(() => finish("📦 준비 연결 실패. 와이스 로그인과 Wise Bridge 2.4.2 설치를 확인해줘."), 25000);
     pingTimer = setInterval(() => {
       if (popup.closed) {
         finish("와이스 창이 닫혀서 준비 작업을 중단했어.");
-      } else if (phase === "ready") {
+      } else if (phase === "ready" || phase === "reconnecting") {
         popup.postMessage({type:"DDOGA_WISE_PREP_PING",token}, "https://wyyyes.com");
       }
     }, 650);
