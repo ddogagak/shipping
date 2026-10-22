@@ -284,12 +284,16 @@ export async function PATCH(req: Request) {
     const byShip=new Map((ships||[]).map(o=>[o.order_id,o]));
     const invalid=ids.filter(id=>{
       const o=byOrder.get(id),sh=byShip.get(id);
-      return !o||!sh||o.order_status==="done"||sh.shipping_status!=="ready"||
+      return !o||!sh||o.order_status==="done"||!["ready","excel_exported"].includes(sh.shipping_status)||
         Boolean(sh.tracking_number)||sh.tracking_registered===true||!String(o.phone||"").trim();
     });
     if(invalid.length) return NextResponse.json({error:"준비 상태·연락처·미등록 조건 불일치",order_ids:invalid},{status:409});
     const results=[];
     for(const id of ids){
+      if(byShip.get(id).shipping_status==="excel_exported"){
+        results.push({order_id:id,ok:true,already:true});
+        continue;
+      }
       const {data,error}=await supabase.from("domestic_shipping")
         .update({shipping_status:"excel_exported",excel_exported_at:now,updated_at:now})
         .eq("order_id",id).eq("shipping_status","ready").is("tracking_number",null)
