@@ -1787,8 +1787,6 @@ export default function DomesticOrdersPage() {
           </div>
         </div>
 
-        {message ? <p style={{ color: "#b91c1c" }}>{message}</p> : null}
-
         <WiseDeadlineBoard orders={rows.map(row => ({order_id:row.order_id,nickname:row.nickname || "",platform:row.platform,first_order_date:row.first_order_date,order_status:row.order_status,tracking_registered:Boolean(shipping(row)?.tracking_registered)}))} />
       </section>
 
@@ -1957,7 +1955,14 @@ export default function DomesticOrdersPage() {
 
       <section style={{ ...cardStyle, marginTop: 16 }}>
         <div style={actionBarStyle}>
-          <div style={{ fontWeight: 800 }}>선택 {selectedIds.length}건</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5, minWidth: 180, flex: "1 1 240px" }}>
+            <div style={{ fontWeight: 800 }}>선택 {selectedIds.length}건</div>
+            {message ? (
+              <div role="status" aria-live="polite" style={{ color: "#b91c1c", fontSize: 13, lineHeight: 1.5, fontWeight: 600, overflowWrap: "anywhere" }}>
+                {message}
+              </div>
+            ) : null}
+          </div>
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button type="button" onClick={sendLogenExcel} style={blueButtonStyle}>
