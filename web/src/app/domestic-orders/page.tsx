@@ -1274,7 +1274,7 @@ export default function DomesticOrdersPage() {
       const msg = event.data;
       if (!msg || msg.token !== token || phase === "finished") return;
       if (msg.type === "DDOGA_WISE_PREP_READY" && (phase === "ready" || phase === "reconnecting")) {
-        if (msg.version !== "2.4.2" && msg.version !== "2.4.3") {
+        if (msg.version !== "2.4.2" && msg.version !== "2.4.3" && msg.version !== "2.4.4") {
           finish("📦 준비: Wise Bridge 2.4.2 이상 설치 필요 (현재 " + String(msg.version || "버전 불명") + ")");
           return;
         }
