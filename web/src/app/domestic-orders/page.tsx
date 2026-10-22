@@ -1274,8 +1274,8 @@ export default function DomesticOrdersPage() {
       const msg = event.data;
       if (!msg || msg.token !== token || phase === "finished") return;
       if (msg.type === "DDOGA_WISE_PREP_READY" && (phase === "ready" || phase === "reconnecting")) {
-        if (msg.version !== "2.4.2") {
-          finish("📦 준비: Wise Bridge 2.4.2 설치 필요 (현재 " + String(msg.version || "버전 불명") + ")");
+        if (msg.version !== "2.4.2" && msg.version !== "2.4.3") {
+          finish("📦 준비: Wise Bridge 2.4.2 이상 설치 필요 (현재 " + String(msg.version || "버전 불명") + ")");
           return;
         }
         if (!msg.instance || (phase === "reconnecting" && msg.instance === wiseInstance)) return;
@@ -1346,7 +1346,7 @@ export default function DomesticOrdersPage() {
     };
 
     window.addEventListener("message", onMessage);
-    timeoutTimer = setTimeout(() => finish("📦 준비 연결 실패. 와이스 로그인과 Wise Bridge 2.4.2 설치를 확인해줘."), 25000);
+    timeoutTimer = setTimeout(() => finish("📦 준비 연결 실패. 와이스 로그인과 Wise Bridge 2.4.2 이상 설치를 확인해줘."), 25000);
     pingTimer = setInterval(() => {
       if (popup.closed) {
         finish("와이스 창이 닫혀서 준비 작업을 중단했어.");
