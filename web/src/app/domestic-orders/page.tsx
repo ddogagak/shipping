@@ -1831,7 +1831,7 @@ export default function DomesticOrdersPage() {
             </button>
 
             <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("ddoga:pickup:open"))} style={blackButtonStyle}>
-              📦 동기화
+              📦 준비
             </button>
 
             <button type="button" onClick={exportExcel} style={blackButtonStyle}>
