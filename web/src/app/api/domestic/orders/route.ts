@@ -271,6 +271,92 @@ export async function PATCH(req: Request) {
     });
   }
 
+  // 로젠 접수 성공 후: 준비 → 엑셀추출. 송장 발급 및 와이스 등록은 하지 않는다.
+  if (action === "confirm_logen_receipt") {
+    const ids = [...new Set(orderIds)];
+    if (!ids.length || ids.length > 100) return NextResponse.json({error:"접수 주문은 1~100건이어야 합니다."},{status:400});
+    const {data:orders,error:ordersError}=await supabase.from("domestic_order")
+      .select("order_id,phone,order_status").in("order_id",ids);
+    const {data:ships,error:shipsError}=await supabase.from("domestic_shipping")
+      .select("order_id,shipping_status,tracking_number,tracking_registered").in("order_id",ids);
+    if(ordersError||shipsError) return NextResponse.json({error:"접수 대상 조회 실패",detail:ordersError?.message||shipsError?.message},{status:500});
+    const byOrder=new Map((orders||[]).map(o=>[o.order_id,o]));
+    const byShip=new Map((ships||[]).map(o=>[o.order_id,o]));
+    const invalid=ids.filter(id=>{
+      const o=byOrder.get(id),sh=byShip.get(id);
+      return !o||!sh||o.order_status==="done"||sh.shipping_status!=="ready"||
+        Boolean(sh.tracking_number)||sh.tracking_registered===true||!String(o.phone||"").trim();
+    });
+    if(invalid.length) return NextResponse.json({error:"준비 상태·연락처·미등록 조건 불일치",order_ids:invalid},{status:409});
+    const results=[];
+    for(const id of ids){
+      const {data,error}=await supabase.from("domestic_shipping")
+        .update({shipping_status:"excel_exported",excel_exported_at:now,updated_at:now})
+        .eq("order_id",id).eq("shipping_status","ready").is("tracking_number",null)
+        .eq("tracking_registered",false).select("order_id");
+      results.push({order_id:id,ok:!error&&Boolean(data?.length),error:error?.message||(!data?.length?"조건 변경됨":undefined)});
+    }
+    return NextResponse.json({ok:true,results});
+  }
+
+  // 로젠 실제 집하 운송장 최초 반영: 주문번호 정확히 일치/유일, 등록 N 유지.
+  if(action === "stage_logen_pickup"){
+    const id=String(body.order_id||"").trim(), no=String(body.order_no||"").trim();
+    const code=String(body.tracking_number||"").replace(/\D/g,"");
+    if(!id||!no||!/^\d{8,20}$/.test(code))return NextResponse.json({error:"주문번호/운송장 형식 오류"},{status:400});
+    const {data:orders,error:orderErr}=await supabase.from("domestic_order")
+      .select("order_id,customer_order_no,order_status").eq("customer_order_no",no);
+    if(orderErr||orders?.length!==1||orders[0].order_id!==id)
+      return NextResponse.json({error:"DDOGA 주문번호가 유일하지 않거나 일치하지 않습니다."},{status:409});
+    if(orders[0].order_status==="done")return NextResponse.json({error:"이미 완료된 주문입니다."},{status:409});
+    const {data:ship,error:shipErr}=await supabase.from("domestic_shipping")
+      .select("shipping_status,tracking_number,tracking_registered").eq("order_id",id).single();
+    if(shipErr||!ship)return NextResponse.json({error:"배송기록 없음"},{status:409});
+    if(ship.shipping_status==="done")return NextResponse.json({error:"이미 배송완료"},{status:409});
+    if(!["excel_exported","uploaded"].includes(ship.shipping_status))
+      return NextResponse.json({error:"엑셀추출/운송장입력 상태가 아닙니다."},{status:409});
+    if(ship.tracking_registered===true)return NextResponse.json({error:"이미 등록 Y인 주문은 자동으로 바꾸지 않습니다."},{status:409});
+    const prev=String(ship.tracking_number||"").replace(/\D/g,"");
+    if(prev&&prev!==code)return NextResponse.json({error:"기존 운송장과 충돌: 수동 확인 필요"},{status:409});
+    const {data:duplicates,error:dupErr}=await supabase.from("domestic_shipping")
+      .select("order_id").eq("tracking_number",code);
+    if(dupErr||duplicates?.some(x=>x.order_id!==id))return NextResponse.json({error:"다른 주문과 송장 중복"},{status:409});
+    if(prev===code&&ship.shipping_status==="uploaded")return NextResponse.json({ok:true,already:true});
+    let update=supabase.from("domestic_shipping")
+      .update({tracking_number:code,shipping_status:"uploaded",tracking_registered:false,updated_at:now})
+      .eq("order_id",id).eq("shipping_status",ship.shipping_status).eq("tracking_registered",false);
+    update=prev?update.eq("tracking_number",ship.tracking_number):update.is("tracking_number",null);
+    const {data:changed,error:writeErr}=await update.select("order_id");
+    if(writeErr||!changed?.length)return NextResponse.json({error:"최종 운송장 저장 실패",detail:writeErr?.message||"상태 변경됨"},{status:409});
+    return NextResponse.json({ok:true,tracking_number:code,shipping_status:"uploaded",tracking_registered:false});
+  }
+
+  // Wise Bridge가 실제 와이스 등록 성공을 확인한 뒤에만 배송완료.
+  if(action === "finish_logen_pickup_after_wise"){
+    const id=String(body.order_id||"").trim();
+    const code=String(body.tracking_number||"").replace(/\D/g,"");
+    if(!id||!/^\d{8,20}$/.test(code)||body.wise_confirmed!==true)
+      return NextResponse.json({error:"와이스 등록 확인이 필요합니다."},{status:400});
+    const {data:ship,error:readErr}=await supabase.from("domestic_shipping")
+      .select("shipping_status,tracking_registered,tracking_number").eq("order_id",id).single();
+    if(readErr||!ship)return NextResponse.json({error:"배송정보 없음"},{status:409});
+    if(String(ship.tracking_number||"").replace(/\D/g,"")!==code)
+      return NextResponse.json({error:"최종 송장 불일치"},{status:409});
+    if(ship.shipping_status==="done"&&ship.tracking_registered===true)
+      return NextResponse.json({ok:true,already:true});
+    if(!["uploaded","registered"].includes(ship.shipping_status))
+      return NextResponse.json({error:"운송장 입력 상태가 아닙니다."},{status:409});
+    const {data:changed,error:writeErr}=await supabase.from("domestic_shipping")
+      .update({tracking_registered:true,shipping_status:"done",updated_at:now})
+      .eq("order_id",id).eq("tracking_number",ship.tracking_number)
+      .in("shipping_status",["uploaded","registered"]).select("order_id");
+    if(writeErr||!changed?.length)return NextResponse.json({error:"완료 저장 실패",detail:writeErr?.message},{status:409});
+    const {error:orderErr}=await supabase.from("domestic_order")
+      .update({order_status:"done",updated_at:now}).eq("order_id",id);
+    if(orderErr)return NextResponse.json({error:"배송완료 저장 성공, 주문완료 저장 실패",detail:orderErr.message},{status:500});
+    return NextResponse.json({ok:true,shipping_status:"done",tracking_registered:true});
+  }
+
   // 로젠 집하 확인: 등록 Y + 동일 운송장 + 미완료 주문만 변경
   if (action === "confirm_pickup") {
     const orderId = String(body.order_id || "").trim();
