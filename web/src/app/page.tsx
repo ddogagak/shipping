@@ -31,7 +31,7 @@ export default async function HomePage() {
     .maybeSingle();
 
   return (
-    <main style={{ maxWidth: 1100, margin: "0 auto", padding: 32 }}>
+    <main className="ddoga-home" style={{ maxWidth: 1100, margin: "0 auto", padding: 32 }}>
       <section>
         <h1 style={{ marginTop: 0 }}>Shipping Admin</h1>
         <p style={{ color: "#6b7280" }}>주문 업로드, 주문 관리, 운송장 업로드, 재고 관리를 처리합니다.</p>
@@ -81,7 +81,7 @@ function formatDate(value?: string | null) {
   if (!value) return "-";
   return new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
 }
-function cardStyle(): React.CSSProperties { return { textDecoration:"none",color:"#111111",padding:20,border:"2px solid #0047FF",borderRadius:16,background:"#FEFF5A",display:"block",transition:"0.15s ease",boxShadow:"0 3px 0 #0047FF",boxSizing:"border-box" }; }
+function cardStyle(): React.CSSProperties { return { textDecoration:"none",color:"#111827",padding:20,border:"1px solid #e5e7eb",borderRadius:14,background:"#ffffff",display:"block",transition:"0.15s ease",boxShadow:"0 1px 3px rgba(17, 24, 39, 0.05)",boxSizing:"border-box" }; }
 const sectionTitleMarginStyle:React.CSSProperties={marginTop:28,marginBottom:12};
 const gridStyle:React.CSSProperties={display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(220px, 1fr))",gap:12};
 const titleStyle:React.CSSProperties={fontSize:22,fontWeight:800};
