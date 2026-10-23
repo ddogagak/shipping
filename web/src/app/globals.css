@@ -50,8 +50,3 @@ th {
 .table-wrap {
   overflow-x: auto;
 }
-
-/* Keep the home dashboard white without changing other admin pages. */
-body:has(.ddoga-home) {
-  background: #ffffff;
-}
