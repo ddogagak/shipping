@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name DDOGA Wise shipping bridge
 // @namespace https://www.ddoga.lol/
-// @version 0.13
+// @version 0.14
 // @match https://wyyyes.com/*
 // @grant none
 // ==/UserScript==
@@ -63,8 +63,14 @@
     const uid=people[0]._id||people[0].userId;
     const chains=(await request("/r0.app/sellers/myMarket/orderChains?userId="+encodeURIComponent(uid))).result||[];
     // 와이스가 반환한 배송 목록 순서를 유지하고, 미발송 입력칸 중 첫 번째를 선택한다.
+    // Wise에 이미 등록된 동일 송장은 재등록하지 않는다.
+    const code=digits(o.tracking_number);
+    const registered=chains.filter(c=>Number(c.delivery_id)>0&&(Number(c.status)===25||!!c.deliveryCode));
+    if(registered.some(c=>digits(c.deliveryCode)===code&&code)){
+      m.reason="Wise에 동일 운송장 이미 등록됨";matches.push(m);continue;
+    }
     const active=chains.filter(c=>Number(c.delivery_id)>0&&!c.deliveryCode&&Number(c.status)!==25);
-    if(active.length<1){m.reason="등록 가능한 미발송 배송 ID 없음";matches.push(m);continue;}
+    if(active.length<1){m.reason=registered.length?"Wise에 이미 송장 등록됨":"등록 가능한 미발송 배송 ID 없음";matches.push(m);continue;}
     const first=active[0];
     m.delivery_id=Number(first.delivery_id);
     m.cursor_order_chain_id=Number(first.firstOrderGroupId);
@@ -82,6 +88,23 @@
   if(!targets.length){send("DDOGA_WISE_SHIP_RESULT",{results:[{nickname:"선택 주문",ok:false,error:"등록 대상이 없어. 미리보기를 다시 실행해줘."}]});return;}
   for(const m of targets){
    try{
+    send("DDOGA_WISE_SHIP_PROGRESS",{message:m.nickname+": Wise 기존 등록 여부 재확인 중..."});
+    const list=await request("/r0.app/sellers/myMarket/buyers/undeliveredUsers");
+    const users=Array.isArray(list.result)?list.result:[];
+    const people=users.filter(u=>norm(u.nickname||u.user?.nickname)===norm(m.nickname));
+    if(people.length!==1)throw Error("미발송자 목록에서 닉네임 확인 불가 (재등록 방지)");
+    const uid=people[0]._id||people[0].userId;
+    const chains=(await request("/r0.app/sellers/myMarket/orderChains?userId="+encodeURIComponent(uid))).result||[];
+    const registered=chains.filter(c=>Number(c.delivery_id)>0&&(Number(c.status)===25||!!c.deliveryCode));
+    if(registered.length){
+      const same=registered.some(c=>digits(c.deliveryCode)===digits(m.tracking_number));
+      throw Error(same?"Wise에 동일 운송장 이미 등록됨 (건너뜀)":"Wise에 기존 송장 등록됨 (자동 덮어쓰기 방지)");
+    }
+    const active=chains.filter(c=>Number(c.delivery_id)>0&&!c.deliveryCode&&Number(c.status)!==25);
+    if(!active.length)throw Error("등록 가능한 미발송 배송 ID 없음");
+    m.delivery_id=Number(active[0].delivery_id);
+    m.cursor_order_chain_id=Number(active[0].firstOrderGroupId);
+    if(!m.cursor_order_chain_id)throw Error("주문 묶음 ID 없음");
     send("DDOGA_WISE_SHIP_PROGRESS",{message:m.nickname+": 와이스 송장 등록 요청 중..."});
     const url="/r0.app/sellers/myMarket/deliveries?cursorOrderChainId="+m.cursor_order_chain_id+"&deliveryIds="+m.delivery_id;
     const cleanCode=digits(m.tracking_number);
