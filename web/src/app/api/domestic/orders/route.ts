@@ -310,26 +310,25 @@ export async function PATCH(req: Request) {
     if(!id||!no||!/^\d{8,20}$/.test(code))return NextResponse.json({error:"주문번호/운송장 형식 오류"},{status:400});
     const {data:orders,error:orderErr}=await supabase.from("domestic_order")
       .select("order_id,customer_order_no,order_status").eq("customer_order_no",no);
-    if(orderErr||orders?.length!==1||orders[0].order_id!==id)
+    if(orderErr||orders?.length!==1||String(orders[0].order_id)!==id)
       return NextResponse.json({error:"DDOGA 주문번호가 유일하지 않거나 일치하지 않습니다."},{status:409});
     if(orders[0].order_status==="done")return NextResponse.json({error:"이미 완료된 주문입니다."},{status:409});
     const {data:ship,error:shipErr}=await supabase.from("domestic_shipping")
       .select("shipping_status,tracking_number,tracking_registered").eq("order_id",id).single();
     if(shipErr||!ship)return NextResponse.json({error:"배송기록 없음"},{status:409});
     if(ship.shipping_status==="done")return NextResponse.json({error:"이미 배송완료"},{status:409});
-    if(!["excel_exported","uploaded"].includes(ship.shipping_status))
-      return NextResponse.json({error:"엑셀추출/운송장입력 상태가 아닙니다."},{status:409});
-    if(ship.tracking_registered===true)return NextResponse.json({error:"이미 등록 Y인 주문은 자동으로 바꾸지 않습니다."},{status:409});
-    const prev=String(ship.tracking_number||"").replace(/\D/g,"");
-    if(prev&&prev!==code)return NextResponse.json({error:"기존 운송장과 충돌: 수동 확인 필요"},{status:409});
     const {data:duplicates,error:dupErr}=await supabase.from("domestic_shipping")
       .select("order_id").eq("tracking_number",code);
-    if(dupErr||duplicates?.some(x=>x.order_id!==id))return NextResponse.json({error:"다른 주문과 송장 중복"},{status:409});
-    if(prev===code&&ship.shipping_status==="uploaded")return NextResponse.json({ok:true,already:true});
+    if(dupErr)return NextResponse.json({error:"송장 중복 조회 실패",detail:dupErr.message},{status:500});
+    if(duplicates?.some(x=>String(x.order_id)!==id))return NextResponse.json({error:"다른 주문과 송장 중복"},{status:409});
+    const prev=String(ship.tracking_number||"").replace(/\D/g,"");
+    if(prev===code&&ship.shipping_status==="uploaded"&&ship.tracking_registered===false)
+      return NextResponse.json({ok:true,already:true});
     let update=supabase.from("domestic_shipping")
       .update({tracking_number:code,shipping_status:"uploaded",tracking_registered:false,updated_at:now})
-      .eq("order_id",id).eq("shipping_status",ship.shipping_status).eq("tracking_registered",false);
-    update=prev?update.eq("tracking_number",ship.tracking_number):update.is("tracking_number",null);
+      .eq("order_id",id).eq("shipping_status",ship.shipping_status)
+      .eq("tracking_registered",ship.tracking_registered);
+    update=ship.tracking_number==null?update.is("tracking_number",null):update.eq("tracking_number",ship.tracking_number);
     const {data:changed,error:writeErr}=await update.select("order_id");
     if(writeErr||!changed?.length)return NextResponse.json({error:"최종 운송장 저장 실패",detail:writeErr?.message||"상태 변경됨"},{status:409});
     return NextResponse.json({ok:true,tracking_number:code,shipping_status:"uploaded",tracking_registered:false});
