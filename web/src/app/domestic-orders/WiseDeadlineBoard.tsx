@@ -62,7 +62,7 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
      const days=daysSince(order.createdAt);
      const pending=Number(order.status)===16&&order.deliveryCompany==="DIRECT";
      if(Number(order.status)===25)continue; // 발송완료는 긴급/미발송 집계에서 제외
-     next.push({nickname:buyer.nickname,order_id:String(order.id),days,status:pending?"pending":days>=13?"urgent":"unshipped",source:"wise"});
+     next.push({nickname:buyer.nickname,order_id:String(order.id),days,status:pending?"pending":days>=12?"urgent":"unshipped",source:"wise"});
     }
     const time=new Date().toISOString();
     try{localStorage.setItem(CACHE_KEY,JSON.stringify({rows:next,updatedAt:time}));}
@@ -82,10 +82,10 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
  const rows=useMemo(()=>wiseRows||[],[wiseRows]);
  const unique=(a:WiseRow[])=>Array.from(new Map(a.filter(x=>x.nickname).sort((a,b)=>b.days-a.days).map(r=>[r.nickname.trim().toLowerCase(),r])).values());
  const unshipped=unique(rows.filter(r=>r.status==="unshipped"||r.status==="urgent"));
- const candidates=unique(rows.filter(r=>r.status==="unshipped"&&r.days>=11&&r.days<13));
+ const candidates=unique(rows.filter(r=>r.status==="unshipped"&&r.days>=10&&r.days<12));
  const pending=unique(rows.filter(r=>r.status==="pending"));
  const confirmed=unique(rows.filter(r=>r.status==="confirmed"));
- const urgent=unique(rows.filter(r=>r.status==="urgent"||(r.status==="unshipped"&&r.days>=13)));
+ const urgent=unique(rows.filter(r=>r.status==="urgent"||(r.status==="unshipped"&&r.days>=12)));
  function refresh(){
   setBusy(true);setNotice("와이스 응답을 기다리는 중...");
   const popup=window.open("https://wyyyes.com/shipping-waiting-user-list","ddoga_wise_shipping");
@@ -141,7 +141,7 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
     <button type="button" onClick={()=>setOpen(v=>!v)} aria-expanded={open} style={{width:"100%",border:0,padding:0,background:"transparent",textAlign:"left",cursor:"pointer",color:"#111827"}}>
      <div style={{fontSize:13,fontWeight:700}}>직킵여부 확인대상</div>
      <div style={{fontSize:24,fontWeight:800,marginTop:4}}>{candidates.length}명 <span style={{fontSize:14}}>{open?"▲":"▼"}</span></div>
-     <div style={{fontSize:11,color:"#6b7280",marginTop:4}}>11일 이상 · 13일 미만</div>
+     <div style={{fontSize:11,color:"#6b7280",marginTop:4}}>10일 이상 · 12일 미만</div>
     </button>
     {open&&<div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:10}}>{candidates.length?candidates.map(x=><span key={x.order_id} style={nicknameStyle}>{x.nickname} <span style={{fontSize:11,fontWeight:600}}>({x.days}일)</span><button type="button" onClick={()=>{const url="https://wyyyes.com/shipping-waiting-user-list";const popup=window.open(url,"ddoga_wise_keep__"+encodeURIComponent(x.nickname));if(!popup){setNotice("와이스 팝업 차단을 해제해줘.");return;}popup.focus();setNotice(x.nickname+"님의 주문을 와이스에서 확인해줘. 실제 전달 완료 전에는 DIRECT 발송완료 처리하지 마.");}} style={{background:"#111827",color:"#fff",border:0,borderRadius:6,padding:"4px 8px",cursor:"pointer"}}>직킵</button></span>):<span style={{fontSize:12}}>대상 없음</span>}</div>}
    </div>
@@ -152,7 +152,7 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
      {pending.map(x=><span key={x.order_id} style={nicknameStyle}>{x.nickname}</span>)}
     </div>
    </div>
-   {card("발송긴급",urgent.length,"#fef2f2","13일 이상")}
+   {card("발송긴급",urgent.length,"#fef2f2","12일 이상")}
   </div>
   {urgent.length>0&&<div style={{marginTop:10,padding:10,borderRadius:8,background:"#fef2f2",fontSize:13}}><strong>발송긴급:</strong> {urgent.map(x=><span key={x.order_id} style={{...nicknameStyle,marginRight:6}}>{x.nickname} ({x.days}일)</span>)}</div>}
   <div style={{marginTop:10,padding:10,borderRadius:8,background:"#f0fdf4",fontSize:13}}><strong>직킵 수령확인 추정 {confirmed.length}명:</strong> {confirmed.length?confirmed.map(x=><span key={x.order_id} style={{...nicknameStyle,marginLeft:6}}>{x.nickname} <button type="button" disabled={acting!==null} onClick={()=>void handleConfirmation(x.order_id,"register")} style={{background:"#166534",color:"#fff",border:0,borderRadius:5,padding:"3px 7px",cursor:"pointer"}}>등록</button><button type="button" disabled={acting!==null} onClick={()=>void handleConfirmation(x.order_id,"dismiss")} style={{background:"#e5e7eb",border:0,borderRadius:5,padding:"3px 7px",cursor:"pointer"}}>삭제</button></span>):"대상 없음"}</div>
