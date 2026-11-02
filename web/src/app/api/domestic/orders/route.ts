@@ -922,6 +922,7 @@ export async function PATCH(req: Request) {
         shipping_type: selectedShippingType,
         tracking_number: selectedTrackingNumber || null,
         shipping_status: selectedTrackingNumber ? "uploaded" : "start",
+        tracking_registered: false, // 합배송 후 기존 등록 Y도 N으로 초기화
         updated_at: now,
       })
       .eq("order_id", base.order_id);
