@@ -28,7 +28,7 @@ export default function SaleInventoryPage(){
  }
  async function correctPrice(item:any){
   const raw=(priceDrafts[item.id]??"").trim().replace(/,/g,"");
-  const value=/^\\d+(\\.\\d+)?$/.test(raw)?Number(raw):NaN;
+  const value=/^\d+(\.\d+)?$/.test(raw)?Number(raw):NaN;
   const expected=Number(item.actual_purchase_unit_price??0);
   if(!Number.isFinite(value)||value<=0){setPriceMessages(prev=>({...prev,[item.id]:"0보다 큰 박스 1개 매입가를 입력해줘."}));return;}
   if(value===expected){cancelPriceEdit(item.id);return;}
