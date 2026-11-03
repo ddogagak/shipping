@@ -25,6 +25,14 @@ const panel: CSSProperties = { border: "1px solid #e5e7eb", borderRadius: 14, ov
 const panelTitle: CSSProperties = { padding: "14px 16px", borderBottom: "1px solid #e5e7eb", fontWeight: 800 };
 const chip: CSSProperties = { padding: "5px 8px", border: "1px solid #e5e7eb", borderRadius: 999, background: "#f9fafb", color: "#4b5563", fontSize: 12, display: "inline-flex", alignItems: "center" };
 
+function itemSortName(value: string) {
+  const name = String(value || "").normalize("NFKC").trim();
+  // Sort by the product name first, treating any leading #number as a trailing variant label.
+  const match = name.match(/^(?:(#\d+)\s*)+(.+)$/);
+  if (!match) return name;
+  const prefixes = name.match(/^(?:(?:#\d+)\s*)+/)?.[0].trim() || "";
+  return match[2].trim() + " " + prefixes;
+}
 function periodLabel(key: string) {
   if (key.includes("-Q")) return key.replace("-Q", "년 ").concat("분기");
   return key.replace("-", "년 ") + "월";
@@ -182,7 +190,7 @@ export default function SalesManagementPage() {
     } else if (saleSort.key === "item_price") {
       compared = Number(a.item_price || 0) - Number(b.item_price || 0);
     } else {
-      compared = String(a[saleSort.key] || "").localeCompare(String(b[saleSort.key] || ""), "ko", { numeric: true, sensitivity: "base" });
+      compared = (saleSort.key === "item_name" ? itemSortName(a.item_name) : String(a[saleSort.key] || "")).localeCompare(saleSort.key === "item_name" ? itemSortName(b.item_name) : String(b[saleSort.key] || ""), "ko", { numeric: true, sensitivity: "base" });
     }
     return (saleSort.direction === "desc" ? -compared : compared) || a.id.localeCompare(b.id);
   }), [filteredItemRows, saleSort]);
