@@ -7,6 +7,8 @@ const SHIPPING_KEYWORDS = ["배송비", "배송료", "택배비", "送料", "shi
 const DEFAULT_KEYWORDS = [...DEFAULT_EXCLUDED, ...SHIPPING_KEYWORDS];
 const INITIAL_SETTLED_AMOUNT = 17232999;
 const PURCHASE_EXCHANGE_RATE: Record<string, number> = { KRW: 1, JPY: 10, CNY: 230 };
+const OVERSEAS_TAX_MULTIPLIER = 1.2;
+const OVERSEAS_SHIPPING_PER_ORDER_KRW = 50000;
 async function purchaseTotals() {
   const orders = await readAll("purchase_orders", "id,ordered_at,paid_amount,currency");
   const monthly: Record<string, number> = {};
@@ -23,7 +25,10 @@ async function purchaseTotals() {
     }
     const amount = Number(order.paid_amount);
     if (!Number.isFinite(amount) || amount < 0) continue;
-    const won = amount * rate;
+    const isOverseas = currency !== "KRW";
+    const won = isOverseas
+      ? amount * rate * OVERSEAS_TAX_MULTIPLIER + OVERSEAS_SHIPPING_PER_ORDER_KRW
+      : amount * rate;
     cumulative += won;
     includedOrders++;
     const day = kstDate(order.ordered_at);
@@ -33,7 +38,7 @@ async function purchaseTotals() {
     monthly[month] = (monthly[month] || 0) + won;
     quarterly[quarter] = (quarterly[quarter] || 0) + won;
   }
-  return { monthly, quarterly, cumulative, included_orders: includedOrders, unsupported_currencies: Array.from(unsupportedCurrencies), exchange_rates: PURCHASE_EXCHANGE_RATE };
+  return { monthly, quarterly, cumulative, included_orders: includedOrders, unsupported_currencies: Array.from(unsupportedCurrencies), exchange_rates: PURCHASE_EXCHANGE_RATE, overseas_tax_multiplier: OVERSEAS_TAX_MULTIPLIER, overseas_shipping_per_order_krw: OVERSEAS_SHIPPING_PER_ORDER_KRW };
 }
 
 async function readAll(table: string, columns: string) {
