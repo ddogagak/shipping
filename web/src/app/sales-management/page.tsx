@@ -119,6 +119,7 @@ export default function SalesManagementPage() {
   const [draftPrefs, setDraftPrefs] = useState<ItemPrefs>({});
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [productSearch, setProductSearch] = useState("");
+  const [buyerSearch, setBuyerSearch] = useState("");
   const [expandedImage, setExpandedImage] = useState<{ url: string; name: string } | null>(null);
   const [saleSort, setSaleSort] = useState<{ key: SortKey; direction: SortDirection }>({ key: "ordered_at", direction: "desc" });
   const [granularity, setGranularity] = useState<"month" | "quarter">("month");
@@ -180,7 +181,14 @@ export default function SalesManagementPage() {
     const includeCost = draftPrefs[key]?.includeCost !== false;
     return { ...row, key, unitCost: unitCost ?? null, includeCost, memo: draftPrefs[key]?.memo || "", cost: includeCost && unitCost != null ? unitCost : null };
   }), [currentRows, costIndex, draftPrefs]);
-  const filteredItemRows = useMemo(() => itemRows.filter(row => row.item_name.normalize("NFKC").toLowerCase().includes(productSearch.normalize("NFKC").trim().toLowerCase())), [itemRows, productSearch]);
+  const filteredItemRows = useMemo(() => {
+    const productQuery = productSearch.normalize("NFKC").trim().toLowerCase();
+    const buyerQuery = buyerSearch.normalize("NFKC").trim().toLowerCase();
+    return itemRows.filter(row =>
+      row.item_name.normalize("NFKC").toLowerCase().includes(productQuery) &&
+      String(row.buyer_nickname || "").normalize("NFKC").toLowerCase().includes(buyerQuery)
+    );
+  }, [itemRows, productSearch, buyerSearch]);
   const sortedItemRows = useMemo(() => [...filteredItemRows].sort((a, b) => {
     let compared = 0;
     if (saleSort.key === "ordered_at") {
@@ -389,9 +397,9 @@ export default function SalesManagementPage() {
             <button style={{ ...button, background: "#111827", color: "#fff" }} disabled={!hasUnsaved || saving} onClick={saveItemSettings}>{saving ? "저장 중..." : "저장"}</button>
           </div>
         </div>
-        <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><input aria-label="상품명 검색" type="search" value={productSearch} onChange={e => setProductSearch(e.target.value)} placeholder="상품명 검색" style={{ height: 36, padding: "0 10px", border: "1px solid #d1d5db", borderRadius: 8, flex: "1 1 220px", maxWidth: 400 }} /><span style={{ color: "#6b7280", fontSize: 12 }}>검색 결과 {filteredItemRows.length}건</span></div>
+        <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><input aria-label="상품명 검색" type="search" value={productSearch} onChange={e => setProductSearch(e.target.value)} placeholder="상품명 검색" style={{ height: 36, padding: "0 10px", border: "1px solid #d1d5db", borderRadius: 8, flex: "1 1 220px", maxWidth: 400 }} /><input aria-label="구매자 닉네임 검색" type="search" value={buyerSearch} onChange={e => setBuyerSearch(e.target.value)} placeholder="구매자 닉네임 검색" style={{ height: 36, padding: "0 10px", border: "1px solid #d1d5db", borderRadius: 8, flex: "1 1 220px", maxWidth: 400 }} /><span style={{ color: "#6b7280", fontSize: 12 }}>검색 결과 {filteredItemRows.length}건</span></div>
         {hasUnsaved && <div style={{ padding: "8px 14px", background: "#fffbeb", color: "#92400e", fontSize: 12 }}>저장되지 않은 원가 설정·삭제·메모가 있습니다.</div>}
-        {!filteredItemRows.length ? <div style={{ padding: 24, color: "#6b7280" }}>{productSearch.trim() ? "검색 결과가 없습니다." : "이 기간의 판매 내역이 없습니다."}</div> :
+        {!filteredItemRows.length ? <div style={{ padding: 24, color: "#6b7280" }}>{productSearch.trim() || buyerSearch.trim() ? "검색 결과가 없습니다." : "이 기간의 판매 내역이 없습니다."}</div> :
           <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1240, fontSize: 13 }}>
             <thead><tr style={{ background: "#f9fafb" }}><th style={th}><input aria-label="현재 판매 내역 전체 선택" type="checkbox" checked={filteredItemRows.length > 0 && filteredItemRows.every(row => selectedItems.includes(row.key))} onChange={e => setSelectedItems(current => e.target.checked ? Array.from(new Set([...current, ...filteredItemRows.map(row => row.key)])) : current.filter(key => !filteredItemRows.some(row => row.key === key)))} /></th><th style={th} aria-sort={saleSort.key === "ordered_at" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("ordered_at", "판매 날짜")}</th><th style={th} aria-sort={saleSort.key === "buyer_nickname" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("buyer_nickname", "구매자 닉네임")}</th><th style={th} aria-sort={saleSort.key === "item_name" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("item_name", "아이템")}</th><th style={th} aria-sort={saleSort.key === "item_price" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("item_price", "판매가")}</th><th style={th}>판매원가 포함</th><th style={th}>개당 원가</th><th style={th}>계산 원가</th><th style={th}>메모</th></tr></thead>
             <tbody>{sortedItemRows.map(row => {
