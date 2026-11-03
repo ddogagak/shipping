@@ -803,6 +803,20 @@ export async function PATCH(req: Request) {
 
     const mergeTargets = sorted.slice(1);
     const mergeTargetIds = mergeTargets.map((order: any) => order.order_id);
+    // Preserve explicit Wise ID links before deleting combined source orders.
+    const {data: linkedWiseOrders,error:linkedWiseError}=await supabase
+      .from("domestic_wise_order_link").select("wise_order_id,domestic_order_id")
+      .in("domestic_order_id",sorted.map((order:any)=>order.order_id));
+    if(linkedWiseError)return NextResponse.json({error:"와이스 주문 연결 조회 실패",detail:linkedWiseError.message},{status:500});
+    const wiseIds=(linkedWiseOrders||[]).map((link:any)=>Number(link.wise_order_id));
+    let currentWiseNickname=String(latest.nickname||"").trim();
+    if(wiseIds.length){
+      const {data:wiseSales,error:wiseSalesError}=await supabase
+        .from("domestic_wise_sales_order").select("wise_order_id,buyer_nickname,ordered_at")
+        .in("wise_order_id",wiseIds).order("ordered_at",{ascending:false}).limit(1);
+      if(wiseSalesError)return NextResponse.json({error:"와이스 최신 닉네임 조회 실패",detail:wiseSalesError.message},{status:500});
+      currentWiseNickname=String(wiseSales?.[0]?.buyer_nickname||currentWiseNickname).trim();
+    }
 
     const orderNos = sorted.map((order: any) =>
       String(order.customer_order_no || order.order_id || "").trim()
@@ -877,6 +891,7 @@ export async function PATCH(req: Request) {
       .from("domestic_order")
       .update({
         customer_order_no: finalCustomerOrderNo,
+        nickname: currentWiseNickname || base.nickname,
       
         // 합배송 배송정보:
         // 주소/수령인은 최신 주문 기준,
@@ -934,6 +949,14 @@ export async function PATCH(req: Request) {
       );
     }
 
+    if(mergeTargetIds.length && (linkedWiseOrders||[]).length){
+      const linkedSourceIds=(linkedWiseOrders||[]).filter((link:any)=>mergeTargetIds.includes(link.domestic_order_id)).map((link:any)=>link.wise_order_id);
+      if(linkedSourceIds.length){
+        const {error:moveLinkError}=await supabase.from("domestic_wise_order_link")
+          .update({domestic_order_id:base.order_id}).in("wise_order_id",linkedSourceIds);
+        if(moveLinkError)return NextResponse.json({error:"와이스 주문 ID 합배송 연결 실패",detail:moveLinkError.message},{status:500});
+      }
+    }
     if (mergeTargetIds.length) {
       const { error: shippingDeleteError } = await supabase
         .from("domestic_shipping")
