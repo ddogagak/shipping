@@ -3,7 +3,7 @@
 // @namespace    https://www.ddoga.lol/
 // @updateURL     https://www.ddoga.lol/ddoga-wise-orders-pull.user.js
 // @downloadURL   https://www.ddoga.lol/ddoga-wise-orders-pull.user.js
-// @version      1.7
+// @version      1.8
 // @description  와이스 주문 전체 이력과 누적 정산금액을 ddoga에 전달
 // @match        https://wyyyes.com/deliverylist*
 // @match        https://wyyyes.com/expected-settlement-amount*
@@ -115,7 +115,7 @@
    const videoCount=out.reduce((n,o)=>n+(o.stocks||[]).filter(s=>s.videoId).length,0);
    const itemCount=out.reduce((n,o)=>n+(o.stocks||[]).length,0);
    console.info("DDOGA Wise collection",{version:"1.7",orders:out.length,detailedOrders,detailFailures,soldCount,videoCount,itemCount});
-   if(itemCount>0&&(soldCount!==itemCount||videoCount!==itemCount)){
+   if(itemCount===0||soldCount!==itemCount||videoCount!==itemCount){
     throw Error("매출자료 전송 중단: 판매시간 "+soldCount+"/"+itemCount+"건, 방송 ID "+videoCount+"/"+itemCount+"건. 상세 조회 성공 "+detailedOrders+"건 / 실패 "+detailFailures+"건. 콘솔의 DDOGA 주문 상세 조회 실패 로그를 확인해줘.");
    }
   }
@@ -128,12 +128,12 @@
   busy=true;
   try{
    const orders=await collect();
-   window.opener?.postMessage({type:"DDOGA_WISE_ORDERS",orders},DDOGA);
+   window.opener?.postMessage({type:"DDOGA_WISE_ORDERS",scriptVersion:"1.8",orders},DDOGA);
   }catch(err){
    window.opener?.postMessage({type:"DDOGA_WISE_PULL_ERROR",error:String(err?.message||err)},DDOGA);
   }finally{busy=false;}
  });
- function ready(){window.opener?.postMessage({type:"DDOGA_WISE_PULL_READY"},DDOGA);}
+ function ready(){window.opener?.postMessage({type:"DDOGA_WISE_PULL_READY",scriptVersion:"1.8"},DDOGA);}
  window.addEventListener("load",ready);
  setTimeout(ready,1200);
 })();
