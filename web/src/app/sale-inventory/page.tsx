@@ -46,21 +46,13 @@ export default function SaleInventoryPage(){
    if(!Number.isSafeInteger(newQuantity)||newQuantity<1||!Number.isSafeInteger(newComponent)||newComponent<1){
     setPriceMessages(prev=>({...prev,[item.id]:"박스 수량과 박스당 구성은 1 이상의 정수로 입력해줘."}));return;
    }
-   if(!Number.isSafeInteger(confirmedOldComponent)||confirmedOldComponent<1||expectedReceived<1||expectedQuantity!==expectedReceived){
-    setPriceMessages(prev=>({...prev,[item.id]:"기존 박스당 구성(미등록인 경우 직접 입력), 매입 수량과 입고 수량을 확인해줘."}));return;
-   }
-   if(expectedQuantity*confirmedOldComponent!==newQuantity*newComponent){
-    setPriceMessages(prev=>({...prev,[item.id]:"총 낱개 수가 맞지 않아. 기존 "+(expectedQuantity*confirmedOldComponent)+"개와 수정 "+(newQuantity*newComponent)+"개를 같게 맞춰줘."}));return;
-   }
-   if(Math.abs(oldTotal-nextTotal)>0.01){
-    setPriceMessages(prev=>({...prev,[item.id]:"총매입금액이 달라져. 새 박스당 매입가를 "+(oldTotal/newQuantity).toLocaleString("ko-KR")+" "+item.actual_purchase_currency+"로 설정해줘."}));return;
-   }
+
   }
   if(!window.confirm(editMode==="box"?
-   "박스 단위 수정\\n"+expectedQuantity+"박스 × "+confirmedOldComponent+"개 → "+newQuantity+"박스 × "+newComponent+"개\\n박스 매입가 "+oldPrice.toLocaleString("ko-KR")+" → "+value.toLocaleString("ko-KR")+" "+item.actual_purchase_currency+"\\n총매입 "+oldTotal.toLocaleString("ko-KR")+" → "+nextTotal.toLocaleString("ko-KR")+" (동일)\\n판매 기록은 가능한 경우에만 변환하고 기존 SKU는 유지해. 저장할까?":
-   "박스 매입가만 "+oldPrice.toLocaleString("ko-KR")+" → "+value.toLocaleString("ko-KR")+" "+item.actual_purchase_currency+"로 변경할까?\\n수량과 구성은 그대로이고 매입 합계는 재계산돼."))return;
+   "박스 단위 수정\\n"+expectedQuantity+"박스 × "+confirmedOldComponent+"개 → "+newQuantity+"박스 × "+newComponent+"개\\n박스 매입가 "+oldPrice.toLocaleString("ko-KR")+" → "+value.toLocaleString("ko-KR")+" "+item.actual_purchase_currency+"\\n총매입 "+oldTotal.toLocaleString("ko-KR")+" → "+nextTotal.toLocaleString("ko-KR")+"\\n매입관리 원본은 유지하고 방송판매재고만 수정해. 저장할까?":
+   "박스 매입가만 "+oldPrice.toLocaleString("ko-KR")+" → "+value.toLocaleString("ko-KR")+" "+item.actual_purchase_currency+"로 변경할까?\\n수량과 구성은 그대로이고 방송판매재고의 원가만 수정돼. 매입관리 원본은 유지해."))return;
   setPriceSaving(item.id);
-  setPriceMessages(prev=>({...prev,[item.id]:"매입정보 수정 중…"}));
+  setPriceMessages(prev=>({...prev,[item.id]:"방송판매재고 수정 중…"}));
   try{
    const response=await fetch("/api/sale-inventory",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({
     action:"reconcile_purchase_box_units",purchase_item_id:item.id,mode:editMode,
@@ -72,7 +64,7 @@ export default function SaleInventoryPage(){
    if(!response.ok)throw new Error(result.message||"수정 실패");
    setEditingPriceId(null);
    setPriceDrafts(prev=>{const next={...prev};delete next[item.id];return next});
-   setPriceMessages(prev=>({...prev,[item.id]:editMode==="box"?"박스 단위 통합 수정 완료":"매입가 수정 완료"}));
+   setPriceMessages(prev=>({...prev,[item.id]:editMode==="box"?"방송판매재고 박스 수정 완료":"방송판매재고 원가 수정 완료"}));
    await load();
   }catch(e){setPriceMessages(prev=>({...prev,[item.id]:e instanceof Error?e.message:"수정 실패"}));}
   finally{setPriceSaving(null)}
@@ -101,7 +93,7 @@ export default function SaleInventoryPage(){
  {editMode==="box"&&<div style={{fontSize:12,lineHeight:1.7,marginBottom:8}}>
   <div>현재 매입 수량 <b>{i.purchase_record_quantity??0}박스</b> · 입고 <b>{i.purchase_record_received_quantity??0}박스</b> · DB 기록 구성 <b>{i.purchase_record_component_count||"미등록"}{i.purchase_record_component_count?"개":""}</b></div>
   <div>기존 총매입가 <b>{(Number(i.actual_purchase_unit_price||0)*Number(i.purchase_record_quantity||0)).toLocaleString("ko-KR")} {i.actual_purchase_currency}</b></div>
-  {!(Number(i.purchase_record_component_count)>0)&&<label style={{display:"block",padding:"8px 0",color:"#9a3412",fontWeight:700}}>기존 박스당 구성 확인 (DB 미등록)
+  {!(Number(i.purchase_record_component_count)>0)&&<label style={{display:"block",padding:"8px 0",color:"#9a3412",fontWeight:700}}>기존 박스당 구성 참고 (DB 미등록)
    <input aria-label="기존 박스당 구성 확인" type="number" min="1" step="1" style={{...input,width:115,display:"block",marginTop:4}} value={oldComponentDraft} onChange={e=>setOldComponentDraft(e.target.value)}/>
    <small style={{fontWeight:400}}>네가 말한 기존 1개입×5박스라면 여기 1을 유지하고, 변경 박스 1 / 구성 5로 입력하면 돼.</small>
   </label>}
@@ -109,12 +101,12 @@ export default function SaleInventoryPage(){
    <label>변경 박스 수<input aria-label="변경할 박스 수량" type="number" min="1" step="1" style={{...input,width:115,display:"block"}} value={boxDraft.quantity} onChange={e=>{const n=Number(e.target.value);setBoxDraft(prev=>({...prev,quantity:e.target.value}));if(Number.isSafeInteger(n)&&n>0)setPriceDrafts(prev=>({...prev,[i.id]:String(Number(i.actual_purchase_unit_price||0)*Number(i.purchase_record_quantity||0)/n)}));}}/></label>
    <label>박스당 구성 수<input aria-label="변경할 박스당 낱개 수" type="number" min="1" step="1" style={{...input,width:115,display:"block"}} value={boxDraft.component} onChange={e=>setBoxDraft(prev=>({...prev,component:e.target.value}))}/></label>
   </div>
-  <div style={{fontSize:11,color:"#64748b",marginTop:6}}>낱개 총수량은 같아야 해. 기존 판매 내역을 정확하게 변환할 수 없으면 서버에서 거절해.</div>
+  <div style={{fontSize:11,color:"#64748b",marginTop:6}}>박스 구성과 수량은 방송판매재고에서만 변경해. 매입관리의 수량·원가는 유지돼.</div>
  </div>}
  <label style={{display:"block",fontSize:12,fontWeight:700}}>박스 1개 실제 매입가 ({i.actual_purchase_currency})
   <input autoFocus aria-label="수정할 박스 매입가" type="number" min="0.01" step="any" value={priceDrafts[i.id]??""} onChange={e=>setPriceDrafts(prev=>({...prev,[i.id]:e.target.value}))} onKeyDown={e=>{if(e.key==="Enter")void correctPrice(i);if(e.key==="Escape")cancelPriceEdit(i.id)}} disabled={priceSaving!==null} style={{...input,width:"100%",marginTop:5}}/>
  </label>
- {editMode==="box"&&<div style={{fontSize:12,marginTop:7}}>수정 후 총매입: <b>{(Number(priceDrafts[i.id]||0)*Number(boxDraft.quantity||0)).toLocaleString("ko-KR")} {i.actual_purchase_currency}</b> · 기존 총매입과 같아야 저장 가능</div>}
+ {editMode==="box"&&<div style={{fontSize:12,marginTop:7}}>수정 후 총매입: <b>{(Number(priceDrafts[i.id]||0)*Number(boxDraft.quantity||0)).toLocaleString("ko-KR")} {i.actual_purchase_currency}</b> · 매입관리 원본은 그대로 유지돼</div>}
  {priceMessages[i.id]&&<div style={{fontSize:12,color:"#b91c1c",marginTop:7}}>{priceMessages[i.id]}</div>}
  <div style={{display:"flex",gap:6,marginTop:9}}><button type="button" style={button} disabled={priceSaving!==null} onClick={()=>void correctPrice(i)}>{priceSaving===i.id?"저장 중…":"수정 저장"}</button><button type="button" style={button} disabled={priceSaving!==null} onClick={()=>cancelPriceEdit(i.id)}>취소</button></div>
  </div>}{i.can_fill_purchase_price&&editingPriceId!==i.id&&<div style={{marginTop:8}}><label>누락 매입가 입력 ({i.actual_purchase_currency} / 박스 1개)<input aria-label="누락 실제 매입가" type="text" inputMode="decimal" value={priceDrafts[i.id]??""} disabled={priceSaving!==null||saving!==null} onChange={e=>setPriceDrafts(v=>({...v,[i.id]:e.target.value}))} placeholder="매입가 입력" style={{...input,width:"100%",marginTop:4}}/></label><button type="button" style={{...button,marginTop:6}} disabled={priceSaving!==null||saving!==null||!priceDrafts[i.id]} onClick={()=>void fillPrice(i)}>{priceSaving===i.id?"매입가 저장 중…":"누락 매입가 저장"}</button><div style={{marginTop:4}}>비어 있던 매입가만 입력 가능 · 저장 후 수정 불가</div></div>}{priceMessages[i.id]&&<div role="status" style={{marginTop:6,fontWeight:700}}>{priceMessages[i.id]}</div>}</div>{i.sourcing_purchase_price>0&&<div style={sourceCost}>인벤토리 소싱 참고가 {Number(i.sourcing_purchase_price).toLocaleString("ko-KR")} {i.sourcing_currency} <b>※ 원가계산에는 사용 안 함</b></div>}<div style={saleInput}><label>방송 실제 판매가격 <small>(개당)</small><input type="number" value={i.sale_price??""} onChange={e=>edit(i.id,"sale_price",e.target.value)} placeholder="원" style={{...input,width:"100%",fontSize:16,fontWeight:800}}/></label></div><div style={profitBox}><Metric label={<>박스<br/>판매수익</>} value={actual&&p.count?won(boxProfit):'-'} strong/><Metric label={<>개당<br/>판매수익</>} value={actual?won(unitProfit):'-'} strong/></div><div style={formula}>박스수익 = 실제판매가 × 박스구성 × 0.84 − 박스원가<br/>개당수익 = 실제판매가 × 0.84 − 개당원가</div><div style={numbers}><label>입고 박스<input type="number" min={0} value={i.purchase_quantity} onChange={e=>edit(i.id,"purchase_quantity",Number(e.target.value))} style={{...input,width:"100%"}}/></label><label>판매 박스<input type="number" min={0} value={i.sold_quantity} onChange={e=>edit(i.id,"sold_quantity",Number(e.target.value))} style={{...input,width:"100%"}}/></label></div><textarea value={i.sale_memo||""} onChange={e=>edit(i.id,"sale_memo",e.target.value)} placeholder="판매 메모" style={memo}/><label style={{display:"block",marginTop:8,fontSize:11,fontWeight:700}}>빵.store 공개 댓글<input type="text" value={i.public_comment||""} maxLength={100} onChange={e=>edit(i.id,"public_comment",e.target.value)} placeholder="빵.store에서 보일 한 줄 댓글" style={{...input,width:"100%",marginTop:4}}/></label><div style={actionRow}><div>{i.product_url&&<a href={i.product_url} target="_blank" rel="noreferrer" style={urlButton}>URL</a>}</div><div style={visibilityButtons}>{[["hidden","숨김"],["display","표시"],["completed","완료"]].map(([value,label])=><button key={value} onClick={()=>edit(i.id,"pending_view_status",value)} disabled={saving===i.id} style={{...visibilityButton,...((i.pending_view_status??i.view_status)===value?activeVisibilityButton:{})}}>{label}</button>)}</div><div style={rightActions}>{i.lineup_image_url&&<button style={button} onClick={()=>setLineup(i.lineup_image_url)}>라인업 보기</button>}<button style={button} onClick={()=>void save(i)} disabled={saving!==null||priceSaving!==null}>{saving===i.id?"저장 중…":"저장"}</button></div></div></div></article>})}</section>{lineup&&<div style={backdrop} onClick={()=>setLineup(null)}><div style={modal} onClick={e=>e.stopPropagation()}><button style={button} onClick={()=>setLineup(null)}>닫기</button><div style={{overflow:"auto",textAlign:"center"}}><img src={lineup} alt="라인업" style={{maxWidth:"100%",height:"auto"}}/></div></div></div>}</main>;
