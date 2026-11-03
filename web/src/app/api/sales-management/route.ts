@@ -6,6 +6,35 @@ const DEFAULT_EXCLUDED = ["야생", "용자", "소장", "양도", "양고"];
 const SHIPPING_KEYWORDS = ["배송비", "배송료", "택배비", "送料", "shipping fee", "shipping cost", "delivery fee", "postage"];
 const DEFAULT_KEYWORDS = [...DEFAULT_EXCLUDED, ...SHIPPING_KEYWORDS];
 const INITIAL_SETTLED_AMOUNT = 17232999;
+const PURCHASE_EXCHANGE_RATE: Record<string, number> = { KRW: 1, JPY: 10, CNY: 230 };
+async function purchaseTotals() {
+  const orders = await readAll("purchase_orders", "id,ordered_at,paid_amount,currency");
+  const monthly: Record<string, number> = {};
+  const quarterly: Record<string, number> = {};
+  const unsupportedCurrencies = new Set<string>();
+  let cumulative = 0;
+  let includedOrders = 0;
+  for (const order of orders) {
+    const currency = String(order.currency || "").toUpperCase().trim();
+    const rate = PURCHASE_EXCHANGE_RATE[currency];
+    if (rate === undefined) {
+      unsupportedCurrencies.add(currency || "(미설정)");
+      continue;
+    }
+    const amount = Number(order.paid_amount);
+    if (!Number.isFinite(amount) || amount < 0) continue;
+    const won = amount * rate;
+    cumulative += won;
+    includedOrders++;
+    const day = kstDate(order.ordered_at);
+    if (!day) continue;
+    const month = day.slice(0, 7);
+    const quarter = day.slice(0, 4) + "-Q" + (Math.floor((Number(day.slice(5, 7)) - 1) / 3) + 1);
+    monthly[month] = (monthly[month] || 0) + won;
+    quarterly[quarter] = (quarterly[quarter] || 0) + won;
+  }
+  return { monthly, quarterly, cumulative, included_orders: includedOrders, unsupported_currencies: Array.from(unsupportedCurrencies), exchange_rates: PURCHASE_EXCHANGE_RATE };
+}
 
 async function readAll(table: string, columns: string) {
   const db = createServiceRoleClient();
@@ -180,8 +209,8 @@ function responseError(error: unknown) {
 export async function GET() {
   try {
     const settings = await readSettings();
-    const report = await buildReport(settings.excluded_keywords);
-    return NextResponse.json({ ...report, settings });
+    const [report, purchases] = await Promise.all([buildReport(settings.excluded_keywords), purchaseTotals()]);
+    return NextResponse.json({ ...report, purchases, settings });
   } catch (error) {
     return responseError(error);
   }
