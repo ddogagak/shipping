@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import {resolveAnalysisSeries,type SeriesKeywordRule} from "@/lib/item-analysis-series";
 import {useEffect,useMemo,useState,type CSSProperties} from "react";
 type Stock={id:string;order_number?:string;display_name?:string;product_name?:string;series_name?:string|null;item_type?:string|null;sale_price?:number|null;component_count?:number;purchase_quantity?:number;sold_quantity?:number;box_cost_price?:number;view_status?:string;stock_status?:string;sold_out_at?:string|null;image_url?:string|null;internal_sku?:string|null;actual_purchase_currency?:string|null;actual_purchase_unit_price?:number|null};
 type Item={id:string;name:string;series:string;type:string;price:number;count:number;boxes:number;qty:number;revenue:number;cost:number;net:number;profit:number|null;margin:number|null;completedAt:string|null;costKnown:boolean;sku:string;image:string|null;};
@@ -13,7 +14,7 @@ const th:CSSProperties={padding:"11px 12px",textAlign:"right",fontSize:12,color:
 const td:CSSProperties={padding:"11px 12px",textAlign:"right",borderBottom:"1px solid #f1f5f9",whiteSpace:"nowrap"};
 const bands=[{name:"5천원 미만",min:0,max:5000},{name:"5천~1만원",min:5000,max:10000},{name:"1만~1.5만원",min:10000,max:15000},{name:"1.5만~2만원",min:15000,max:20000},{name:"2만~3만원",min:20000,max:30000},{name:"3만~5만원",min:30000,max:50000},{name:"5만원 이상",min:50000,max:Infinity}];
 const bandFor=(price:number)=>bands.find(b=>price>=b.min&&price<b.max)?.name||"기타";
-function convert(rows:Stock[]){
+function convert(rows:Stock[],rules:SeriesKeywordRule[]){
  const stats={completed:0,withPrice:0,invalid:0,missingCost:0,missingDate:0,excludedNoPrice:0};
  const items:Item[]=[];
  for(const row of rows){
@@ -35,7 +36,9 @@ function convert(rows:Stock[]){
   const profit=costKnown?net-cost:null;
   const complete=typeof row.sold_out_at==="string"&&Number.isFinite(Date.parse(row.sold_out_at))?row.sold_out_at:null;
   if(!complete)stats.missingDate++;
-  items.push({id:String(row.id),name:String(row.display_name||row.product_name||"(이름 없음)"),series:String(row.series_name||"미분류"),type:String(row.item_type||"미분류"),price,count,boxes,qty:count*boxes,revenue,cost,net,profit,margin:profit!==null&&revenue>0?profit/revenue*100:null,completedAt:complete,costKnown,sku:String(row.internal_sku||""),image:row.image_url||null});
+  const itemName=String(row.display_name||row.product_name||"(이름 없음)");
+  const classified=resolveAnalysisSeries([row.product_name,row.display_name].filter(Boolean).join(" "),row.series_name,rules);
+  items.push({id:String(row.id),name:itemName,series:classified.series,type:String(row.item_type||"미분류"),price,count,boxes,qty:count*boxes,revenue,cost,net,profit,margin:profit!==null&&revenue>0?profit/revenue*100:null,completedAt:complete,costKnown,sku:String(row.internal_sku||""),image:row.image_url||null});
  }
  return {items,stats};
 }
@@ -55,10 +58,10 @@ function SummaryTable({rows}:{rows:Group[]}){
  return <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead><tr>{["구분","완료 품목","판매 추정 수량","추정 매출","원가 확인 품목","확인 가능분 이익","확인 가능분 이익률"].map(x=><th key={x} style={th}>{x}</th>)}</tr></thead><tbody>{rows.map(x=><tr key={x.key}><td style={{...td,textAlign:"left",fontWeight:700}}>{x.key}</td><td style={td}>{x.items}종</td><td style={td}>{cash(x.qty)}개</td><td style={td}>{cash(x.revenue)}원</td><td style={td}>{x.costCoverage}/{x.items}</td><td style={td}>{x.costCoverage?cash(x.profit)+"원":"—"}</td><td style={td}>{x.costCoverage?percent(x.profit,x.costRevenue):"—"}</td></tr>)}</tbody></table></div>;
 }
 export default function ItemAnalysis(){
- const [rows,setRows]=useState<Stock[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState("");
+ const [rows,setRows]=useState<Stock[]>([]),[rules,setRules]=useState<SeriesKeywordRule[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState("");
  const [series,setSeries]=useState("전체"),[kind,setKind]=useState("전체"),[month,setMonth]=useState("전체"),[band,setBand]=useState("전체"),[search,setSearch]=useState(""),[sort,setSort]=useState("revenue"),[limit,setLimit]=useState(60);
- useEffect(()=>{let active=true;fetch("/api/sale-inventory",{cache:"no-store"}).then(async r=>{const json=await r.json();if(!r.ok||!json.ok)throw Error(json.message||"판매재고 조회 실패");if(active)setRows(json.items||[])}).catch(e=>{if(active)setError(String(e.message||e))}).finally(()=>{if(active)setLoading(false)});return()=>{active=false}},[]);
- const {items,stats}=useMemo(()=>convert(rows),[rows]);
+ useEffect(()=>{let active=true;Promise.all([fetch("/api/sale-inventory",{cache:"no-store"}),fetch("/api/sales-management/item-keywords",{cache:"no-store"})]).then(async ([inventory,keywords])=>{const a=await inventory.json(),b=await keywords.json();if(!inventory.ok||!a.ok)throw Error(a.message||"판매재고 조회 실패");if(!keywords.ok||!b.ok)throw Error(b.message||"키워드 조회 실패");if(active){setRows(a.items||[]);setRules(b.rules||[])}}).catch(e=>{if(active)setError(String(e.message||e))}).finally(()=>{if(active)setLoading(false)});return()=>{active=false}},[]);
+ const {items,stats}=useMemo(()=>convert(rows,rules),[rows,rules]);
  const seriesList=[...new Set(items.map(x=>x.series))].sort((a,b)=>a.localeCompare(b,"ko"));
  const kindList=[...new Set(items.map(x=>x.type))].sort((a,b)=>a.localeCompare(b,"ko"));
  const monthList=[...new Set(items.map(x=>x.completedAt?kstMonth(x.completedAt):"날짜 없음"))].sort().reverse();
@@ -72,11 +75,12 @@ export default function ItemAnalysis(){
  return <main style={{maxWidth:1450,margin:"auto",padding:"24px 20px 70px",color:"#0f172a"}}>
   <header style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"center",flexWrap:"wrap",marginBottom:20}}>
    <div><div style={{color:"#64748b",fontSize:12}}>매출관리 / 아이템 분석</div><h1 style={{fontSize:29,margin:"5px 0"}}>작품 · 굿즈 · 가격대별 판매 분석</h1><p style={{fontSize:13,color:"#64748b",margin:0}}>방송판매 재고의 완료 처리 기록을 기반으로 한 추정 매출과 이익</p></div>
-   <div style={{display:"flex",gap:8,flexWrap:"wrap"}}><Link href="/sales-management" style={input}>← 매출관리</Link><Link href="/sale-inventory" style={input}>방송판매 재고</Link></div>
+   <div style={{display:"flex",gap:8,flexWrap:"wrap"}}><Link href="/sales-management" style={input}>← 매출관리</Link><Link href="/sale-inventory" style={input}>방송판매 재고</Link><Link href="/sales-management/items/keywords" style={{...input,background:"#eff6ff",borderColor:"#93c5fd",fontWeight:700}}>작품 키워드 관리</Link></div>
   </header>
   {loading&&<div style={card}>판매재고 데이터를 읽어오는 중…</div>}
   {error&&<div style={{...card,color:"#b91c1c"}} role="alert">{error}</div>}
   {!loading&&!error&&<>
+   <div style={{...card,background:"#f8fafc",marginBottom:16,fontSize:13,lineHeight:1.8}}><b>작품 분류:</b> <Link href="/sales-management/items/keywords">키워드 관리</Link>에서 등록한 단어로 상품명을 판별하며, 일치하지 않으면 기존 저장 작품명을 사용해. 여러 작품 키워드가 동시에 일치하면 원본 작품명을 유지하거나 미분류로 표시해. 실제 상품·매입 데이터는 수정하지 않아.</div>
    <div style={{...card,background:"#f8fafc",marginBottom:16,fontSize:13,lineHeight:1.8}}><b>분석 기준:</b> 방송판매 재고에서 완료 상태이고 개당 판매가가 입력된 품목 중, 박스 구성수량과 판매 박스 수가 확인되는 항목을 집계해. <b>완료 시 재고 전체가 판매 처리되는 현행 시스템 규칙</b>에 따라 실제 결제 확정 매출과 다를 수 있어. <b>이익 = 추정 매출 × 0.84 − 계산 원가</b>이며, 0.84는 현행 방송판매 재고 화면의 수수료·세금 단순 가정이야. 실제 세무상 순이익이나 정산 금액은 아니야. 원가 누락 품목은 이익률에서 제외해.</div>
    <section style={{...card,display:"flex",gap:10,flexWrap:"wrap",marginBottom:16,alignItems:"center"}}>
     <label>작품 <select style={input} value={series} onChange={e=>setSeries(e.target.value)}><option>전체</option>{seriesList.map(x=><option key={x}>{x}</option>)}</select></label>
