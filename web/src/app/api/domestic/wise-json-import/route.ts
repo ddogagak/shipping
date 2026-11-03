@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 export const runtime="nodejs";
-type RawOrder={id:number;status?:number;deliveryCompany?:string|null;deliveryCode?:string|null;startAt?:string|null;updatedAt?:string|null;createdAt?:string|null;receiverName?:string|null;receiverPhoneNum?:string|null;receiverphonenum?:string|null;virtualPhoneNum?:string|null;virtualphonenum?:string|null;postNum?:string|null;addr1?:string|null;addr2?:string|null;addr3?:string|null;user?:{nickname?:string|null};stocks?:Array<{id:number;name?:string;price?:number;thumbnail?:string|null;soldAt?:string|null}>};
+type RawOrder={id:number;status?:number;deliveryCompany?:string|null;deliveryCode?:string|null;startAt?:string|null;updatedAt?:string|null;createdAt?:string|null;receiverName?:string|null;receiverPhoneNum?:string|null;receiverphonenum?:string|null;virtualPhoneNum?:string|null;virtualphonenum?:string|null;postNum?:string|null;addr1?:string|null;addr2?:string|null;addr3?:string|null;user?:{nickname?:string|null};stocks?:Array<{id:number;name?:string;price?:number;thumbnail?:string|null;soldAt?:string|null;videoId?:string|null}>};
 function asText(v:unknown){return String(v??"").trim()}
 function validDate(v:unknown){const s=asText(v);return s&&!Number.isNaN(Date.parse(s))?s:null}
 function kst(v:string){return new Date(v).toLocaleString("sv-SE",{timeZone:"Asia/Seoul"}).slice(0,16)}
@@ -41,6 +41,7 @@ export async function POST(req:Request){
     buyer_nickname:asText(o.user?.nickname),
     ordered_at:validDate(o.createdAt)!,
     sold_at:validDate(s.soldAt),
+    video_id:asText(s.videoId)||null,
     item_name:asText(s.name),
     item_price:Number.isFinite(Number(s.price??0))?Number(s.price??0):0,
     image_url:s.thumbnail??null,
@@ -262,7 +263,7 @@ export async function POST(req:Request){
    const {error}=await db.from("domestic_wise_order_snapshot").upsert(snapshots,{onConflict:"wise_order_id"});
    if(error)throw new Error("와이스 배송 스냅샷 저장 실패: "+error.message);
   }
-  const photoRows=orders.flatMap(o=>(o.stocks??[]).filter(s=>Number.isSafeInteger(s.id)).map(s=>({wise_stock_id:s.id,wise_order_id:o.id,buyer_nickname:asText(o.user?.nickname),ordered_at:validDate(o.createdAt)??new Date().toISOString(),sold_at:validDate(s.soldAt),item_name:asText(s.name),item_price:Number(s.price??0),image_url:s.thumbnail??null})));
+  const photoRows=orders.flatMap(o=>(o.stocks??[]).filter(s=>Number.isSafeInteger(s.id)).map(s=>({wise_stock_id:s.id,wise_order_id:o.id,buyer_nickname:asText(o.user?.nickname),ordered_at:validDate(o.createdAt)??new Date().toISOString(),sold_at:validDate(s.soldAt),video_id:asText(s.videoId)||null,item_name:asText(s.name),item_price:Number(s.price??0),image_url:s.thumbnail??null})));
   for(const chunk of batches(photoRows)){const {error}=await db.from("domestic_wise_item_photo").upsert(chunk,{onConflict:"wise_stock_id"});if(error)throw new Error("와이스 상품정보 저장 실패: "+error.message)}
   const selectedRaw=asText(form.get("selected_ids"));
   const selectedIds=selectedRaw?JSON.parse(selectedRaw):null;
