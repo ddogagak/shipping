@@ -42,15 +42,15 @@ const percent=(n:number,d:number)=>d?(100*n/d).toFixed(1)+"%":"—";
 type Favorite={series:string;amount:number;count:number};
 const SERIES_RULES:{series:string;patterns:RegExp[]}[]=[
  {series:"치이카와",patterns:[/치이카와/i,/먼작귀/i,/하치와레/i,/모몽가/i,/쿠리만쥬/i,/ちいかわ/i,/ハチワレ/i,/モモンガ/i]},
- {series:"나히아",patterns:[/나히아/i,/히로아카/i,/히어로\\s*아카데미아/i,/僕のヒーローアカデミア/i,/미도리야/i,/바쿠고/i,/토도로키/i,/토가\\s*히미코/i]},
- {series:"헌터×헌터",patterns:[/헌터\\s*[x×]?\\s*헌터/i,/hunter\\s*[x×]?\\s*hunter/i,/곤\\s*프릭스/i,/키르아/i,/크라피카/i,/히소카/i,/환영여단/i]},
+ {series:"나히아",patterns:[/나히아/i,/히로아카/i,/히어로\s*아카데미아/i,/僕のヒーローアカデミア/i,/미도리야/i,/바쿠고/i,/토도로키/i,/토가\s*히미코/i]},
+ {series:"헌터×헌터",patterns:[/헌터\s*[x×]?\s*헌터/i,/hunter\s*[x×]?\s*hunter/i,/곤\s*프릭스/i,/키르아/i,/크라피카/i,/히소카/i,/환영여단/i]},
  {series:"귀멸의 칼날",patterns:[/귀멸/i,/鬼滅/i,/탄지로/i,/네즈코/i,/젠이츠/i,/이노스케/i]},
  {series:"프리렌",patterns:[/프리렌/i,/葬送のフリーレン/i,/페른/i,/슈타르크/i]},
- {series:"진격의 거인",patterns:[/진격의\\s*거인/i,/進撃の巨人/i,/리바이/i,/엘런\\s*예거/i,/미카사/i]},
+ {series:"진격의 거인",patterns:[/진격의\s*거인/i,/進撃の巨人/i,/리바이/i,/엘런\s*예거/i,/미카사/i]},
  {series:"짱구",patterns:[/짱구/i,/クレヨンしんちゃん/i,/부리부리자에몽/i]},
  {series:"리락쿠마",patterns:[/리락쿠마/i,/リラックマ/i,/코리락쿠마/i,/키이로이토리/i]},
- {series:"나루토",patterns:[/나루토/i,/ナルト/i,/우치하\\s*사스케/i,/우치하\\s*이타치/i,/하타케\\s*카카시/i]},
- {series:"약사의 혼잣말",patterns:[/약사의\\s*혼잣말/i,/薬屋のひとりごと/i,/마오마오/i,/진시/i]},
+ {series:"나루토",patterns:[/나루토/i,/ナルト/i,/우치하\s*사스케/i,/우치하\s*이타치/i,/하타케\s*카카시/i]},
+ {series:"약사의 혼잣말",patterns:[/약사의\s*혼잣말/i,/薬屋のひとりごと/i,/마오마오/i,/진시/i]},
  {series:"주술회전",patterns:[/주술회전/i,/呪術廻戦/i,/고죠/i,/게토/i,/이타도리/i,/스쿠나/i]},
  {series:"산리오",patterns:[/산리오/i,/サンリオ/i,/쿠로미/i,/시나모롤/i,/폼폼푸린/i,/마이멜로디/i]}
 ];
