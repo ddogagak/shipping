@@ -50,7 +50,7 @@ export async function POST(req:Request){
     const {error}=await db.from("domestic_wise_item_photo").upsert(chunk,{onConflict:"wise_stock_id"});
     if(error)throw new Error("와이스 매출 자료 저장 실패: "+error.message);
    }
-   return NextResponse.json({ok:true,sales_saved_orders:salesOrders.length,sales_saved_items:salesRows.length,imported_at:importedAt});
+   return NextResponse.json({ok:true,sales_saved_orders:salesOrders.length,sales_saved_items:salesRows.length,sold_at_count:salesRows.filter(row=>row.sold_at).length,missing_sold_at_count:salesRows.filter(row=>!row.sold_at).length,imported_at:importedAt});
   }
   // Page through all orders; otherwise Supabase's default row cap hides older phone-only changes.
   const domestic:Array<{order_id:string;customer_order_no:string|null;nickname:string|null;platform:string|null;order_status:string|null;phone:string|null;first_order_date:string|null;source_order_dates:string[]|null}>=[];
