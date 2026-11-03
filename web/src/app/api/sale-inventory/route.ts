@@ -128,21 +128,19 @@ export async function GET() {
         const ledger: any = ledgerByItemId.get(String(item.id));
         const isDomestic = String(order.source_site || "") === "Domestic" || String(order.currency || "").toUpperCase() === "KRW";
         const storedReceived = Math.max(0, Number(item.received_quantity ?? 0));
-        const boxQuantity = isDomestic && storedReceived === 0
+        const originalBoxQuantity = isDomestic && storedReceived === 0
           ? Math.max(0, Number(item.quantity ?? domesticMeta?.quantity ?? 0))
           : storedReceived;
+        const boxQuantity = ledger?.box_quantity_override == null ? originalBoxQuantity : Math.max(0,Number(ledger.box_quantity_override));
         const purchaseCurrency = String(order.currency || "CNY").toUpperCase();
-        const actualPurchaseUnitPrice = Number(item.unit_price || 0);
-        const pricing = pricingFromPurchase(
-          actualPurchaseUnitPrice,
-          purchaseCurrency,
-          item.component_count ?? domesticMeta?.component_count ?? sourcing?.component_count,
-        );
+        const actualPurchaseUnitPrice = ledger?.purchase_price_override == null ? Number(item.unit_price || 0) : Number(ledger.purchase_price_override);
+        const actualComponentCount = ledger?.component_count_override ?? item.component_count ?? domesticMeta?.component_count ?? sourcing?.component_count;
+        const pricing = pricingFromPurchase(actualPurchaseUnitPrice,purchaseCurrency,actualComponentCount);
         // For a uniquely matched SKU, sourcing owns the canonical image.
         // Unmatched/duplicate SKU and no-SKU items keep their currently stored image.
-        const imageUrl = fixedSku && sourcing?.image_url
+        const imageUrl = ledger?.image_url_override ?? (fixedSku && sourcing?.image_url
           ? sourcing.image_url
-          : item.image_url || domesticMeta?.image_url || (!fixedSku ? sourcing?.image_url : null) || null;
+          : item.image_url || domesticMeta?.image_url || (!fixedSku ? sourcing?.image_url : null) || null);
         const defaultViewStatus = imageUrl ? "display" : "hidden";
 
         // 기존에 이미 완료 처리된 항목도 판매박스=입고박스, 재고=0으로 실제 DB를 보정한다.
@@ -178,7 +176,8 @@ export async function GET() {
           purchase_record_received_quantity: storedReceived,
           purchase_record_component_count: Math.max(0, Number(item.component_count ?? 0)),
           actual_purchase_unit_price: actualPurchaseUnitPrice,
-          can_fill_purchase_price: item.unit_price == null || Number(item.unit_price) === 0,
+          can_fill_purchase_price: actualPurchaseUnitPrice <= 0,
+          sale_price_override: ledger?.purchase_price_override ?? null,
           actual_purchase_currency: purchaseCurrency,
           order_paid_amount: Number(order.paid_amount || 0),
           order_local_shipping: Number(order.local_shipping || 0),
@@ -231,84 +230,46 @@ export async function PATCH(req: Request) {
     }
 
     const sb = createServiceRoleClient();
-    if (body.action === "reconcile_purchase_box_units") {
-      const expected = body.expected || {};
+    // Sale-inventory-only corrections. Never modify purchase_items or sourcing records.
+    if (["reconcile_purchase_box_units","update_purchase_price","fill_missing_purchase_price"].includes(String(body.action))) {
+      const mode = body.action === "reconcile_purchase_box_units" ? (body.mode === "box" ? "box" : "price") : "price";
       const input = body.next || {};
-      const mode = body.mode === "box" ? "box" : "price";
-      const price = Number(input.unit_price);
-      const qty = Number(input.quantity);
-      const component = Number(input.component_count);
-      if (!Number.isFinite(price) || price <= 0 || (mode === "box" && (
-        !Number.isSafeInteger(qty) || qty < 1 ||
-        !Number.isSafeInteger(component) || component < 1
-      ))) return NextResponse.json({ok:false,message:"수정할 매입가, 박스 수량, 박스당 구성을 다시 확인해줘."},{status:400});
-      const {data,error} = await sb.rpc("reconcile_purchase_box_units_v2",{
-        p_item_id:body.purchase_item_id,
-        p_mode:mode,
-        p_expected_price:Number(expected.unit_price),
-        p_expected_quantity:Number(expected.quantity),
-        p_expected_received:Number(expected.received_quantity),
-        p_expected_component:Number(expected.component_count),
-        p_new_price:price,
-        p_new_quantity:mode==="box"?qty:Number(expected.quantity),
-        p_new_component:mode==="box"?component:Number(expected.component_count),
-        p_confirmed_old_component:mode==="box"?Number(body.confirmed_old_component):Number(expected.component_count),
-      });
-      if(error) return NextResponse.json({ok:false,message:error.message||"매입 단위 수정 실패"},{status:409});
-      return NextResponse.json({ok:true,item:data});
-    }
-    // Explicit price correction for an existing purchase item. Require the value that was displayed
-    // to the editor, so an intervening change cannot be accidentally overwritten.
-    if (body.action === "update_purchase_price") {
-      const value = body.unit_price;
-      const expected = body.expected_unit_price;
-      if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 ||
-          typeof expected !== "number" || !Number.isFinite(expected) || expected < 0) {
-        return NextResponse.json({ ok: false, message: "매입가가 올바르지 않습니다." }, { status: 400 });
-      }
-      const { data: item, error: readError } = await sb.from("purchase_items")
-        .select("id,quantity,unit_price").eq("id", body.purchase_item_id).maybeSingle();
-      if (readError) throw readError;
-      if (!item) return NextResponse.json({ ok: false, message: "상품을 찾을 수 없습니다." }, { status: 404 });
-      const currentPrice = Number(item.unit_price ?? 0);
-      if (currentPrice !== expected) {
-        return NextResponse.json({ ok: false, message: "다른 작업에서 매입가가 바뀌었어. 새로고침한 뒤 다시 수정해줘." }, { status: 409 });
-      }
-      const lineTotal = value * Number(item.quantity ?? 0);
-      if (!Number.isFinite(lineTotal) || !Number.isFinite(value)) {
-        return NextResponse.json({ ok: false, message: "입력한 매입가가 너무 큽니다." }, { status: 400 });
-      }
-      if (currentPrice === value) return NextResponse.json({ ok: true, unit_price: value });
-      let update = sb.from("purchase_items").update({ unit_price: value, line_total: lineTotal }).eq("id", body.purchase_item_id);
-      update = item.unit_price == null ? update.is("unit_price", null) : update.eq("unit_price", currentPrice);
-      const { data: updated, error: updateError } = await update.select("id,unit_price").maybeSingle();
-      if (updateError) throw updateError;
-      if (!updated) return NextResponse.json({ ok: false, message: "매입가가 변경됐어. 새로고침 후 다시 수정해줘." }, { status: 409 });
-      return NextResponse.json({ ok: true, unit_price: updated.unit_price });
-    }
-    // Missing import prices are stored as either NULL or 0. Fill once only.
-    if (body.action === "fill_missing_purchase_price") {
-      const value = body.unit_price;
-      if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-        return NextResponse.json({ ok: false, message: "0보다 큰 매입가를 입력해 주세요." }, { status: 400 });
-      }
-      const { data: item, error: readError } = await sb.from("purchase_items")
-        .select("id,quantity,unit_price").eq("id", body.purchase_item_id).maybeSingle();
-      if (readError) throw readError;
-      if (!item) return NextResponse.json({ ok: false, message: "상품을 찾을 수 없습니다." }, { status: 404 });
-      if (item.unit_price != null && Number(item.unit_price) !== 0) {
-        return NextResponse.json({ ok: false, message: "이미 매입가가 있는 상품은 수정할 수 없습니다." }, { status: 409 });
-      }
-      const lineTotal = value * Number(item.quantity ?? 0);
-      if (!Number.isFinite(lineTotal)) return NextResponse.json({ ok: false, message: "매입가가 너무 큽니다." }, { status: 400 });
-      // The conditional write also prevents concurrent requests from overwriting a filled price.
-      const { data: updated, error: updateError } = await sb.from("purchase_items")
-        .update({ unit_price: value, line_total: lineTotal })
-        .eq("id", body.purchase_item_id).or("unit_price.is.null,unit_price.eq.0")
-        .select("id,unit_price").maybeSingle();
-      if (updateError) throw updateError;
-      if (!updated) return NextResponse.json({ ok: false, message: "다른 작업에서 이미 매입가를 입력했습니다. 새로고침해 주세요." }, { status: 409 });
-      return NextResponse.json({ ok: true, unit_price: updated.unit_price });
+      const newPrice = Number(body.action === "reconcile_purchase_box_units" ? input.unit_price : body.unit_price);
+      if (!Number.isFinite(newPrice) || newPrice <= 0 || newPrice > 10000000000)
+        return NextResponse.json({ok:false,message:"0보다 큰 실제 매입가를 입력해줘."},{status:400});
+      const {data:purchase,error:purchaseError}=await sb.from("purchase_items")
+        .select("id,unit_price,quantity,received_quantity").eq("id",body.purchase_item_id).maybeSingle();
+      if(purchaseError)throw purchaseError;
+      if(!purchase)return NextResponse.json({ok:false,message:"대상 상품을 찾을 수 없어."},{status:404});
+      const {data:existing,error:existingError}=await sb.from("purchase_sale_inventory")
+        .select("*").eq("purchase_item_id",body.purchase_item_id).maybeSingle();
+      if(existingError)throw existingError;
+      const effectivePrice=Number(existing?.purchase_price_override ?? purchase.unit_price ?? 0);
+      const expectedPrice=Number(body.action === "reconcile_purchase_box_units" ? body.expected?.unit_price : body.expected_unit_price ?? effectivePrice);
+      if(effectivePrice !== expectedPrice)
+        return NextResponse.json({ok:false,message:"다른 작업에서 매입가가 바뀌었어. 새로고침해줘."},{status:409});
+      const originalQty=Number(purchase.received_quantity ?? purchase.quantity ?? 0);
+      const effectiveQty=Number(existing?.box_quantity_override ?? originalQty);
+      const nextQty=mode==="box" ? Number(input.quantity):effectiveQty;
+      const nextComponent=mode==="box" ? Number(input.component_count):null;
+      if(mode==="box"&&(!Number.isSafeInteger(nextQty)||nextQty<1||nextQty>1000000||
+        !Number.isSafeInteger(nextComponent)||nextComponent<1||nextComponent>1000000))
+        return NextResponse.json({ok:false,message:"박스 수와 구성수량은 1 이상의 정수로 입력해줘."},{status:400});
+      const oldSold=Math.max(0,Number(existing?.sold_quantity ?? 0));
+      const sold=existing?.stock_status==="soldout" ? nextQty : Math.min(oldSold,nextQty);
+      const remaining=existing?.stock_status==="soldout" ? 0:Math.max(0,nextQty-sold);
+      const payload:Record<string,unknown>={
+        purchase_item_id:body.purchase_item_id,
+        purchase_price_override:newPrice,
+        ...(mode==="box"?{box_quantity_override:nextQty,component_count_override:nextComponent}:{}),
+        sold_quantity:sold,remaining_quantity:remaining,
+        stock_status:existing?.stock_status||"active",
+        ...(existing?{}:{sale_price:null})
+      };
+      const {data:updated,error:updateError}=await sb.from("purchase_sale_inventory")
+        .upsert(payload,{onConflict:"purchase_item_id"}).select().single();
+      if(updateError)throw updateError;
+      return NextResponse.json({ok:true,unit_price:newPrice,item:updated});
     }
     const hasImage = Object.prototype.hasOwnProperty.call(body, "image_url");
     const imageUrl = hasImage ? (String(body.image_url || "").trim() || null) : undefined;
@@ -318,27 +279,6 @@ export async function PATCH(req: Request) {
     const componentCount = hasComponentCount
       ? Math.max(0, Math.trunc(Number(body.component_count || 0)))
       : undefined;
-
-    if (hasImage) {
-      // Image changes must only affect the explicitly selected purchase item.
-      // Never update all items sharing a name or overwrite sourcing images.
-      const { error } = await sb.from("purchase_items")
-        .update({ image_url: imageUrl })
-        .eq("id", body.purchase_item_id);
-      if (error) throw error;
-    }
-
-    if (hasComponentCount && body.sourcing_inventory_id) {
-      const pricing = pricingFromPurchase(
-        Number(body.actual_purchase_unit_price || 0),
-        String(body.actual_purchase_currency || "CNY"),
-        componentCount,
-      );
-      const { error } = await sb.from("inventory_items")
-        .update({ component_count: componentCount || null, unit_sale_price: pricing.unitSalePrice || null })
-        .eq("id", body.sourcing_inventory_id);
-      if (error) throw error;
-    }
 
     const received = Math.max(0, Math.trunc(Number(body.purchase_quantity ?? 0)));
     const viewStatus = ["display", "hidden", "completed"].includes(String(body.view_status))
@@ -358,6 +298,9 @@ export async function PATCH(req: Request) {
     const payload = {
       purchase_item_id: body.purchase_item_id,
       ...(hasDisplayName ? { display_name: displayName } : {}),
+      ...(hasImage ? { image_url_override: imageUrl } : {}),
+      ...(hasComponentCount ? { component_count_override: componentCount } : {}),
+      box_quantity_override: received,
       sale_price: body.sale_price === "" || body.sale_price == null ? null : Number(body.sale_price),
       remaining_quantity: remaining,
       sold_quantity: sold,
@@ -366,11 +309,6 @@ export async function PATCH(req: Request) {
       public_comment: cleanPublicComment || null,
       sold_out_at: status === "soldout" ? (body.sold_out_at || new Date().toISOString()) : null,
     };
-
-    const { error: quantityError } = await sb.from("purchase_items")
-      .update({ received_quantity: received })
-      .eq("id", body.purchase_item_id);
-    if (quantityError) throw quantityError;
 
     const { data, error } = await sb.from("purchase_sale_inventory")
       .upsert(payload, { onConflict: "purchase_item_id" })
