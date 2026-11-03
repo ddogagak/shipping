@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties, type For
 
 type SortKey = "ordered_at" | "buyer_nickname" | "item_name" | "item_price";
 type SortDirection = "asc" | "desc";
-type SaleRow = { id: string; order_id: string; item_name: string; item_price: number; buyer_nickname: string; ordered_at: string };
+type SaleRow = { id: string; order_id: string; item_name: string; item_price: number; buyer_nickname: string; ordered_at: string; image_url?: string | null };
 type Buyer = { buyer_nickname: string; sales: number; order_count: number; item_count: number };
 type Period = { key: string; sales: number; order_count: number; item_count: number; sales_rows: SaleRow[] };
 type ItemPref = { includeCost: boolean; memo: string; deleted?: boolean };
@@ -111,6 +111,7 @@ export default function SalesManagementPage() {
   const [draftPrefs, setDraftPrefs] = useState<ItemPrefs>({});
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [productSearch, setProductSearch] = useState("");
+  const [expandedImage, setExpandedImage] = useState<{ url: string; name: string } | null>(null);
   const [saleSort, setSaleSort] = useState<{ key: SortKey; direction: SortDirection }>({ key: "ordered_at", direction: "desc" });
   const [granularity, setGranularity] = useState<"month" | "quarter">("month");
   const [selectedPeriod, setSelectedPeriod] = useState("");
@@ -149,6 +150,12 @@ export default function SalesManagementPage() {
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    if (!expandedImage) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setExpandedImage(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [expandedImage]);
 
   const periods = useMemo(() => granularity === "month" ? report?.monthly || [] : report?.quarterly || [], [granularity, report]);
   const selectedKey = periods.some(p => p.key === selectedPeriod) ? selectedPeriod : periods[0]?.key || "";
@@ -284,6 +291,14 @@ export default function SalesManagementPage() {
   const toggleSelected = (key: string) => setSelectedItems(current => current.includes(key) ? current.filter(x => x !== key) : [...current, key]);
 
   return <main style={pageStyle}>
+    {expandedImage && <div role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setExpandedImage(null); }} style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(17,24,39,.78)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div role="dialog" aria-modal="true" aria-label={expandedImage.name + " 이미지 미리보기"} style={{ position: "relative", maxWidth: "min(94vw,900px)", maxHeight: "92vh", background: "#fff", borderRadius: 12, padding: 12, boxShadow: "0 20px 60px rgba(0,0,0,.3)", display: "flex", flexDirection: "column", gap: 10 }}>
+        <button type="button" onClick={() => setExpandedImage(null)} aria-label="이미지 닫기" style={{ position: "absolute", zIndex: 1, right: 16, top: 16, border: 0, borderRadius: 999, background: "#111827", color: "#fff", width: 34, height: 34, fontSize: 22, cursor: "pointer" }}>×</button>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={expandedImage.url} alt={expandedImage.name} style={{ display: "block", maxWidth: "100%", maxHeight: "calc(92vh - 95px)", objectFit: "contain", borderRadius: 6 }} />
+        <div style={{ fontSize: 13, fontWeight: 700, padding: "0 5px 3px", overflowWrap: "anywhere" }}>{expandedImage.name}</div>
+      </div>
+    </div>}
     <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 20 }}>
       <div><h1 style={{ margin: 0, fontSize: 30 }}>매출관리</h1><p style={{ color: "#6b7280", margin: "6px 0 0" }}>와이스 판매와 방송판매재고 원가를 월별·분기별로 확인합니다.</p></div>
       <nav style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -363,7 +378,13 @@ export default function SalesManagementPage() {
               const pendingDelete = draft.deleted === true && !savedPrefs[row.key]?.deleted;
               return <tr key={row.key} style={{ background: pendingDelete ? "#fff7ed" : "#fff", opacity: pendingDelete ? 0.55 : 1 }}>
                 <td style={td}><input aria-label={row.item_name + " 선택"} type="checkbox" checked={selectedItems.includes(row.key)} onChange={() => toggleSelected(row.key)} /></td>
-                <td style={td}>{kstDateTime(row.ordered_at)}</td><td style={td}>{row.buyer_nickname || "(닉네임 없음)"}</td><td style={td}><b>{row.item_name}</b>{pendingDelete && <div style={{ color: "#b45309", fontSize: 11 }}>저장하면 삭제</div>}</td>
+                <td style={td}>{kstDateTime(row.ordered_at)}</td><td style={td}>{row.buyer_nickname || "(닉네임 없음)"}</td><td style={td}><div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+                  {row.image_url ? <button type="button" onClick={() => setExpandedImage({ url: row.image_url!, name: row.item_name })} aria-label={row.item_name + " 사진 크게 보기"} title="사진 크게 보기" style={{ width: 44, height: 44, padding: 0, border: "1px solid #e5e7eb", borderRadius: 7, overflow: "hidden", background: "#fff", flexShrink: 0, cursor: "zoom-in" }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={row.image_url} alt="" loading="lazy" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                  </button> : <span aria-label="사진 없음" title="사진 없음" style={{ display: "inline-flex", width: 44, height: 44, justifyContent: "center", alignItems: "center", border: "1px solid #e5e7eb", borderRadius: 7, background: "#f9fafb", color: "#9ca3af", fontSize: 11, flexShrink: 0 }}>사진 없음</span>}
+                  <div><b>{row.item_name}</b>{pendingDelete && <div style={{ color: "#b45309", fontSize: 11 }}>저장하면 삭제</div>}</div>
+                </div></td>
                 <td style={td}>{money(row.item_price)}원</td>
                 <td style={td}><button onClick={() => updateDraft(row.key, { includeCost: !draft.includeCost })} aria-label="판매원가 포함 여부 전환" style={{ ...button, minWidth: 44, padding: "5px 10px", background: draft.includeCost ? "#dcfce7" : "#f3f4f6", borderColor: draft.includeCost ? "#86efac" : "#d1d5db", color: draft.includeCost ? "#166534" : "#6b7280" }}>{draft.includeCost ? "Y" : "N"}</button></td>
                 <td style={td}>{row.unitCost == null ? <span style={{ color: "#b91c1c" }}>미매칭</span> : money(row.unitCost) + "원"}</td>
