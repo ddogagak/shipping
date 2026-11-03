@@ -60,7 +60,6 @@ function slotMetrics(sessions:Session[],minutes:number):Slot[]{
  }
  return slots;
 }
-function quantile(values:number[],q:number){if(!values.length)return 0;const a=[...values].sort((x,y)=>x-y);const p=(a.length-1)*q;const low=Math.floor(p),high=Math.ceil(p);return a[low]*(high-p)+a[high]*(p-low);}
 function BarGraph({slots,metric,minutes}:{slots:Slot[];metric:"amount"|"average";minutes:number}){
  const peak=Math.max(1,...slots.map(s=>s[metric]));
  return <div style={{overflowX:"auto"}}>
