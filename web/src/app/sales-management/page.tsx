@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties, type For
 
 type SortKey = "ordered_at" | "buyer_nickname" | "item_name" | "item_price";
 type SortDirection = "asc" | "desc";
-type SaleRow = { id: string; order_id: string; item_name: string; item_price: number; buyer_nickname: string; ordered_at: string; image_url?: string | null };
+type SaleRow = { id: string; order_id: string; item_name: string; item_price: number; buyer_nickname: string; ordered_at: string; image_url?: string | null; video_id?: string | null; sold_at?: string | null };
 type Buyer = { buyer_nickname: string; sales: number; order_count: number; item_count: number };
 type Period = { key: string; sales: number; order_count: number; item_count: number; sales_rows: SaleRow[] };
 type ItemPref = { includeCost: boolean; memo: string; deleted?: boolean };
@@ -25,6 +25,37 @@ const td: CSSProperties = { padding: "10px 12px", borderBottom: "1px solid #f3f4
 const panel: CSSProperties = { border: "1px solid #e5e7eb", borderRadius: 14, overflow: "hidden", background: "#fff", marginBottom: 16 };
 const panelTitle: CSSProperties = { padding: "14px 16px", borderBottom: "1px solid #e5e7eb", fontWeight: 800 };
 const chip: CSSProperties = { padding: "5px 8px", border: "1px solid #e5e7eb", borderRadius: 999, background: "#f9fafb", color: "#4b5563", fontSize: 12, display: "inline-flex", alignItems: "center" };
+
+type BroadcastMetrics = { count: number; durationMs: number; sales: number; itemCount: number };
+function broadcastMetrics(rows: SaleRow[], prefs: ItemPrefs, granularity: "month" | "quarter") {
+  const videos = new Map<string, { first: number; last: number; sales: number; itemCount: number }>();
+  for (const row of visibleRows(rows, prefs)) {
+    if (!row.video_id || !row.sold_at) continue;
+    const sold = Date.parse(row.sold_at);
+    if (!Number.isFinite(sold)) continue;
+    const record = videos.get(row.video_id) || { first: sold, last: sold, sales: 0, itemCount: 0 };
+    record.first = Math.min(record.first, sold);
+    record.last = Math.max(record.last, sold);
+    record.sales += Number(row.item_price || 0);
+    record.itemCount++;
+    videos.set(row.video_id, record);
+  }
+  const metrics = new Map<string, BroadcastMetrics>();
+  for (const record of videos.values()) {
+    const key = stockPeriodKey(new Date(record.first).toISOString(), granularity);
+    const summary = metrics.get(key) || { count: 0, durationMs: 0, sales: 0, itemCount: 0 };
+    summary.count++;
+    summary.durationMs += record.last - record.first;
+    summary.sales += record.sales;
+    summary.itemCount += record.itemCount;
+    metrics.set(key, summary);
+  }
+  return metrics;
+}
+function broadcastDuration(ms: number) {
+  const minutes = Math.round(ms / 60000);
+  return Math.floor(minutes / 60) + "시간 " + (minutes % 60) + "분";
+}
 
 function itemSortName(value: string) {
   const name = String(value || "").normalize("NFKC").trim();
@@ -172,6 +203,8 @@ export default function SalesManagementPage() {
   const rawCurrent = periods.find(p => p.key === selectedKey);
   const currentRows = useMemo(() => visibleRows(rawCurrent?.sales_rows || [], savedPrefs), [rawCurrent, savedPrefs]);
   const currentSummary = useMemo(() => summarizeRows(rawCurrent?.sales_rows || [], savedPrefs), [rawCurrent, savedPrefs]);
+  const broadcastByPeriod = useMemo(() => broadcastMetrics(report?.all_time_sales_rows || [], savedPrefs, granularity), [report, savedPrefs, granularity]);
+  const currentBroadcast = broadcastByPeriod.get(selectedKey) || { count: 0, durationMs: 0, sales: 0, itemCount: 0 };
   const currentBuyers = useMemo(() => buyersFromRows(rawCurrent?.sales_rows || [], savedPrefs), [rawCurrent, savedPrefs]);
   const allTimeBuyers = useMemo(() => buyersFromRows(report?.all_time_sales_rows || [], savedPrefs), [report, savedPrefs]);
   const allTimeByBuyer = useMemo(() => new Map(allTimeBuyers.map(buyer => [buyer.buyer_nickname, buyer])), [allTimeBuyers]);
@@ -368,6 +401,12 @@ export default function SalesManagementPage() {
         </article>
       </section>
 
+      <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(195px,1fr))", gap: 12, marginTop: 14 }}>
+        <article style={card}><span style={label}>방송 횟수 · {selectedKey ? periodLabel(selectedKey) : "선택 기간"}</span><strong style={value}>{money(currentBroadcast.count)}회</strong></article>
+        <article style={card}><span style={label}>누적 방송시간 (판매 구간 추정)</span><strong style={value}>{broadcastDuration(currentBroadcast.durationMs)}</strong><small style={{ color: "#6b7280" }}>방송별 최초~최종 판매시각 합산</small></article>
+        <article style={card}><span style={label}>방송 매출</span><strong style={value}>{money(currentBroadcast.sales)}원</strong><small style={{ color: "#6b7280" }}>방송 ID·판매시각 확인된 상품 기준</small></article>
+        <article style={card}><span style={label}>시간당 방송 매출</span><strong style={value}>{currentBroadcast.durationMs > 0 ? money(currentBroadcast.sales / (currentBroadcast.durationMs / 3600000)) + "원" : "-"}</strong><small style={{ color: "#6b7280" }}>누적 판매 구간이 0분이면 계산하지 않음</small></article>
+      </section>
       <section style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", padding: "12px 14px", margin: "14px 0 20px", background: "#f9fafb", borderRadius: 10, color: "#4b5563", fontSize: 12 }}>
         <span>가져온 와이스 주문 {money(Number(report.imported_order_count || 0))}건</span><span>집계 주문 {money(currentSummary.order_count)}건</span><span>키워드 제외 아이템 {money(Number(report.excluded_item_count || 0))}개</span><span>마지막 동기화 {kstDate(report.last_imported_at)}</span>
       </section>
@@ -376,9 +415,10 @@ export default function SalesManagementPage() {
         <div style={panelTitle}>{granularity === "month" ? "월별" : "분기별"} 실적</div>
         {periods.length === 0 ? <div style={{ padding: 24, color: "#6b7280" }}>표시할 자료가 없습니다. 와이스 주문을 동기화해 주세요.</div> :
           <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 620, fontSize: 13 }}>
-            <thead><tr style={{ background: "#f9fafb" }}><th style={th}>기간</th><th style={th}>매출</th><th style={th}>주문</th><th style={th}>판매수량</th><th style={th}>선택</th></tr></thead>
-            <tbody>{periods.map(p => { const vis = summarizeRows(p.sales_rows, savedPrefs); return <tr key={p.key} onClick={() => setSelectedPeriod(p.key)} style={{ cursor: "pointer", background: p.key === selectedKey ? "#eff6ff" : "#fff" }}><td style={td}><b>{periodLabel(p.key)}</b></td><td style={td}>{money(vis.sales)}원</td><td style={td}>{money(vis.order_count)}건</td><td style={td}>{money(vis.item_count)}개</td><td style={td}>{p.key === selectedKey ? "●" : ""}</td></tr>; })}</tbody>
+            <thead><tr style={{ background: "#f9fafb" }}><th style={th}>기간</th><th style={th}>매출</th><th style={th}>주문</th><th style={th}>판매수량</th><th style={th}>방송 횟수</th><th style={th}>누적 방송시간*</th><th style={th}>방송 매출</th><th style={th}>시간당 매출</th><th style={th}>선택</th></tr></thead>
+            <tbody>{periods.map(p => { const vis = summarizeRows(p.sales_rows, savedPrefs); return <tr key={p.key} onClick={() => setSelectedPeriod(p.key)} style={{ cursor: "pointer", background: p.key === selectedKey ? "#eff6ff" : "#fff" }}><td style={td}><b>{periodLabel(p.key)}</b></td><td style={td}>{money(vis.sales)}원</td><td style={td}>{money(vis.order_count)}건</td><td style={td}>{money(vis.item_count)}개</td>{(() => { const b = broadcastByPeriod.get(p.key) || { count: 0, durationMs: 0, sales: 0, itemCount: 0 }; return <><td style={td}>{money(b.count)}회</td><td style={td}>{broadcastDuration(b.durationMs)}</td><td style={td}>{money(b.sales)}원</td><td style={td}>{b.durationMs > 0 ? money(b.sales / (b.durationMs / 3600000)) + "원" : "-"}</td></>; })()}<td style={td}>{p.key === selectedKey ? "●" : ""}</td></tr>; })}</tbody>
           </table></div>}
+        <div style={{ padding: "8px 12px", color: "#6b7280", fontSize: 12 }}>* 방송시간 = 동일 videoId 내 최초 판매~최종 판매 간격이며 실제 송출시간과 다릅니다. 방송은 최초 판매일 기준 기간에 합산합니다. videoId 또는 soldAt 누락 상품은 방송 통계에서 제외됩니다.</div>
       </section>
 
       <section style={panel}>
