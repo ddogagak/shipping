@@ -90,11 +90,11 @@
    const detailUrl=new URL("/r0.app/sellers/myMarket/orderChains/"+encodeURIComponent(first.id),location.origin);
    const headers={Accept:"application/json",Authorization:auth,"x-wyyyes-agent":"web/web (Original)","x-wyyyes-version":"web (Original)/no_ota"};
    const detailRes=await originalFetch.call(window,detailUrl.toString(),{credentials:"include",headers});
-   if(!detailRes.ok)throw Error("와이스 주문 상세 조회 HTTP "+detailRes.status+" (아이템별 판매시간 수집 불가)");
+   if(!detailRes.ok){console.warn("DDOGA: 와이스 상세 API를 확인할 수 없어 목록 데이터만 사용해.",detailRes.status);return out;}
    const detailData=await detailRes.json();
    const detail=detailData.result;
    if(!detail||String(detail.id)!==String(first.id)||!Array.isArray(detail.stocks))
-    throw Error("와이스 주문 상세 응답 구조가 달라 아이템별 판매시간을 확인하지 못했어.");
+    {console.warn("DDOGA: 상세 응답 구조가 예상과 달라 목록 데이터만 사용해.");return out;}
    const byId=new Map(detail.stocks.map(s=>[String(s.id),s]));
    first.stocks=first.stocks.map(s=>({...s,soldAt:byId.get(String(s.id))?.soldAt??s.soldAt??null}));
    const rest=incomplete.slice(1);
@@ -104,10 +104,10 @@
     await Promise.all(batch.map(async order=>{
      const url=new URL("/r0.app/sellers/myMarket/orderChains/"+encodeURIComponent(order.id),location.origin);
      const res=await originalFetch.call(window,url.toString(),{credentials:"include",headers});
-     if(!res.ok)throw Error("와이스 주문 "+order.id+" 상세 조회 HTTP "+res.status);
+     if(!res.ok){console.warn("DDOGA: 주문 상세 시간 조회 실패",order.id,res.status);return;}
      const data=await res.json();
      const d=data.result;
-     if(!d||String(d.id)!==String(order.id)||!Array.isArray(d.stocks))throw Error("와이스 주문 "+order.id+" 상세 응답 오류");
+     if(!d||String(d.id)!==String(order.id)||!Array.isArray(d.stocks)){console.warn("DDOGA: 상세 응답 구조 불일치",order.id);return;}
      const stocks=new Map(d.stocks.map(s=>[String(s.id),s]));
      order.stocks=order.stocks.map(s=>({...s,soldAt:stocks.get(String(s.id))?.soldAt??s.soldAt??null}));
     }));
