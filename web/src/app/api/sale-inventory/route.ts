@@ -242,7 +242,7 @@ export async function PATCH(req: Request) {
         !Number.isSafeInteger(qty) || qty < 1 ||
         !Number.isSafeInteger(component) || component < 1
       ))) return NextResponse.json({ok:false,message:"수정할 매입가, 박스 수량, 박스당 구성을 다시 확인해줘."},{status:400});
-      const {data,error} = await sb.rpc("reconcile_purchase_box_units",{
+      const {data,error} = await sb.rpc("reconcile_purchase_box_units_v2",{
         p_item_id:body.purchase_item_id,
         p_mode:mode,
         p_expected_price:Number(expected.unit_price),
@@ -252,6 +252,7 @@ export async function PATCH(req: Request) {
         p_new_price:price,
         p_new_quantity:mode==="box"?qty:Number(expected.quantity),
         p_new_component:mode==="box"?component:Number(expected.component_count),
+        p_confirmed_old_component:mode==="box"?Number(body.confirmed_old_component):Number(expected.component_count),
       });
       if(error) return NextResponse.json({ok:false,message:error.message||"매입 단위 수정 실패"},{status:409});
       return NextResponse.json({ok:true,item:data});
