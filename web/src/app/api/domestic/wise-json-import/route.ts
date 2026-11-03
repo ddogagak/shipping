@@ -22,6 +22,21 @@ function wisePhone(o:RawOrder){
 }
 function orderNumberKey(v:unknown){return key(asText(v).replace(/-C\d+$/i,""))}
 function batches<T>(a:T[],n=200){const out:T[][]=[];for(let i=0;i<a.length;i+=n)out.push(a.slice(i,i+n));return out}
+// A list-only Wise JSON omits soldAt/videoId. Never erase already-synced item metadata.
+async function upsertWisePhotosPreservingTimes(db:ReturnType<typeof createServiceRoleClient>,rows:Array<{wise_stock_id:number;sold_at:string|null;video_id:string|null;[key:string]:unknown}>,errorPrefix:string){
+ for(const chunk of batches(rows)){
+  const ids=chunk.map(row=>row.wise_stock_id);
+  const {data:existing,error:readError}=await db.from("domestic_wise_item_photo").select("wise_stock_id,sold_at,video_id").in("wise_stock_id",ids);
+  if(readError)throw new Error(errorPrefix+": 기존 상품정보 조회 실패: "+readError.message);
+  const oldById=new Map((existing??[]).map(row=>[Number(row.wise_stock_id),row]));
+  const safeRows=chunk.map(row=>{
+   const old=oldById.get(row.wise_stock_id);
+   return {...row,sold_at:row.sold_at??old?.sold_at??null,video_id:row.video_id??old?.video_id??null};
+  });
+  const {error}=await db.from("domestic_wise_item_photo").upsert(safeRows,{onConflict:"wise_stock_id"});
+  if(error)throw new Error(errorPrefix+": "+error.message);
+ }
+}
 export async function POST(req:Request){
  try{
   const form=await req.formData();
@@ -47,10 +62,7 @@ export async function POST(req:Request){
     image_url:s.thumbnail??null,
     imported_at:importedAt
    })));
-   for(const chunk of batches(salesRows)){
-    const {error}=await db.from("domestic_wise_item_photo").upsert(chunk,{onConflict:"wise_stock_id"});
-    if(error)throw new Error("와이스 매출 자료 저장 실패: "+error.message);
-   }
+   await upsertWisePhotosPreservingTimes(db,salesRows,"와이스 매출 자료 저장 실패");
    return NextResponse.json({ok:true,sales_saved_orders:salesOrders.length,sales_saved_items:salesRows.length,sold_at_count:salesRows.filter(row=>row.sold_at).length,missing_sold_at_count:salesRows.filter(row=>!row.sold_at).length,imported_at:importedAt});
   }
   // Page through all orders; otherwise Supabase's default row cap hides older phone-only changes.
@@ -264,7 +276,7 @@ export async function POST(req:Request){
    if(error)throw new Error("와이스 배송 스냅샷 저장 실패: "+error.message);
   }
   const photoRows=orders.flatMap(o=>(o.stocks??[]).filter(s=>Number.isSafeInteger(s.id)).map(s=>({wise_stock_id:s.id,wise_order_id:o.id,buyer_nickname:asText(o.user?.nickname),ordered_at:validDate(o.createdAt)??new Date().toISOString(),sold_at:validDate(s.soldAt),video_id:asText(s.videoId)||null,item_name:asText(s.name),item_price:Number(s.price??0),image_url:s.thumbnail??null})));
-  for(const chunk of batches(photoRows)){const {error}=await db.from("domestic_wise_item_photo").upsert(chunk,{onConflict:"wise_stock_id"});if(error)throw new Error("와이스 상품정보 저장 실패: "+error.message)}
+  await upsertWisePhotosPreservingTimes(db,photoRows,"와이스 상품정보 저장 실패");
   const selectedRaw=asText(form.get("selected_ids"));
   const selectedIds=selectedRaw?JSON.parse(selectedRaw):null;
   if(selectedIds!==null&&(!Array.isArray(selectedIds)||selectedIds.length>40||!selectedIds.every(Number.isSafeInteger)||new Set(selectedIds).size!==selectedIds.length))
