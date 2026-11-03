@@ -49,7 +49,7 @@ function buildLifecycle(buyers:Buyer[],asOf:number):Lifecycle[]{
   const high=buyer.total>=highCutoff&&buyer.total>0;
   let stage="관찰 중";
   if(ageDays<30)stage=high?"최근 유입 큰손":"최근 유입";
-  else if(ageDays>=60&&bins[1]>0&&bins[2]>0)stage="지속 구매형";
+  else if(ageDays>=90&&bins[1]>0&&bins[2]>0)stage="지속 구매형";
   else if(ageDays>=60&&high&&earlyShare>=0.75&&bins[1]<bins[0]*0.3)stage="초반 집중형";
   else if(ageDays>=60&&idleDays>=30)stage="30일 이상 미구매";
   else if(ageDays>=30&&high&&earlyShare>=0.75)stage="초반 집중 관찰";
@@ -80,7 +80,6 @@ export default function CustomerAnalysis(){
  const detail=all.find(c=>c.key===selected);
  const asOf=Date.now();
  const lifecycle=useMemo(()=>buildLifecycle(all,asOf),[all,asOf]);
- const lifeById=useMemo(()=>new Map(lifecycle.map(x=>[x.buyer.key,x])),[lifecycle]);
  const full60=lifecycle.filter(x=>x.observed60),full90=lifecycle.filter(x=>x.observed90);
  const accumulated=[0,1,2].map((i)=>({index:i,eligible:lifecycle.filter(x=>x.ageDays>=(i+1)*30),amount:lifecycle.filter(x=>x.ageDays>=(i+1)*30).reduce((v,x)=>v+x.bins[i],0)}));
  const concentration=[1,5,10].map(n=>({n,amount:all.slice(0,n).reduce((v,x)=>v+x.total,0),ratio:percent(all.slice(0,n).reduce((v,x)=>v+x.total,0),all.reduce((v,x)=>v+x.total,0))}));
@@ -136,7 +135,7 @@ export default function CustomerAnalysis(){
       <p style={{fontSize:11,color:"#64748b",lineHeight:1.6}}>구간별로 관찰 가능한 고객 집단이 다를 수 있어. 동일 고객 비교가 필요하면 아래 표에서 60일 이상 관찰한 고객을 봐.</p>
      </div>
      <div><h3 style={{fontSize:15}}>고객 유형 분포 · 탐색용 규칙</h3><div style={{display:"flex",flexWrap:"wrap",gap:8}}>{countStages.filter(x=>x.count>0).map(x=><div key={x.stage} style={{border:"1px solid #e2e8f0",borderRadius:9,padding:"10px 12px",minWidth:130}}><div style={{fontSize:12,color:"#475569"}}>{x.stage}</div><div style={{fontWeight:800,fontSize:19,marginTop:4}}>{x.count}명</div><div style={{fontSize:11,color:"#64748b"}}>{won(x.amount)}원 누적</div></div>)}</div>
-      <p style={{fontSize:11,color:"#64748b",lineHeight:1.6}}>‘큰손’은 누적 구매액 상위 20%, ‘초반 집중형’은 60일 관찰 가능·첫 30일 매출 75% 이상·31~60일 매출이 첫 30일의 30% 미만인 고객. ‘지속 구매형’은 31~60일과 61~90일 모두 구매 기록이 있는 고객이야. 유형은 참고용이며 고객의 실제 소비 여력이나 이탈 의도를 뜻하지 않아.</p>
+      <p style={{fontSize:11,color:"#64748b",lineHeight:1.6}}>‘큰손’은 누적 구매액 상위 20%, ‘초반 집중형’은 60일 관찰 가능·첫 30일 매출 75% 이상·31~60일 매출이 첫 30일의 30% 미만인 고객. ‘지속 구매형’은 첫 구매 후 90일 관찰 가능하고 30~59일과 60~89일 모두 구매 기록이 있는 고객이야. 유형은 참고용이며 고객의 실제 소비 여력이나 이탈 의도를 뜻하지 않아.</p>
      </div>
     </div>
     <h3 style={{fontSize:15,marginTop:18}}>고객별 소비 흐름 (누적 매출 상위 30명)</h3>
