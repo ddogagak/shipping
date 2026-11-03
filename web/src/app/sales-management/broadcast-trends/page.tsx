@@ -85,25 +85,67 @@ function CumulativeGraph({slots,minutes}:{slots:Slot[];minutes:number}){
   </svg>
  </div>;
 }
+
+type ClockSlot={hour:number;amount:number;items:number;sessionCount:number;exposureMinutes:number;perSession:number;perHour:number};
+const kstHour=(ts:number)=>Number(new Intl.DateTimeFormat("en-GB",{timeZone:"Asia/Seoul",hour:"2-digit",hourCycle:"h23"}).format(new Date(ts)));
+const clockLabel=(hour:number)=>String(hour).padStart(2,"0")+":00";
+function clockMetrics(sessions:Session[]):ClockSlot[]{
+ const slots=Array.from({length:24},(_,hour)=>({hour,amount:0,items:0,sessionCount:0,exposureMinutes:0,perSession:0,perHour:0}));
+ const seen=Array.from({length:24},()=>new Set<string>());
+ for(const session of sessions){
+  for(const sale of session.salesList){
+   const hour=kstHour(sale.at),slot=slots[hour];
+   slot.amount+=sale.amount;slot.items++;
+   seen[hour].add(session.id);
+  }
+  // First-to-last sale is only a proxy for when this broadcast was active.
+  // Split the interval by actual hour boundaries in KST (Korea has no DST).
+  for(let t=session.first;t<session.last;){
+   const boundary=(Math.floor(t/3600000)+1)*3600000;
+   const next=Math.min(session.last,boundary);
+   slots[kstHour(t)].exposureMinutes+=(next-t)/60000;
+   t=next;
+  }
+ }
+ for(const slot of slots){
+  slot.sessionCount=seen[slot.hour].size;
+  slot.perSession=slot.sessionCount?slot.amount/slot.sessionCount:0;
+  slot.perHour=slot.exposureMinutes?slot.amount/(slot.exposureMinutes/60):0;
+ }
+ return slots;
+}
+function ClockChart({slots,metric}:{slots:ClockSlot[];metric:"amount"|"perHour"}){
+ const max=Math.max(1,...slots.map(s=>s[metric]));
+ return <div style={{overflowX:"auto"}}><div style={{display:"flex",gap:5,minWidth:850,height:245,padding:"30px 6px 0",alignItems:"flex-end",borderBottom:"1px solid #cbd5e1"}}>
+ {slots.map(slot=><div key={slot.hour} title={clockLabel(slot.hour)+"~"+clockLabel((slot.hour+1)%24)+" · 매출 "+money(slot.amount)+"원 · 판매 "+slot.items+"개 · 판매 발생 방송 "+slot.sessionCount+"회 · 추정 방송시간 "+slot.exposureMinutes.toFixed(0)+"분"} style={{flex:1,minWidth:27,height:"100%",display:"flex",flexDirection:"column",justifyContent:"flex-end",alignItems:"center",gap:3}}>
+  <span style={{fontSize:10,color:"#475569"}}>{slot[metric]>=10000?Math.round(slot[metric]/10000)+"만":money(slot[metric])}</span>
+  <div style={{height:Math.max(2,Math.round(slot[metric]/max*170)),width:"85%",borderRadius:"5px 5px 0 0",background:metric==="amount"?"#6366f1":"#0d9488"}}/>
+  <span style={{fontSize:10,color:"#64748b",height:27}}>{String(slot.hour).padStart(2,"0")}</span>
+ </div>)}</div></div>;
+}
+
 export default function BroadcastTrendsPage(){
  const [report,setReport]=useState<Report|null>(null);
  const [loading,setLoading]=useState(true),[error,setError]=useState("");
  const [month,setMonth]=useState("all"),[step,setStep]=useState(30);
  const [metric,setMetric]=useState<"amount"|"average">("average");
  const [selected,setSelected]=useState("all");
+ const [clockMetric,setClockMetric]=useState<"amount"|"perHour">("amount");
  useEffect(()=>{let alive=true;fetch("/api/sales-management",{cache:"no-store"}).then(async r=>{const d=await r.json();if(!r.ok||!d.ok)throw Error(d.message||"방송 데이터를 불러오지 못했어.");if(alive)setReport(d);}).catch(e=>{if(alive)setError(String(e.message||e));}).finally(()=>{if(alive)setLoading(false);});return()=>{alive=false;};},[]);
  const {sessions,unmapped}=useMemo(()=>buildSessions(report?.all_time_sales_rows||[],new Set((report?.settings?.item_settings||[]).filter(p=>p.deleted).map(p=>p.id))),[report]);
  const months=useMemo(()=>Array.from(new Set(sessions.map(s=>s.month))).sort().reverse(),[sessions]);
  const inMonth=useMemo(()=>sessions.filter(s=>month==="all"||s.month===month),[sessions,month]);
  const active=useMemo(()=>selected==="all"?inMonth:inMonth.filter(s=>s.id===selected),[inMonth,selected]);
  const slots=useMemo(()=>slotMetrics(active,step),[active,step]);
+ const clockSlots=useMemo(()=>clockMetrics(active),[active]);
+ const peakClock=clockSlots.reduce<ClockSlot|null>((best,s)=>!best||s.amount>best.amount?s:best,null);
  const total=active.reduce((s,x)=>s+x.sales,0),allMs=active.reduce((s,x)=>s+x.duration,0),allItems=active.reduce((s,x)=>s+x.items,0);
  const ratio=(hours:number)=>total?active.reduce((sum,s)=>sum+s.salesList.filter(x=>x.at-s.first<=hours*3600000).reduce((a,x)=>a+x.amount,0),0)/total*100:0;
  const continued=(hours:number)=>active.filter(s=>s.duration>=hours*3600000).length;
  const threshold=(pct:number)=>{if(!slots.length)return "-";const x=slots.find(s=>s.cumulative>=pct);return x?((x.index+1)*step)+"분":"> "+slots.length*step+"분";};
  return <main style={{maxWidth:1380,margin:"auto",padding:"24px 20px 60px",color:"#0f172a"}}>
   <div style={{display:"flex",justifyContent:"space-between",gap:12,flexWrap:"wrap",alignItems:"center",marginBottom:20}}>
-   <div><div style={{fontSize:12,color:"#64748b",marginBottom:6}}>매출관리 / 방송 트렌드</div><h1 style={{fontSize:29,margin:0}}>방송 경과시간별 매출 분석</h1><p style={{...muted,margin:"8px 0 0"}}>첫 판매시각 기준 · 방송별 매출 흐름과 적정 종료 시점 탐색</p></div>
+   <div><div style={{fontSize:12,color:"#64748b",marginBottom:6}}>매출관리 / 방송 트렌드</div><h1 style={{fontSize:29,margin:0}}>방송 트렌드 분석</h1><p style={{...muted,margin:"8px 0 0"}}>첫 판매시각 기준 · 방송별 매출 흐름과 적정 종료 시점 탐색</p></div>
    <div style={{display:"flex",gap:8}}><Link href="/sales-management" style={{...control,textDecoration:"none"}}>← 매출관리</Link><Link href="/domestic-upload" style={{...control,textDecoration:"none"}}>주문 동기화</Link></div>
   </div>
   {loading&&<p>방송 데이터 불러오는 중…</p>}
@@ -123,6 +165,30 @@ export default function BroadcastTrendsPage(){
      ["2시간 이내 매출 비중",ratio(2).toFixed(1)+"%","2시간 이상 지속 "+continued(2)+"회"],
      ["3시간 이내 매출 비중",ratio(3).toFixed(1)+"%","3시간 이상 지속 "+continued(3)+"회"]
     ].map(([title,main,sub])=><div key={title} style={frame}><div style={{...muted,fontWeight:700}}>{title}</div><strong style={{display:"block",fontSize:23,margin:"10px 0 5px",letterSpacing:"-.035em"}}>{main}</strong><span style={muted}>{sub}</span></div>)}
+   </section>
+   <section style={{...frame,marginBottom:16}}>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
+     <div><h2 style={{fontSize:19,margin:"0 0 6px"}}>실제 판매 시간대 (한국시간)</h2><p style={{...muted,margin:0}}>방송 경과시간이 아니라 실제 시각 기준. 자정을 넘긴 방송도 판매가 발생한 시각에 각각 분배해.</p></div>
+     <div style={{display:"flex",gap:6}}><button onClick={()=>setClockMetric("amount")} style={{...control,background:clockMetric==="amount"?"#e0e7ff":"#fff"}}>시간대별 총매출</button><button onClick={()=>setClockMetric("perHour")} style={{...control,background:clockMetric==="perHour"?"#d1fae5":"#fff"}}>추정 방송 1시간당</button></div>
+    </div>
+    <div style={{display:"flex",gap:12,flexWrap:"wrap",marginTop:14,fontSize:13}}>
+     <span>매출 최고 시간대 <b>{peakClock&&peakClock.amount>0?clockLabel(peakClock.hour)+"~"+clockLabel((peakClock.hour+1)%24):"-"}</b></span>
+     <span>해당 시간대 매출 <b>{money(peakClock?.amount||0)}원</b></span>
+     <span style={muted}>기간·방송 선택 필터가 동일하게 적용돼.</span>
+    </div>
+    <ClockChart slots={clockSlots} metric={clockMetric}/>
+    <div style={{overflowX:"auto",marginTop:18}}>
+     <table style={{borderCollapse:"collapse",width:"100%",fontSize:13}}>
+      <thead><tr>{["판매 시간대 (KST)","총매출","판매 수량","판매 발생 방송","추정 방송시간","추정 시간당 매출"].map(label=><th key={label} style={th}>{label}</th>)}</tr></thead>
+      <tbody>{[...clockSlots].sort((a,b)=>b.amount-a.amount).map(slot=><tr key={slot.hour}>
+       <td style={{...td,textAlign:"left",fontWeight:700}}>{clockLabel(slot.hour)}~{clockLabel((slot.hour+1)%24)}</td>
+       <td style={td}>{money(slot.amount)}원</td><td style={td}>{money(slot.items)}개</td>
+       <td style={td}>{slot.sessionCount}회</td><td style={td}>{Math.round(slot.exposureMinutes)}분</td>
+       <td style={td}>{slot.exposureMinutes?money(slot.perHour)+"원":"-"}</td>
+      </tr>)}</tbody>
+     </table>
+    </div>
+    <p style={{...muted,lineHeight:1.6,margin:"12px 0 0"}}>해석 주의: 총매출은 그 시각에 실제 판매된 금액이야. 다만 방송 노출시간은 첫 판매~마지막 판매 사이를 방송 중이었다고 가정해 계산한 추정치라서, '추정 시간당 매출'은 실제 송출 시간 기준과 다를 수 있어. 방송이 아예 없던 시간대는 판매 기회도 적기 때문에 매출이 낮다고 고객 수요가 낮다는 뜻은 아니야.</p>
    </section>
    <section style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,480px),1fr))",gap:16,marginBottom:16}}>
     <article style={frame}>
