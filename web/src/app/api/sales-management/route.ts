@@ -88,7 +88,7 @@ function addPeriod(map: Map<string, any>, key: string, order: any, items: any[])
   const buyerName = String(order.buyer_nickname || "").trim() || "(닉네임 없음)";
   for (const item of items) {
     const orderId = String(order.id);
-    const row = { id: String(item.id), order_id: orderId, item_name: item.item_name, item_price: money(item.item_price), buyer_nickname: buyerName, ordered_at: order.ordered_at, image_url: item.image_url || null };
+    const row = { id: String(item.id), order_id: orderId, item_name: item.item_name, item_price: money(item.item_price), buyer_nickname: buyerName, ordered_at: item.sold_at || order.ordered_at, image_url: item.image_url || null };
     bucket.sales += row.item_price;
     bucket.item_count += 1;
     bucket.order_ids.add(orderId);
@@ -151,14 +151,14 @@ async function readSettings() {
 
 async function buildReport(excludedKeywords: string[]) {
   const terms = excludedKeywords.map(term => term.toLowerCase());
-  const itemRows = await readAll("domestic_wise_item_photo", "wise_stock_id,wise_order_id,buyer_nickname,ordered_at,item_name,item_price,image_url,imported_at");
+  const itemRows = await readAll("domestic_wise_item_photo", "wise_stock_id,wise_order_id,buyer_nickname,ordered_at,sold_at,item_name,item_price,image_url,imported_at");
   const orders = new Map<string, any>();
   let lastImportedAt = "";
   for (const row of itemRows) {
     const id = String(row.wise_order_id || "");
     if (!id) continue;
     const order = orders.get(id) || { id, buyer_nickname: row.buyer_nickname || "", ordered_at: row.ordered_at, items: [] };
-    order.items.push({ id: String(row.wise_stock_id), item_name: String(row.item_name || ""), item_price: money(row.item_price), image_url: String(row.image_url || "") || null });
+    order.items.push({ id: String(row.wise_stock_id), item_name: String(row.item_name || ""), item_price: money(row.item_price), sold_at: row.sold_at || null, image_url: String(row.image_url || "") || null });
     orders.set(id, order);
     const imported = String(row.imported_at || "");
     if (imported > lastImportedAt) lastImportedAt = imported;
@@ -173,8 +173,6 @@ async function buildReport(excludedKeywords: string[]) {
   let wiseGrossTotal = 0;
   for (const order of orders.values()) {
     wiseGrossTotal += order.items.reduce((sum: number, item: any) => sum + money(item.item_price), 0);
-    const date = kstDate(order.ordered_at);
-    if (!date) continue;
     const items = order.items.filter((item: any) => {
       const haystack = item.item_name.normalize("NFKC").toLowerCase();
       const excluded = terms.some(term => haystack.includes(term));
@@ -184,13 +182,16 @@ async function buildReport(excludedKeywords: string[]) {
     if (!items.length) continue;
     includedOrderCount++;
     includedItemCount += items.length;
-    const monthKey = date.slice(0, 7);
-    const quarterKey = date.slice(0, 4) + "-Q" + (Math.floor((Number(date.slice(5, 7)) - 1) / 3) + 1);
-    addPeriod(monthly, monthKey, order, items);
-    addPeriod(quarterly, quarterKey, order, items);
     const buyerName = String(order.buyer_nickname || "").trim() || "(닉네임 없음)";
     for (const item of items) {
-      allTimeSalesRows.push({ id: String(item.id), order_id: String(order.id), item_name: item.item_name, item_price: money(item.item_price), buyer_nickname: buyerName, ordered_at: order.ordered_at });
+      const itemTime = item.sold_at || order.ordered_at;
+      const date = kstDate(itemTime);
+      if (!date) continue;
+      const monthKey = date.slice(0, 7);
+      const quarterKey = date.slice(0, 4) + "-Q" + (Math.floor((Number(date.slice(5, 7)) - 1) / 3) + 1);
+      addPeriod(monthly, monthKey, order, [item]);
+      addPeriod(quarterly, quarterKey, order, [item]);
+      allTimeSalesRows.push({ id: String(item.id), order_id: String(order.id), item_name: item.item_name, item_price: money(item.item_price), buyer_nickname: buyerName, ordered_at: itemTime, image_url: item.image_url || null });
     }
   }
   return {
