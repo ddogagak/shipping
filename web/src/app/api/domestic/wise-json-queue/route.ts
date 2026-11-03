@@ -43,6 +43,8 @@ async function processOne(wise_order_id: number, action: "approve"|"ignore") {
    const {error:it}=await db.from("domestic_order_item").insert(items.map(x=>({order_id:id,item_text:x.item_name,price:x.item_price})));
    if(it)throw new Error("주문 등록됨, 상품정보 저장 실패: "+it.message);
   }
+  const {error:linkError}=await db.from("domestic_wise_order_link").upsert({wise_order_id,domestic_order_id:id},{onConflict:"wise_order_id"});
+  if(linkError)throw new Error("주문 등록됨, 와이스 ID 연결 실패: "+linkError.message);
   const {error:re}=await db.from("domestic_wise_import_queue").update({review_status:"reviewed"}).eq("wise_order_id",wise_order_id);
   if(re)throw new Error("주문 등록됨, 대기열 상태 저장 실패: "+re.message);
   return NextResponse.json({ok:true,order_id:id});
