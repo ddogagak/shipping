@@ -210,7 +210,12 @@ export default function SalesManagementPage() {
     const boxCost = Number(row.box_cost_price || 0) || Number(row.unit_cost_price || 0) * Math.max(1, Number(row.component_count || 1));
     return sum + (Number.isFinite(boxCost) ? boxCost : 0) * Math.max(0, Number(row.purchase_quantity || 0));
   }, 0);
+  const cumulativeInventoryCost = inventory.reduce((sum, row) => {
+    const boxCost = Number(row.box_cost_price || 0) || Number(row.unit_cost_price || 0) * Math.max(1, Number(row.component_count || 1));
+    return sum + (Number.isFinite(boxCost) ? boxCost : 0) * Math.max(0, Number(row.purchase_quantity || 0));
+  }, 0);
   const grossAfterCogs = currentSummary.sales - currentInventoryCost;
+  const cumulativeGrossAfterCogs = Number(report?.wise_gross_total || 0) - cumulativeInventoryCost;
   const allRowsById = useMemo(() => new Map((report?.all_time_sales_rows || []).map(row => [row.id, row])), [report]);
   const deletedItems = Object.entries(savedPrefs).filter(([, pref]) => pref.deleted);
   const hasUnsaved = JSON.stringify(savedPrefs) !== JSON.stringify(draftPrefs);
@@ -343,7 +348,16 @@ export default function SalesManagementPage() {
       <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12 }}>
         <article style={{ ...card, background: "#eff6ff", borderColor: "#bfdbfe" }}><span style={label}>매출 · {selectedKey ? periodLabel(selectedKey) : "선택 기간"}</span><strong style={{ ...value, color: "#1d4ed8" }}>{money(currentSummary.sales)}원</strong><small style={{ color: "#6b7280" }}>필터·삭제 적용 · 주문 {money(currentSummary.order_count)}건</small></article>
         <article style={card}><span style={label}>방송판매재고 매입금액 · {selectedKey ? periodLabel(selectedKey) : "선택 기간"}</span><strong style={value}>{money(currentInventoryCost)}원</strong><small style={{ color: "#6b7280" }}>입고완료 주문의 상품 행 {money(currentInventoryRows.length)}건 · 숨김/판매완료 포함</small></article>
-        <article style={{ ...card, background: "#f0fdf4", borderColor: "#bbf7d0" }}><span style={label}>매출 − 방송재고 매입금액</span><strong style={{ ...value, color: grossAfterCogs >= 0 ? "#15803d" : "#b91c1c" }}>{money(grossAfterCogs)}원</strong><small style={{ color: "#6b7280" }}>선택 기간 매출에서 전체 방송재고 매입액을 뺀 금액</small></article>
+        <article style={{ ...card, background: "#f0fdf4", borderColor: "#bbf7d0" }}>
+          <span style={label}>매출 − 방송재고 매입금액</span>
+          <strong style={{ ...value, color: grossAfterCogs >= 0 ? "#15803d" : "#b91c1c" }}>{money(grossAfterCogs)}원</strong>
+          <small style={{ color: "#6b7280" }}>선택 기간 매출에서 해당 기간 방송재고 매입액을 뺀 금액</small>
+          <div style={{ borderTop: "1px solid #bbf7d0", marginTop: 14, paddingTop: 12 }}>
+            <span style={{ ...label, display: "block" }}>전체 누적 판매금액 − 방송재고 누적 매입금액</span>
+            <strong style={{ display: "block", marginTop: 6, fontSize: 20, fontWeight: 850, color: cumulativeGrossAfterCogs >= 0 ? "#15803d" : "#b91c1c" }}>{money(cumulativeGrossAfterCogs)}원</strong>
+            <small style={{ color: "#6b7280" }}>누적 판매 {money(Number(report.wise_gross_total || 0))}원 − 누적 매입 {money(cumulativeInventoryCost)}원</small>
+          </div>
+        </article>
         <article style={{ ...card, background: "#f8fafc" }}><span style={label}>와이스 전체 판매금액 · 누적</span><strong style={value}>{money(Number(report.wise_gross_total || 0))}원</strong><small style={{ color: "#6b7280" }}>배송비·키워드·아이템 삭제·원가토글 적용 전 전체</small></article>
         <article style={{ ...card, background: "#fff7ed", borderColor: "#fed7aa" }}><span style={label}>누적 정산예정액</span><strong style={{ ...value, color: "#c2410c" }}>{money(expectedSettlement)}원</strong><small style={{ color: "#6b7280" }}>전체 판매금액 × 0.94 − 누적 정산금액</small></article>
         <article style={card}>
