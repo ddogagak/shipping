@@ -98,7 +98,7 @@ export default function SaleInventoryPage(){
   <div>현재 매입 수량 <b>{i.purchase_record_quantity??0}박스</b> · 입고 <b>{i.purchase_record_received_quantity??0}박스</b> · 박스당 <b>{i.purchase_record_component_count??0}개</b></div>
   <div>기존 총매입가 <b>{(Number(i.actual_purchase_unit_price||0)*Number(i.purchase_record_quantity||0)).toLocaleString("ko-KR")} {i.actual_purchase_currency}</b></div>
   <div style={{display:"flex",gap:8,marginTop:7,flexWrap:"wrap"}}>
-   <label>변경 박스 수<input aria-label="변경할 박스 수량" type="number" min="1" step="1" style={{...input,width:115,display:"block"}} value={boxDraft.quantity} onChange={e=>setBoxDraft(prev=>({...prev,quantity:e.target.value}))}/></label>
+   <label>변경 박스 수<input aria-label="변경할 박스 수량" type="number" min="1" step="1" style={{...input,width:115,display:"block"}} value={boxDraft.quantity} onChange={e=>{const n=Number(e.target.value);setBoxDraft(prev=>({...prev,quantity:e.target.value}));if(Number.isSafeInteger(n)&&n>0)setPriceDrafts(prev=>({...prev,[i.id]:String(Number(i.actual_purchase_unit_price||0)*Number(i.purchase_record_quantity||0)/n)}));}}/></label>
    <label>박스당 구성 수<input aria-label="변경할 박스당 낱개 수" type="number" min="1" step="1" style={{...input,width:115,display:"block"}} value={boxDraft.component} onChange={e=>setBoxDraft(prev=>({...prev,component:e.target.value}))}/></label>
   </div>
   <div style={{fontSize:11,color:"#64748b",marginTop:6}}>낱개 총수량은 같아야 해. 기존 판매 내역을 정확하게 변환할 수 없으면 서버에서 거절해.</div>
