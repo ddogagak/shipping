@@ -258,16 +258,20 @@ export async function PATCH(req: Request) {
       const oldSold=Math.max(0,Number(existing?.sold_quantity ?? 0));
       const sold=existing?.stock_status==="soldout" ? nextQty : Math.min(oldSold,nextQty);
       const remaining=existing?.stock_status==="soldout" ? 0:Math.max(0,nextQty-sold);
-      const payload:Record<string,unknown>={
-        purchase_item_id:body.purchase_item_id,
+      const changes:Record<string,unknown>={
         purchase_price_override:newPrice,
         ...(mode==="box"?{box_quantity_override:nextQty,component_count_override:nextComponent}:{}),
-        sold_quantity:sold,remaining_quantity:remaining,
-        stock_status:existing?.stock_status||"active",
-        ...(existing?{}:{sale_price:null})
+        sold_quantity:sold,remaining_quantity:remaining
       };
-      const {data:updated,error:updateError}=await sb.from("purchase_sale_inventory")
-        .upsert(payload,{onConflict:"purchase_item_id"}).select().single();
+      const result=existing
+        ? await sb.from("purchase_sale_inventory").update(changes).eq("purchase_item_id",body.purchase_item_id).select().single()
+        : await sb.from("purchase_sale_inventory").insert({
+            purchase_item_id:body.purchase_item_id,
+            sale_price:null,
+            stock_status:"active",
+            ...changes
+          }).select().single();
+      const {data:updated,error:updateError}=result;
       if(updateError)throw updateError;
       return NextResponse.json({ok:true,unit_price:newPrice,item:updated});
     }
