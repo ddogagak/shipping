@@ -22,22 +22,27 @@ export default function WiseJsonImport(){
   function onMessage(event:MessageEvent){
    if(event.origin!==allowedOrigin||(event.source!==window.opener&&event.source!==wiseTab))return;
    const data=event.data;
-   if(data?.type==="DDOGA_WISE_PULL_READY"){setWiseConnected(true);return;}
+   if(data?.type==="DDOGA_WISE_PULL_READY"){if(data.scriptVersion!=="1.8"){setWiseConnected(false);setMessage("이전 와이스 스크립트가 실행 중이야. Tampermonkey 1.8을 저장하고 와이스 연결 탭을 새로 열어줘.");return;}setWiseConnected(true);return;}
    if(data?.type==="DDOGA_WISE_PULL_ERROR"){finishPull();setMessage("판매목록 가져오기 실패: "+String(data.error||"조회 실패"));return;}
    if(data?.type==="DDOGA_WISE_PING"){
     (event.source as Window).postMessage({type:"DDOGA_WISE_READY"},allowedOrigin);
     return;
    }
    if(data?.type!=="DDOGA_WISE_ORDERS"||!Array.isArray(data.orders))return;
+   if(data.scriptVersion!=="1.8"){finishPull();setMessage("매출자료 수신 차단: 실행 중인 와이스 스크립트가 1.8이 아니야. 기존 와이스 탭과 중복 Tampermonkey 스크립트를 확인해줘.");return;}
    if(data.orders.length>20000||!data.orders.every((o:unknown)=>o!==null&&typeof o==="object"&&Number.isSafeInteger((o as {id?:number}).id)&&Array.isArray((o as {stocks?:unknown}).stocks)))return;
    finishPull();
+   const allStocks=data.orders.flatMap((o:{stocks?:Array<{soldAt?:string|null;videoId?:string|null}>})=>o.stocks??[]);
+   const soldCount=allStocks.filter((s:{soldAt?:string|null})=>s.soldAt).length;
+   const videoCount=allStocks.filter((s:{videoId?:string|null})=>s.videoId).length;
+   if(allStocks.length&&(soldCount!==allStocks.length||videoCount!==allStocks.length)){setMessage(`매출자료 수신 차단: 판매시각 ${soldCount}/${allStocks.length}건, 방송 ID ${videoCount}/${allStocks.length}건. 스크립트 1.8에서 수집이 완료되지 않았어.`);return;}
    const json=JSON.stringify(data.orders);
    if(json.length>15000000){setMessage("전송된 JSON이 15MB를 초과합니다.");return;}
    autoPreviewRef.current=true;
    setFile(new File([json],"wyyyes-orders.json",{type:"application/json"}));
    setPreview(null);
    setSelectedUpdates([]);
-   setMessage("와이스 주문 "+data.orders.length+"건을 받았어. 자동 미리보기 중이야. DB는 아직 변경하지 않았어.");
+   setMessage("와이스 1.8 주문 "+data.orders.length+"건 · 판매시각 "+soldCount+"건 · 방송 ID "+videoCount+"건 수신. 자동 미리보기 중이며 DB는 아직 변경하지 않았어.");
    (event.source as Window).postMessage({type:"DDOGA_WISE_RECEIVED",count:data.orders.length},allowedOrigin);
   }
   window.addEventListener("message",onMessage);
@@ -54,8 +59,14 @@ export default function WiseJsonImport(){
  const [preview,setPreview]=useState<{total:number;new_orders:Candidate[];possible_existing:Candidate[];queued_orders:Candidate[];already_queued:number;update_candidates:UpdateCandidate[]}|null>(null);
  async function syncSales(){
   if(!file)return;
-  setLoading(true);setActivity("sales_sync");setMessage("와이스 주문 매출자료 저장 중…");
+  setLoading(true);setActivity("sales_sync");setMessage("와이스 주문 매출자료 저장 전 판매시간 확인 중…");
   try{
+   const orders=JSON.parse(await file.text());
+   const stocks=Array.isArray(orders)?orders.flatMap((o:{stocks?:Array<{soldAt?:string|null;videoId?:string|null}>})=>o.stocks??[]):[];
+   const soldCount=stocks.filter((s:{soldAt?:string|null})=>s.soldAt).length;
+   const videoCount=stocks.filter((s:{videoId?:string|null})=>s.videoId).length;
+   if(!Array.isArray(orders)||stocks.length===0||soldCount!==stocks.length||videoCount!==stocks.length)throw new Error(`판매시각/방송 ID 누락 JSON 저장 차단: 판매시각 ${soldCount}/${stocks.length}건, 방송 ID ${videoCount}/${stocks.length}건. 와이스 전체 주문을 1.8로 새로 가져와줘.`);
+   setMessage("와이스 주문 매출자료 저장 중…");
    const form=new FormData();form.append("file",file);form.append("mode","sales_sync");
    const res=await fetch("/api/domestic/wise-json-import",{method:"POST",body:form});
    const data=await res.json();if(!res.ok)throw new Error(data.error||"매출자료 저장 실패");
