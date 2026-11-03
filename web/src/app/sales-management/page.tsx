@@ -352,10 +352,9 @@ export default function SalesManagementPage() {
           <span style={label}>매출 − 방송재고 매입금액</span>
           <strong style={{ ...value, color: grossAfterCogs >= 0 ? "#15803d" : "#b91c1c" }}>{money(grossAfterCogs)}원</strong>
           <small style={{ color: "#6b7280" }}>선택 기간 매출에서 해당 기간 방송재고 매입액을 뺀 금액</small>
-          <div style={{ borderTop: "1px solid #bbf7d0", marginTop: 14, paddingTop: 12 }}>
-            <span style={{ ...label, display: "block" }}>전체 누적 판매금액 − 방송재고 누적 매입금액</span>
-            <strong style={{ display: "block", marginTop: 6, fontSize: 20, fontWeight: 850, color: cumulativeGrossAfterCogs >= 0 ? "#15803d" : "#b91c1c" }}>{money(cumulativeGrossAfterCogs)}원</strong>
-            <small style={{ color: "#6b7280" }}>누적 판매 {money(Number(report.wise_gross_total || 0))}원 − 누적 매입 {money(cumulativeInventoryCost)}원</small>
+          <div style={{ marginTop: 6, fontSize: 12, color: "#4b5563", lineHeight: 1.35 }}>
+            누적 차액 <strong style={{ color: cumulativeGrossAfterCogs >= 0 ? "#15803d" : "#b91c1c", fontSize: 13 }}>{money(cumulativeGrossAfterCogs)}원</strong>
+            <span title={`누적 판매 ${money(Number(report.wise_gross_total || 0))}원 − 누적 매입 ${money(cumulativeInventoryCost)}원`} style={{ marginLeft: 5, color: "#9ca3af", cursor: "help" }}>ⓘ</span>
           </div>
         </article>
         <article style={{ ...card, background: "#f8fafc" }}><span style={label}>와이스 전체 판매금액 · 누적</span><strong style={value}>{money(Number(report.wise_gross_total || 0))}원</strong><small style={{ color: "#6b7280" }}>배송비·키워드·아이템 삭제·원가토글 적용 전 전체</small></article>
