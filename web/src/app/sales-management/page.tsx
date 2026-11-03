@@ -2,6 +2,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
 
+type SortKey = "ordered_at" | "buyer_nickname" | "item_name" | "item_price";
+type SortDirection = "asc" | "desc";
 type SaleRow = { id: string; order_id: string; item_name: string; item_price: number; buyer_nickname: string; ordered_at: string };
 type Buyer = { buyer_nickname: string; sales: number; order_count: number; item_count: number };
 type Period = { key: string; sales: number; order_count: number; item_count: number; sales_rows: SaleRow[] };
@@ -30,6 +32,12 @@ function periodLabel(key: string) {
 function kstDate(value?: string | null) {
   if (!value) return "-";
   return new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", dateStyle: "medium" }).format(new Date(value));
+}
+function kstDateTime(value?: string | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
 }
 function stockPeriodKey(value: string | undefined, granularity: "month" | "quarter") {
   const date = new Date(String(value || ""));
@@ -103,6 +111,7 @@ export default function SalesManagementPage() {
   const [draftPrefs, setDraftPrefs] = useState<ItemPrefs>({});
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [productSearch, setProductSearch] = useState("");
+  const [saleSort, setSaleSort] = useState<{ key: SortKey; direction: SortDirection }>({ key: "ordered_at", direction: "desc" });
   const [granularity, setGranularity] = useState<"month" | "quarter">("month");
   const [selectedPeriod, setSelectedPeriod] = useState("");
   const [settledAmount, setSettledAmount] = useState(0);
@@ -157,6 +166,28 @@ export default function SalesManagementPage() {
     return { ...row, key, unitCost: unitCost ?? null, includeCost, memo: draftPrefs[key]?.memo || "", cost: includeCost && unitCost != null ? unitCost : null };
   }), [currentRows, costIndex, draftPrefs]);
   const filteredItemRows = useMemo(() => itemRows.filter(row => row.item_name.normalize("NFKC").toLowerCase().includes(productSearch.normalize("NFKC").trim().toLowerCase())), [itemRows, productSearch]);
+  const sortedItemRows = useMemo(() => [...filteredItemRows].sort((a, b) => {
+    let compared = 0;
+    if (saleSort.key === "ordered_at") {
+      const left = Date.parse(a.ordered_at || "");
+      const right = Date.parse(b.ordered_at || "");
+      compared = (Number.isFinite(left) ? left : 0) - (Number.isFinite(right) ? right : 0);
+    } else if (saleSort.key === "item_price") {
+      compared = Number(a.item_price || 0) - Number(b.item_price || 0);
+    } else {
+      compared = String(a[saleSort.key] || "").localeCompare(String(b[saleSort.key] || ""), "ko", { numeric: true, sensitivity: "base" });
+    }
+    return (saleSort.direction === "desc" ? -compared : compared) || a.id.localeCompare(b.id);
+  }), [filteredItemRows, saleSort]);
+  const toggleSaleSort = (key: SortKey) => setSaleSort(current => ({
+    key,
+    direction: current.key === key && current.direction === "desc" ? "asc" : "desc",
+  }));
+  const sortHeader = (key: SortKey, title: string) => <button type="button" onClick={() => toggleSaleSort(key)}
+    aria-label={title + " 정렬"}
+    style={{ border: 0, padding: 0, background: "transparent", font: "inherit", color: saleSort.key === key ? "#1d4ed8" : "inherit", fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}>
+    {title} <span aria-hidden="true">{saleSort.key === key ? (saleSort.direction === "desc" ? "▼" : "▲") : "↕"}</span>
+  </button>;
   const knownCost = itemRows.reduce((sum, row) => sum + (row.cost ?? 0), 0);
   const unmatchedQuantity = itemRows.reduce((sum, row) => sum + (row.includeCost && row.unitCost == null ? 1 : 0), 0);
   const currentInventoryRows = inventory.filter(row => selectedKey && stockPeriodKey(row.ordered_at, granularity) === selectedKey);
@@ -326,13 +357,13 @@ export default function SalesManagementPage() {
         {hasUnsaved && <div style={{ padding: "8px 14px", background: "#fffbeb", color: "#92400e", fontSize: 12 }}>저장되지 않은 원가 설정·삭제·메모가 있습니다.</div>}
         {!filteredItemRows.length ? <div style={{ padding: 24, color: "#6b7280" }}>{productSearch.trim() ? "검색 결과가 없습니다." : "이 기간의 판매 내역이 없습니다."}</div> :
           <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1240, fontSize: 13 }}>
-            <thead><tr style={{ background: "#f9fafb" }}><th style={th}><input aria-label="현재 판매 내역 전체 선택" type="checkbox" checked={filteredItemRows.length > 0 && filteredItemRows.every(row => selectedItems.includes(row.key))} onChange={e => setSelectedItems(current => e.target.checked ? Array.from(new Set([...current, ...filteredItemRows.map(row => row.key)])) : current.filter(key => !filteredItemRows.some(row => row.key === key)))} /></th><th style={th}>판매 날짜</th><th style={th}>구매자 닉네임</th><th style={th}>아이템</th><th style={th}>판매가</th><th style={th}>판매원가 포함</th><th style={th}>개당 원가</th><th style={th}>계산 원가</th><th style={th}>메모</th></tr></thead>
-            <tbody>{filteredItemRows.map(row => {
+            <thead><tr style={{ background: "#f9fafb" }}><th style={th}><input aria-label="현재 판매 내역 전체 선택" type="checkbox" checked={filteredItemRows.length > 0 && filteredItemRows.every(row => selectedItems.includes(row.key))} onChange={e => setSelectedItems(current => e.target.checked ? Array.from(new Set([...current, ...filteredItemRows.map(row => row.key)])) : current.filter(key => !filteredItemRows.some(row => row.key === key)))} /></th><th style={th} aria-sort={saleSort.key === "ordered_at" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("ordered_at", "판매 날짜")}</th><th style={th} aria-sort={saleSort.key === "buyer_nickname" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("buyer_nickname", "구매자 닉네임")}</th><th style={th} aria-sort={saleSort.key === "item_name" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("item_name", "아이템")}</th><th style={th} aria-sort={saleSort.key === "item_price" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("item_price", "판매가")}</th><th style={th}>판매원가 포함</th><th style={th}>개당 원가</th><th style={th}>계산 원가</th><th style={th}>메모</th></tr></thead>
+            <tbody>{sortedItemRows.map(row => {
               const draft = draftPrefs[row.key] || { includeCost: true, memo: "", deleted: false };
               const pendingDelete = draft.deleted === true && !savedPrefs[row.key]?.deleted;
               return <tr key={row.key} style={{ background: pendingDelete ? "#fff7ed" : "#fff", opacity: pendingDelete ? 0.55 : 1 }}>
                 <td style={td}><input aria-label={row.item_name + " 선택"} type="checkbox" checked={selectedItems.includes(row.key)} onChange={() => toggleSelected(row.key)} /></td>
-                <td style={td}>{kstDate(row.ordered_at)}</td><td style={td}>{row.buyer_nickname || "(닉네임 없음)"}</td><td style={td}><b>{row.item_name}</b>{pendingDelete && <div style={{ color: "#b45309", fontSize: 11 }}>저장하면 삭제</div>}</td>
+                <td style={td}>{kstDateTime(row.ordered_at)}</td><td style={td}>{row.buyer_nickname || "(닉네임 없음)"}</td><td style={td}><b>{row.item_name}</b>{pendingDelete && <div style={{ color: "#b45309", fontSize: 11 }}>저장하면 삭제</div>}</td>
                 <td style={td}>{money(row.item_price)}원</td>
                 <td style={td}><button onClick={() => updateDraft(row.key, { includeCost: !draft.includeCost })} aria-label="판매원가 포함 여부 전환" style={{ ...button, minWidth: 44, padding: "5px 10px", background: draft.includeCost ? "#dcfce7" : "#f3f4f6", borderColor: draft.includeCost ? "#86efac" : "#d1d5db", color: draft.includeCost ? "#166534" : "#6b7280" }}>{draft.includeCost ? "Y" : "N"}</button></td>
                 <td style={td}>{row.unitCost == null ? <span style={{ color: "#b91c1c" }}>미매칭</span> : money(row.unitCost) + "원"}</td>
