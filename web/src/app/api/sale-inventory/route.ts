@@ -228,6 +228,35 @@ export async function PATCH(req: Request) {
     }
 
     const sb = createServiceRoleClient();
+    // Explicit price correction for an existing purchase item. Require the value that was displayed
+    // to the editor, so an intervening change cannot be accidentally overwritten.
+    if (body.action === "update_purchase_price") {
+      const value = body.unit_price;
+      const expected = body.expected_unit_price;
+      if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 ||
+          typeof expected !== "number" || !Number.isFinite(expected) || expected < 0) {
+        return NextResponse.json({ ok: false, message: "매입가가 올바르지 않습니다." }, { status: 400 });
+      }
+      const { data: item, error: readError } = await sb.from("purchase_items")
+        .select("id,quantity,unit_price").eq("id", body.purchase_item_id).maybeSingle();
+      if (readError) throw readError;
+      if (!item) return NextResponse.json({ ok: false, message: "상품을 찾을 수 없습니다." }, { status: 404 });
+      const currentPrice = Number(item.unit_price ?? 0);
+      if (currentPrice !== expected) {
+        return NextResponse.json({ ok: false, message: "다른 작업에서 매입가가 바뀌었어. 새로고침한 뒤 다시 수정해줘." }, { status: 409 });
+      }
+      const lineTotal = value * Number(item.quantity ?? 0);
+      if (!Number.isFinite(lineTotal) || !Number.isFinite(value)) {
+        return NextResponse.json({ ok: false, message: "입력한 매입가가 너무 큽니다." }, { status: 400 });
+      }
+      if (currentPrice === value) return NextResponse.json({ ok: true, unit_price: value });
+      let update = sb.from("purchase_items").update({ unit_price: value, line_total: lineTotal }).eq("id", body.purchase_item_id);
+      update = item.unit_price == null ? update.is("unit_price", null) : update.eq("unit_price", currentPrice);
+      const { data: updated, error: updateError } = await update.select("id,unit_price").maybeSingle();
+      if (updateError) throw updateError;
+      if (!updated) return NextResponse.json({ ok: false, message: "매입가가 변경됐어. 새로고침 후 다시 수정해줘." }, { status: 409 });
+      return NextResponse.json({ ok: true, unit_price: updated.unit_price });
+    }
     // Missing import prices are stored as either NULL or 0. Fill once only.
     if (body.action === "fill_missing_purchase_price") {
       const value = body.unit_price;
