@@ -314,10 +314,15 @@ export async function PATCH(req: Request) {
       sold_out_at: status === "soldout" ? (body.sold_out_at || new Date().toISOString()) : null,
     };
 
-    const { data, error } = await sb.from("purchase_sale_inventory")
-      .upsert(payload, { onConflict: "purchase_item_id" })
-      .select()
-      .single();
+    // Updating only selected fields preserves sale-only cost/box overrides.
+    const { data: currentLedger, error: lookupError } = await sb.from("purchase_sale_inventory")
+      .select("purchase_item_id").eq("purchase_item_id",body.purchase_item_id).maybeSingle();
+    if (lookupError) throw lookupError;
+    const { data, error } = currentLedger
+      ? await sb.from("purchase_sale_inventory").update(payload)
+          .eq("purchase_item_id",body.purchase_item_id).select().single()
+      : await sb.from("purchase_sale_inventory")
+          .insert(payload).select().single();
     if (error) throw error;
 
     const responseData = {
