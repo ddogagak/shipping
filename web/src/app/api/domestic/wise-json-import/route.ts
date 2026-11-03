@@ -232,7 +232,30 @@ export async function POST(req:Request){
    const {error}=await db.from("domestic_wise_sales_order").upsert(chunk,{onConflict:"wise_order_id"});
    if(error)throw new Error("와이스 매출 스냅샷 저장 실패: "+error.message);
   }
-  // Never alter existing domestic orders or shipping. Refresh WYYYES-only snapshots and item metadata.
+  // Keep the displayed domestic nickname in sync for orders with explicit Wise ID links.
+  // Shipping, item summaries, and historical order numbers remain unchanged.
+  const importedIds=salesRows.map(x=>x.wise_order_id);
+  const touchedDomesticIds=new Set<string>();
+  for(const chunk of batches(importedIds)){
+   const {data:links,error:linkError}=await db.from("domestic_wise_order_link").select("domestic_order_id").in("wise_order_id",chunk);
+   if(linkError)throw new Error("와이스 연결 조회 실패: "+linkError.message);
+   for(const link of links||[])touchedDomesticIds.add(String(link.domestic_order_id));
+  }
+  for(const domesticId of touchedDomesticIds){
+   const {data:links,error:linkError}=await db.from("domestic_wise_order_link").select("wise_order_id").eq("domestic_order_id",domesticId);
+   if(linkError)throw new Error("와이스 닉네임 연결 조회 실패: "+linkError.message);
+   const linkedIds=(links||[]).map(x=>x.wise_order_id);
+   if(!linkedIds.length)continue;
+   const {data:latest,error:latestError}=await db.from("domestic_wise_sales_order")
+    .select("buyer_nickname,ordered_at").in("wise_order_id",linkedIds).order("ordered_at",{ascending:false}).limit(1);
+   if(latestError)throw new Error("최신 와이스 닉네임 조회 실패: "+latestError.message);
+   const currentNickname=asText(latest?.[0]?.buyer_nickname);
+   if(currentNickname){
+    const {error:nickError}=await db.from("domestic_order").update({nickname:currentNickname}).eq("order_id",domesticId).eq("platform","wise");
+    if(nickError)throw new Error("와이스 닉네임 동기화 실패: "+nickError.message);
+   }
+  }
+  // Refresh WYYYES-only shipping snapshots and item metadata without changing shipping state.
   for(const chunk of batches(orders)){
    const snapshots=chunk.map(o=>({wise_order_id:o.id,wise_status:o.status??null,wise_delivery_company:o.deliveryCompany??null,wise_delivery_code:o.deliveryCode??null,wise_start_at:validDate(o.startAt),wise_updated_at:validDate(o.updatedAt),snapshot_imported_at:new Date().toISOString()}));
    const {error}=await db.from("domestic_wise_order_snapshot").upsert(snapshots,{onConflict:"wise_order_id"});
