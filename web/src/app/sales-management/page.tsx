@@ -9,7 +9,7 @@ type Buyer = { buyer_nickname: string; sales: number; order_count: number; item_
 type Period = { key: string; sales: number; order_count: number; item_count: number; sales_rows: SaleRow[] };
 type ItemPref = { includeCost: boolean; memo: string; deleted?: boolean };
 type ItemSettings = { id: string; includeCost: boolean; memo: string; deleted: boolean };
-type PurchaseTotals = { monthly: Record<string, number>; quarterly: Record<string, number>; cumulative: number; included_orders: number; unsupported_currencies: string[]; exchange_rates: Record<string, number> };
+type PurchaseTotals = { monthly: Record<string, number>; quarterly: Record<string, number>; cumulative: number; included_orders: number; unsupported_currencies: string[]; exchange_rates: Record<string, number>; overseas_tax_multiplier: number; overseas_shipping_per_order_krw: number };
 type Report = { purchases: PurchaseTotals; monthly: Period[]; quarterly: Period[]; all_time_sales_rows: SaleRow[]; excluded_item_count: number; included_order_count: number; included_item_count: number; imported_order_count: number; last_imported_at: string | null; wise_gross_total: number; settings: { cumulative_settled_amount: number; excluded_keywords: string[]; item_settings: ItemSettings[] } };
 type StockItem = { display_name?: string; product_name?: string; option_text?: string; ordered_at?: string; purchase_quantity?: number; component_count?: number; unit_cost_price?: number; box_cost_price?: number };
 type ItemPrefs = Record<string, ItemPref>;
@@ -349,14 +349,14 @@ export default function SalesManagementPage() {
     {!loading && !error && report && <>
       <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12 }}>
         <article style={{ ...card, background: "#eff6ff", borderColor: "#bfdbfe" }}><span style={label}>매출 · {selectedKey ? periodLabel(selectedKey) : "선택 기간"}</span><strong style={{ ...value, color: "#1d4ed8" }}>{money(currentSummary.sales)}원</strong><small style={{ color: "#6b7280" }}>필터·삭제 적용 · 주문 {money(currentSummary.order_count)}건</small></article>
-        <article style={card}><span style={label}>매입관리 매입금액 · {selectedKey ? periodLabel(selectedKey) : "선택 기간"}</span><strong style={value}>{money(selectedPurchaseAmount)}원</strong><small style={{ color: "#6b7280" }}>매입관리 주문 실결제액 · 원화 환산 추정치 (입고 전 포함)</small></article>
+        <article style={card}><span style={label}>매입관리 투입비용 · {selectedKey ? periodLabel(selectedKey) : "선택 기간"}</span><strong style={value}>{money(selectedPurchaseAmount)}원</strong><small style={{ color: "#6b7280" }}>매입관리 기준 · 해외 주문 매입액 × 120% + 주문당 배송비 5만원 (원화 환산 추정)</small></article>
         <article style={{ ...card, background: "#f0fdf4", borderColor: "#bbf7d0" }}>
-          <span style={label}>매출 − 매입관리 매입금액</span>
+          <span style={label}>매출 − 매입관리 투입비용</span>
           <strong style={{ ...value, color: grossAfterPurchases >= 0 ? "#15803d" : "#b91c1c" }}>{money(grossAfterPurchases)}원</strong>
-          <small style={{ color: "#6b7280" }}>선택 기간 매출에서 매입관리의 같은 기간 주문 실결제액을 뺀 금액</small>
+          <small style={{ color: "#6b7280" }}>선택 기간 매출에서 같은 기간 매입관리 추정 투입비용을 뺀 금액</small>
           <div style={{ marginTop: 6, fontSize: 12, color: "#4b5563", lineHeight: 1.35 }}>
             누적 차액 <strong style={{ color: cumulativeGrossAfterPurchases >= 0 ? "#15803d" : "#b91c1c", fontSize: 13 }}>{money(cumulativeGrossAfterPurchases)}원</strong>
-            <span title={`누적 와이스 판매 ${money(Number(report.wise_gross_total || 0))}원 − 누적 매입관리 실결제 ${money(cumulativePurchaseAmount)}원 (JPY×10, CNY×230, KRW×1 추정 환산; 현지배송비 별도)`} style={{ marginLeft: 5, color: "#9ca3af", cursor: "help" }}>ⓘ</span>
+            <span title={`누적 와이스 판매 ${money(Number(report.wise_gross_total || 0))}원 − 누적 매입관리 추정 투입비용 ${money(cumulativePurchaseAmount)}원 (해외 매입액 × 120% + 해외 주문당 5만원, JPY×10, CNY×230; 국내 매입액은 추가비용 없음)`} style={{ marginLeft: 5, color: "#9ca3af", cursor: "help" }}>ⓘ</span>
           </div>
         </article>
         <article style={{ ...card, background: "#f8fafc" }}><span style={label}>와이스 전체 판매금액 · 누적</span><strong style={value}>{money(Number(report.wise_gross_total || 0))}원</strong><small style={{ color: "#6b7280" }}>배송비·키워드·아이템 삭제·원가토글 적용 전 전체</small></article>
