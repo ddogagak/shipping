@@ -3,7 +3,7 @@
 // @namespace    https://www.ddoga.lol/
 // @updateURL     https://www.ddoga.lol/ddoga-wise-orders-pull.user.js
 // @downloadURL   https://www.ddoga.lol/ddoga-wise-orders-pull.user.js
-// @version      1.5
+// @version      1.6
 // @description  와이스 주문 전체 이력과 누적 정산금액을 ddoga에 전달
 // @match        https://wyyyes.com/deliverylist*
 // @match        https://wyyyes.com/expected-settlement-amount*
@@ -99,7 +99,7 @@
      const byId=new Map(detail.stocks.map(stock=>[String(stock.id),stock]));
      order.stocks=order.stocks.map(stock=>{
       const source=byId.get(String(stock.id));
-      return {...stock,soldAt:source?.soldAt??stock.soldAt??null};
+      return {...stock,soldAt:source?.soldAt??stock.soldAt??null,videoId:source?.videoId??stock.videoId??null};
      });
      detailedOrders++;
     }catch(e){
