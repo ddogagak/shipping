@@ -3,7 +3,7 @@
 // @namespace    https://www.ddoga.lol/
 // @updateURL     https://www.ddoga.lol/ddoga-wise-orders-pull.user.js
 // @downloadURL   https://www.ddoga.lol/ddoga-wise-orders-pull.user.js
-// @version      1.3
+// @version      1.4
 // @description  와이스 주문 전체 이력과 누적 정산금액을 ddoga에 전달
 // @match        https://wyyyes.com/deliverylist*
 // @match        https://wyyyes.com/expected-settlement-amount*
@@ -81,6 +81,37 @@
    if(!next)break;
    if(cursors.has(next))throw Error("페이지 커서 중복");
    cursors.add(next);
+  }
+  // The list endpoint may omit per-stock soldAt while the individual chain response includes it.
+  // Enrich only orders whose stock timestamps are missing. Never guess a sale timestamp.
+  const incomplete=out.filter(o=>Array.isArray(o.stocks)&&o.stocks.length&&o.stocks.some(s=>!s.soldAt));
+  if(incomplete.length){
+   const first=incomplete[0];
+   const detailUrl=new URL("/r0.app/sellers/myMarket/orderChains/"+encodeURIComponent(first.id),location.origin);
+   const headers={Accept:"application/json",Authorization:auth,"x-wyyyes-agent":"web/web (Original)","x-wyyyes-version":"web (Original)/no_ota"};
+   const detailRes=await originalFetch.call(window,detailUrl.toString(),{credentials:"include",headers});
+   if(!detailRes.ok)throw Error("와이스 주문 상세 조회 HTTP "+detailRes.status+" (아이템별 판매시간 수집 불가)");
+   const detailData=await detailRes.json();
+   const detail=detailData.result;
+   if(!detail||String(detail.id)!==String(first.id)||!Array.isArray(detail.stocks))
+    throw Error("와이스 주문 상세 응답 구조가 달라 아이템별 판매시간을 확인하지 못했어.");
+   const byId=new Map(detail.stocks.map(s=>[String(s.id),s]));
+   first.stocks=first.stocks.map(s=>({...s,soldAt:byId.get(String(s.id))?.soldAt??s.soldAt??null}));
+   const rest=incomplete.slice(1);
+   const concurrency=5;
+   for(let i=0;i<rest.length;i+=concurrency){
+    const batch=rest.slice(i,i+concurrency);
+    await Promise.all(batch.map(async order=>{
+     const url=new URL("/r0.app/sellers/myMarket/orderChains/"+encodeURIComponent(order.id),location.origin);
+     const res=await originalFetch.call(window,url.toString(),{credentials:"include",headers});
+     if(!res.ok)throw Error("와이스 주문 "+order.id+" 상세 조회 HTTP "+res.status);
+     const data=await res.json();
+     const d=data.result;
+     if(!d||String(d.id)!==String(order.id)||!Array.isArray(d.stocks))throw Error("와이스 주문 "+order.id+" 상세 응답 오류");
+     const stocks=new Map(d.stocks.map(s=>[String(s.id),s]));
+     order.stocks=order.stocks.map(s=>({...s,soldAt:stocks.get(String(s.id))?.soldAt??s.soldAt??null}));
+    }));
+   }
   }
   return out;
  }
