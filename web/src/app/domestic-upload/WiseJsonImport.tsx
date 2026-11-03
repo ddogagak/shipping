@@ -34,7 +34,7 @@ export default function WiseJsonImport(){
    const allStocks=data.orders.flatMap((o:{stocks?:Array<{soldAt?:string|null;videoId?:string|null}>})=>o.stocks??[]);
    const soldCount=allStocks.filter((s:{soldAt?:string|null})=>s.soldAt).length;
    const videoCount=allStocks.filter((s:{videoId?:string|null})=>s.videoId).length;
-   if(!allStocks.length||soldCount!==allStocks.length||videoCount!==allStocks.length){setMessage(`매출자료 수신 차단: 판매시각 ${soldCount}/${allStocks.length}건, 방송 ID ${videoCount}/${allStocks.length}건 · 전송 버전 ${String(data.scriptVersion||"미표기")}. 실제 데이터가 누락되어 저장하지 않았어.`);return;}
+   if(!allStocks.length||soldCount!==allStocks.length){setMessage(`매출자료 수신 차단: 판매시각 ${soldCount}/${allStocks.length}건, 방송 ID ${videoCount}/${allStocks.length}건 · 전송 버전 ${String(data.scriptVersion||"미표기")}. 실제 데이터가 누락되어 저장하지 않았어.`);return;}
    const json=JSON.stringify(data.orders);
    if(json.length>15000000){setMessage("전송된 JSON이 15MB를 초과합니다.");return;}
    autoPreviewRef.current=true;
@@ -64,7 +64,7 @@ export default function WiseJsonImport(){
    const stocks=Array.isArray(orders)?orders.flatMap((o:{stocks?:Array<{soldAt?:string|null;videoId?:string|null}>})=>o.stocks??[]):[];
    const soldCount=stocks.filter((s:{soldAt?:string|null})=>s.soldAt).length;
    const videoCount=stocks.filter((s:{videoId?:string|null})=>s.videoId).length;
-   if(!Array.isArray(orders)||stocks.length===0||soldCount!==stocks.length||videoCount!==stocks.length)throw new Error(`판매시각/방송 ID 누락 JSON 저장 차단: 판매시각 ${soldCount}/${stocks.length}건, 방송 ID ${videoCount}/${stocks.length}건. 와이스 전체 주문을 1.8로 새로 가져와줘.`);
+   if(!Array.isArray(orders)||stocks.length===0||soldCount!==stocks.length)throw new Error(`판매시각 누락 JSON 저장 차단: 판매시각 ${soldCount}/${stocks.length}건. 방송 ID ${videoCount}건은 선택 항목이야.`);
    setMessage("와이스 주문 매출자료 저장 중…");
    const form=new FormData();form.append("file",file);form.append("mode","sales_sync");
    const res=await fetch("/api/domestic/wise-json-import",{method:"POST",body:form});
