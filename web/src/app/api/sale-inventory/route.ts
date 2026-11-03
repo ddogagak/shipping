@@ -251,7 +251,7 @@ export async function PATCH(req: Request) {
       const originalQty=Number(purchase.received_quantity ?? purchase.quantity ?? 0);
       const effectiveQty=Number(existing?.box_quantity_override ?? originalQty);
       const nextQty=mode==="box" ? Number(input.quantity):effectiveQty;
-      const nextComponent=mode==="box" ? Number(input.component_count):null;
+      const nextComponent=mode==="box" ? Number(input.component_count) : 0;
       if(mode==="box"&&(!Number.isSafeInteger(nextQty)||nextQty<1||nextQty>1000000||
         !Number.isSafeInteger(nextComponent)||nextComponent<1||nextComponent>1000000))
         return NextResponse.json({ok:false,message:"박스 수와 구성수량은 1 이상의 정수로 입력해줘."},{status:400});
