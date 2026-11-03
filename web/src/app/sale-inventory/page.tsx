@@ -104,7 +104,7 @@ export default function SaleInventoryPage(){
   {!(Number(i.purchase_record_component_count)>0)&&<label style={{display:"block",padding:"8px 0",color:"#9a3412",fontWeight:700}}>기존 박스당 구성 확인 (DB 미등록)
    <input aria-label="기존 박스당 구성 확인" type="number" min="1" step="1" style={{...input,width:115,display:"block",marginTop:4}} value={oldComponentDraft} onChange={e=>setOldComponentDraft(e.target.value)}/>
    <small style={{fontWeight:400}}>네가 말한 기존 1개입×5박스라면 여기 1을 유지하고, 변경 박스 1 / 구성 5로 입력하면 돼.</small>
-  </label>
+  </label>}
   <div style={{display:"flex",gap:8,marginTop:7,flexWrap:"wrap"}}>
    <label>변경 박스 수<input aria-label="변경할 박스 수량" type="number" min="1" step="1" style={{...input,width:115,display:"block"}} value={boxDraft.quantity} onChange={e=>{const n=Number(e.target.value);setBoxDraft(prev=>({...prev,quantity:e.target.value}));if(Number.isSafeInteger(n)&&n>0)setPriceDrafts(prev=>({...prev,[i.id]:String(Number(i.actual_purchase_unit_price||0)*Number(i.purchase_record_quantity||0)/n)}));}}/></label>
    <label>박스당 구성 수<input aria-label="변경할 박스당 낱개 수" type="number" min="1" step="1" style={{...input,width:115,display:"block"}} value={boxDraft.component} onChange={e=>setBoxDraft(prev=>({...prev,component:e.target.value}))}/></label>
