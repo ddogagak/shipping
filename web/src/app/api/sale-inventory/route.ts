@@ -174,6 +174,9 @@ export async function GET() {
           option_text: item.option_text,
           product_url: item.product_url,
           purchase_quantity: boxQuantity,
+          purchase_record_quantity: Math.max(0, Number(item.quantity ?? 0)),
+          purchase_record_received_quantity: storedReceived,
+          purchase_record_component_count: Math.max(0, Number(item.component_count ?? 0)),
           actual_purchase_unit_price: actualPurchaseUnitPrice,
           can_fill_purchase_price: item.unit_price == null || Number(item.unit_price) === 0,
           actual_purchase_currency: purchaseCurrency,
@@ -228,6 +231,31 @@ export async function PATCH(req: Request) {
     }
 
     const sb = createServiceRoleClient();
+    if (body.action === "reconcile_purchase_box_units") {
+      const expected = body.expected || {};
+      const input = body.next || {};
+      const mode = body.mode === "box" ? "box" : "price";
+      const price = Number(input.unit_price);
+      const qty = Number(input.quantity);
+      const component = Number(input.component_count);
+      if (!Number.isFinite(price) || price <= 0 || (mode === "box" && (
+        !Number.isSafeInteger(qty) || qty < 1 ||
+        !Number.isSafeInteger(component) || component < 1
+      ))) return NextResponse.json({ok:false,message:"수정할 매입가, 박스 수량, 박스당 구성을 다시 확인해줘."},{status:400});
+      const {data,error} = await sb.rpc("reconcile_purchase_box_units",{
+        p_item_id:body.purchase_item_id,
+        p_mode:mode,
+        p_expected_price:Number(expected.unit_price),
+        p_expected_quantity:Number(expected.quantity),
+        p_expected_received:Number(expected.received_quantity),
+        p_expected_component:Number(expected.component_count),
+        p_new_price:price,
+        p_new_quantity:mode==="box"?qty:Number(expected.quantity),
+        p_new_component:mode==="box"?component:Number(expected.component_count),
+      });
+      if(error) return NextResponse.json({ok:false,message:error.message||"매입 단위 수정 실패"},{status:409});
+      return NextResponse.json({ok:true,item:data});
+    }
     // Explicit price correction for an existing purchase item. Require the value that was displayed
     // to the editor, so an intervening change cannot be accidentally overwritten.
     if (body.action === "update_purchase_price") {
