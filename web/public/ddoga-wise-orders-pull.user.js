@@ -3,7 +3,7 @@
 // @namespace    https://www.ddoga.lol/
 // @updateURL     https://www.ddoga.lol/ddoga-wise-orders-pull.user.js
 // @downloadURL   https://www.ddoga.lol/ddoga-wise-orders-pull.user.js
-// @version      1.8
+// @version      1.9
 // @description  와이스 주문 전체 이력과 누적 정산금액을 ddoga에 전달
 // @match        https://wyyyes.com/deliverylist*
 // @match        https://wyyyes.com/expected-settlement-amount*
@@ -82,7 +82,7 @@
    if(cursors.has(next))throw Error("페이지 커서 중복");
    cursors.add(next);
   }
-  // Detailed order responses include individual stocks[].soldAt; list responses omit it.
+  // Detailed order responses contain soldAt/videoId; a missing videoId alone does not block a valid sale.
   const missing=out.filter(o=>Array.isArray(o.stocks)&&o.stocks.some(s=>!s.soldAt||!s.videoId));
   if(missing.length){
    const headers={Accept:"application/json",Authorization:auth,"x-wyyyes-agent":"web/web (Original)","x-wyyyes-version":"web (Original)/no_ota"};
@@ -114,8 +114,8 @@
    const soldCount=out.reduce((n,o)=>n+(o.stocks||[]).filter(s=>s.soldAt).length,0);
    const videoCount=out.reduce((n,o)=>n+(o.stocks||[]).filter(s=>s.videoId).length,0);
    const itemCount=out.reduce((n,o)=>n+(o.stocks||[]).length,0);
-   console.info("DDOGA Wise collection",{version:"1.8",orders:out.length,detailedOrders,detailFailures,soldCount,videoCount,itemCount});
-   if(itemCount===0||soldCount!==itemCount||videoCount!==itemCount){
+   console.info("DDOGA Wise collection",{version:"1.9",orders:out.length,detailedOrders,detailFailures,soldCount,videoCount,itemCount});
+   if(itemCount===0||soldCount!==itemCount){
     throw Error("매출자료 전송 중단: 판매시간 "+soldCount+"/"+itemCount+"건, 방송 ID "+videoCount+"/"+itemCount+"건. 상세 조회 성공 "+detailedOrders+"건 / 실패 "+detailFailures+"건. 콘솔의 DDOGA 주문 상세 조회 실패 로그를 확인해줘.");
    }
   }
@@ -128,12 +128,12 @@
   busy=true;
   try{
    const orders=await collect();
-   window.opener?.postMessage({type:"DDOGA_WISE_ORDERS",scriptVersion:"1.8",orders},DDOGA);
+   window.opener?.postMessage({type:"DDOGA_WISE_ORDERS",scriptVersion:"1.9",orders},DDOGA);
   }catch(err){
    window.opener?.postMessage({type:"DDOGA_WISE_PULL_ERROR",error:String(err?.message||err)},DDOGA);
   }finally{busy=false;}
  });
- function ready(){window.opener?.postMessage({type:"DDOGA_WISE_PULL_READY",scriptVersion:"1.8"},DDOGA);}
+ function ready(){window.opener?.postMessage({type:"DDOGA_WISE_PULL_READY",scriptVersion:"1.9"},DDOGA);}
  window.addEventListener("load",ready);
  setTimeout(ready,1200);
 })();
