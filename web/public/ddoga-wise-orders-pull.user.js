@@ -3,7 +3,7 @@
 // @namespace    https://www.ddoga.lol/
 // @updateURL     https://www.ddoga.lol/ddoga-wise-orders-pull.user.js
 // @downloadURL   https://www.ddoga.lol/ddoga-wise-orders-pull.user.js
-// @version      1.4
+// @version      1.5
 // @description  와이스 주문 전체 이력과 누적 정산금액을 ddoga에 전달
 // @match        https://wyyyes.com/deliverylist*
 // @match        https://wyyyes.com/expected-settlement-amount*
@@ -82,35 +82,40 @@
    if(cursors.has(next))throw Error("페이지 커서 중복");
    cursors.add(next);
   }
-  // The list endpoint may omit per-stock soldAt while the individual chain response includes it.
-  // Enrich only orders whose stock timestamps are missing. Never guess a sale timestamp.
-  const incomplete=out.filter(o=>Array.isArray(o.stocks)&&o.stocks.length&&o.stocks.some(s=>!s.soldAt));
-  if(incomplete.length){
-   const first=incomplete[0];
-   const detailUrl=new URL("/r0.app/sellers/myMarket/orderChains/"+encodeURIComponent(first.id),location.origin);
+  // Detailed order responses include individual stocks[].soldAt; list responses omit it.
+  const missing=out.filter(o=>Array.isArray(o.stocks)&&o.stocks.some(s=>!s.soldAt));
+  if(missing.length){
    const headers={Accept:"application/json",Authorization:auth,"x-wyyyes-agent":"web/web (Original)","x-wyyyes-version":"web (Original)/no_ota"};
-   const detailRes=await originalFetch.call(window,detailUrl.toString(),{credentials:"include",headers});
-   if(!detailRes.ok){console.warn("DDOGA: 와이스 상세 API를 확인할 수 없어 목록 데이터만 사용해.",detailRes.status);return out;}
-   const detailData=await detailRes.json();
-   const detail=detailData.result;
-   if(!detail||String(detail.id)!==String(first.id)||!Array.isArray(detail.stocks))
-    {console.warn("DDOGA: 상세 응답 구조가 예상과 달라 목록 데이터만 사용해.");return out;}
-   const byId=new Map(detail.stocks.map(s=>[String(s.id),s]));
-   first.stocks=first.stocks.map(s=>({...s,soldAt:byId.get(String(s.id))?.soldAt??s.soldAt??null}));
-   const rest=incomplete.slice(1);
-   const concurrency=5;
-   for(let i=0;i<rest.length;i+=concurrency){
-    const batch=rest.slice(i,i+concurrency);
-    await Promise.all(batch.map(async order=>{
-     const url=new URL("/r0.app/sellers/myMarket/orderChains/"+encodeURIComponent(order.id),location.origin);
+   let detailedOrders=0, detailFailures=0;
+   async function enrich(order){
+    const url=new URL("/r0.app/sellers/myMarket/orderChains/"+encodeURIComponent(order.id),location.origin);
+    try{
      const res=await originalFetch.call(window,url.toString(),{credentials:"include",headers});
-     if(!res.ok){console.warn("DDOGA: 주문 상세 시간 조회 실패",order.id,res.status);return;}
-     const data=await res.json();
-     const d=data.result;
-     if(!d||String(d.id)!==String(order.id)||!Array.isArray(d.stocks)){console.warn("DDOGA: 상세 응답 구조 불일치",order.id);return;}
-     const stocks=new Map(d.stocks.map(s=>[String(s.id),s]));
-     order.stocks=order.stocks.map(s=>({...s,soldAt:stocks.get(String(s.id))?.soldAt??s.soldAt??null}));
-    }));
+     if(!res.ok)throw Error("HTTP "+res.status);
+     const payload=await res.json();
+     const detail=payload?.result;
+     if(!detail||String(detail.id)!==String(order.id)||!Array.isArray(detail.stocks))
+      throw Error("상세 응답의 주문 ID 또는 stocks 구조 불일치");
+     const byId=new Map(detail.stocks.map(stock=>[String(stock.id),stock]));
+     order.stocks=order.stocks.map(stock=>{
+      const source=byId.get(String(stock.id));
+      return {...stock,soldAt:source?.soldAt??stock.soldAt??null};
+     });
+     detailedOrders++;
+    }catch(e){
+     detailFailures++;
+     console.warn("DDOGA 주문 상세 조회 실패",order.id,String(e?.message||e));
+    }
+   }
+   // A small concurrent batch avoids overwhelming the seller endpoint.
+   for(let i=0;i<missing.length;i+=5){
+    await Promise.all(missing.slice(i,i+5).map(enrich));
+   }
+   const soldCount=out.reduce((n,o)=>n+(o.stocks||[]).filter(s=>s.soldAt).length,0);
+   const itemCount=out.reduce((n,o)=>n+(o.stocks||[]).length,0);
+   console.info("DDOGA Wise soldAt collection",{orders:out.length,detailedOrders,detailFailures,soldCount,itemCount});
+   if(!soldCount){
+    throw Error("아이템 판매시간을 0건 가져왔어. 주문 상세 조회 성공 "+detailedOrders+"건 / 실패 "+detailFailures+"건. 개발자 도구 콘솔에서 DDOGA 주문 상세 조회 실패 로그를 확인해줘.");
    }
   }
   return out;
