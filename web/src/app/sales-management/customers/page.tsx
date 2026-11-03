@@ -39,6 +39,47 @@ function customersFrom(rows:Sale[],deleted:Set<string>){
 }
 const percent=(n:number,d:number)=>d?(100*n/d).toFixed(1)+"%":"—";
 
+type Favorite={series:string;amount:number;count:number};
+const SERIES_RULES:{series:string;patterns:RegExp[]}[]=[
+ {series:"치이카와",patterns:[/치이카와/i,/먼작귀/i,/하치와레/i,/모몽가/i,/쿠리만쥬/i,/ちいかわ/i,/ハチワレ/i,/モモンガ/i]},
+ {series:"나히아",patterns:[/나히아/i,/히로아카/i,/히어로\\s*아카데미아/i,/僕のヒーローアカデミア/i,/미도리야/i,/바쿠고/i,/토도로키/i,/토가\\s*히미코/i]},
+ {series:"헌터×헌터",patterns:[/헌터\\s*[x×]?\\s*헌터/i,/hunter\\s*[x×]?\\s*hunter/i,/곤\\s*프릭스/i,/키르아/i,/크라피카/i,/히소카/i,/환영여단/i]},
+ {series:"귀멸의 칼날",patterns:[/귀멸/i,/鬼滅/i,/탄지로/i,/네즈코/i,/젠이츠/i,/이노스케/i]},
+ {series:"프리렌",patterns:[/프리렌/i,/葬送のフリーレン/i,/페른/i,/슈타르크/i]},
+ {series:"진격의 거인",patterns:[/진격의\\s*거인/i,/進撃の巨人/i,/리바이/i,/엘런\\s*예거/i,/미카사/i]},
+ {series:"짱구",patterns:[/짱구/i,/クレヨンしんちゃん/i,/부리부리자에몽/i]},
+ {series:"리락쿠마",patterns:[/리락쿠마/i,/リラックマ/i,/코리락쿠마/i,/키이로이토리/i]},
+ {series:"나루토",patterns:[/나루토/i,/ナルト/i,/우치하\\s*사스케/i,/우치하\\s*이타치/i,/하타케\\s*카카시/i]},
+ {series:"약사의 혼잣말",patterns:[/약사의\\s*혼잣말/i,/薬屋のひとりごと/i,/마오마오/i,/진시/i]},
+ {series:"주술회전",patterns:[/주술회전/i,/呪術廻戦/i,/고죠/i,/게토/i,/이타도리/i,/스쿠나/i]},
+ {series:"산리오",patterns:[/산리오/i,/サンリオ/i,/쿠로미/i,/시나모롤/i,/폼폼푸린/i,/마이멜로디/i]}
+];
+function seriesOf(name:string):string|null{
+ const matches=SERIES_RULES.filter(rule=>rule.patterns.some(p=>p.test(name)));
+ return matches.length===1?matches[0].series:null;
+}
+function topSeries(entries:Entry[]):Favorite[]{
+ const groups=new Map<string,Favorite>();
+ for(const e of entries){
+  const series=seriesOf(e.name);if(!series)continue;
+  const row=groups.get(series)||{series,amount:0,count:0};
+  row.amount+=e.amount;row.count++;groups.set(series,row);
+ }
+ return [...groups.values()].sort((a,b)=>b.amount-a.amount||b.count-a.count||a.series.localeCompare(b.series,"ko")).slice(0,3);
+}
+const FAVORITE_STYLES:CSSProperties[]=[
+ {background:"#fff2c9",border:"1px solid #f3c66a",color:"#925600"},
+ {background:"#edf0f8",border:"1px solid #c7cfe2",color:"#475569"},
+ {background:"#ffede2",border:"1px solid #eab79c",color:"#9a532c"}
+];
+function FavoriteBadges({entries}:{entries:Entry[]}){
+ const favorites=topSeries(entries);
+ return <span style={{display:"inline-flex",gap:4,flexWrap:"wrap",alignItems:"center",marginLeft:8,verticalAlign:"middle"}}>
+ {favorites.map((x,i)=><span key={x.series} title={(i+1)+"위 · "+x.series+" · "+won(x.amount)+"원 · "+x.count+"개"} style={{...FAVORITE_STYLES[i],borderRadius:999,padding:"3px 7px",fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>{["🥇","🥈","🥉"][i]} {x.series}</span>)}
+ </span>;
+}
+
+
 type Lifecycle={buyer:Buyer;bins:number[];ageDays:number;idleDays:number;stage:string;earlyShare:number;observed60:boolean;observed90:boolean};
 function buildLifecycle(buyers:Buyer[],asOf:number):Lifecycle[]{
  const highCutoff=[...buyers].sort((a,b)=>b.total-a.total)[Math.max(0,Math.ceil(buyers.length*0.2)-1)]?.total??Infinity;
@@ -142,9 +183,9 @@ export default function CustomerAnalysis(){
     <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}><thead><tr>{["고객","유형","첫 구매 후 경과","최근 구매 경과","첫 0~29일","30~59일","60~89일","90일 이후","누적 구매"].map(x=><th key={x} style={head}>{x}</th>)}</tr></thead><tbody>{lifecycle.slice(0,30).map(x=><tr key={x.buyer.key} onClick={()=>setSelected(x.buyer.key)} style={{cursor:"pointer"}}><td style={{...cell,textAlign:"left",fontWeight:700}}>{x.buyer.name}</td><td style={cell}>{x.stage}</td><td style={cell}>{x.ageDays}일</td><td style={cell}>{x.idleDays}일</td>{x.bins.map((v,i)=><td key={i} style={cell}>{i<3&&x.ageDays<(i+1)*30?won(v)+"원 · 진행 중":won(v)+"원"}</td>)}<td style={cell}>{won(x.buyer.total)}원</td></tr>)}</tbody></table></div>
     <p style={{fontSize:11,color:"#64748b",marginTop:10}}>첫 30일이나 60일이 아직 지나지 않은 고객은 해당 구간을 ‘진행 중’으로 표시해. 관측 시작인 8월 이전 구매 이력은 확인되지 않으므로 오래된 단골도 신규로 보일 수 있어.</p>
    </section>
-   <section style={{...panel,marginBottom:16}}><h2 style={{fontSize:18,margin:"0 0 8px"}}>고객별 누적 실적</h2>
+   <section style={{...panel,marginBottom:16}}><h2 style={{fontSize:18,margin:"0 0 8px"}}>고객별 누적 실적</h2><p style={{fontSize:12,color:"#64748b",lineHeight:1.6}}>닉네임 옆 🥇·🥈·🥉 배지는 상품명으로 식별되는 작품별 <b>누적 구매금액 순위</b>야. 작품을 식별할 수 없거나 여러 작품이 섞인 상품은 제외하고 최대 3개만 표시해.</p>
     <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:12}}><input aria-label="고객 검색" placeholder="닉네임 검색" style={control} value={search} onChange={e=>{setSearch(e.target.value);setVisible(50)}}/><select aria-label="정렬" style={control} value={sort} onChange={e=>setSort(e.target.value)}><option value="amount">구매금액순</option><option value="broadcast">참여 방송순</option><option value="orders">주문 건수순</option><option value="latest">최근 구매순</option></select><label style={{fontSize:13}}><input type="checkbox" checked={repeatOnly} onChange={e=>setRepeatOnly(e.target.checked)}/> 재구매 고객만</label></div>
-    <div style={{overflowX:"auto"}}><table style={{borderCollapse:"collapse",width:"100%",fontSize:13}}><thead><tr>{["고객","누적 구매금액","주문","상품","구매 참여 방송","첫 구매","최근 구매","재구매"].map(x=><th style={head} key={x}>{x}</th>)}</tr></thead><tbody>{list.slice(0,visible).map(c=><tr key={c.key} style={{background:selected===c.key?"#eff6ff":"#fff",cursor:"pointer"}} onClick={()=>setSelected(selected===c.key?null:c.key)}><td style={{...cell,textAlign:"left",fontWeight:700}}>{c.name}</td><td style={cell}>{won(c.total)}원</td><td style={cell}>{c.orders.size}건</td><td style={cell}>{c.entries.length}개</td><td style={cell}>{c.videos.size}회</td><td style={cell}>{day(c.first)}</td><td style={cell}>{day(c.last)}</td><td style={cell}>{c.events.length>1?"재구매":"첫 구매만"}</td></tr>)}</tbody></table></div>
+    <div style={{overflowX:"auto"}}><table style={{borderCollapse:"collapse",width:"100%",fontSize:13}}><thead><tr>{["고객","누적 구매금액","주문","상품","구매 참여 방송","첫 구매","최근 구매","재구매"].map(x=><th style={head} key={x}>{x}</th>)}</tr></thead><tbody>{list.slice(0,visible).map(c=><tr key={c.key} style={{background:selected===c.key?"#eff6ff":"#fff",cursor:"pointer"}} onClick={()=>setSelected(selected===c.key?null:c.key)}><td style={{...cell,textAlign:"left",fontWeight:700}}>{c.name}<FavoriteBadges entries={c.entries}/></td><td style={cell}>{won(c.total)}원</td><td style={cell}>{c.orders.size}건</td><td style={cell}>{c.entries.length}개</td><td style={cell}>{c.videos.size}회</td><td style={cell}>{day(c.first)}</td><td style={cell}>{day(c.last)}</td><td style={cell}>{c.events.length>1?"재구매":"첫 구매만"}</td></tr>)}</tbody></table></div>
     <div style={{fontSize:12,color:"#64748b",marginTop:12}}>{list.length}명 중 {Math.min(visible,list.length)}명 표시 {visible<list.length&&<button style={{...control,marginLeft:12}} onClick={()=>setVisible(n=>n+50)}>50명 더 보기</button>}</div>
    </section>
    {detail&&<section style={panel}><div style={{display:"flex",justifyContent:"space-between",gap:12}}><h2 style={{fontSize:19,margin:0}}>{detail.name} 고객 상세</h2><button style={control} onClick={()=>setSelected(null)}>닫기</button></div>
