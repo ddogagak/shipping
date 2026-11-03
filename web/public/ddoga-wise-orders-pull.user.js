@@ -114,7 +114,7 @@
    const soldCount=out.reduce((n,o)=>n+(o.stocks||[]).filter(s=>s.soldAt).length,0);
    const videoCount=out.reduce((n,o)=>n+(o.stocks||[]).filter(s=>s.videoId).length,0);
    const itemCount=out.reduce((n,o)=>n+(o.stocks||[]).length,0);
-   console.info("DDOGA Wise collection",{version:"1.7",orders:out.length,detailedOrders,detailFailures,soldCount,videoCount,itemCount});
+   console.info("DDOGA Wise collection",{version:"1.8",orders:out.length,detailedOrders,detailFailures,soldCount,videoCount,itemCount});
    if(itemCount===0||soldCount!==itemCount||videoCount!==itemCount){
     throw Error("매출자료 전송 중단: 판매시간 "+soldCount+"/"+itemCount+"건, 방송 ID "+videoCount+"/"+itemCount+"건. 상세 조회 성공 "+detailedOrders+"건 / 실패 "+detailFailures+"건. 콘솔의 DDOGA 주문 상세 조회 실패 로그를 확인해줘.");
    }
