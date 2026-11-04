@@ -14,7 +14,7 @@ type InventoryItem = {
 
 const statusList=["전체","입고전","해외배송","입고완료","판매중","판매완료","보류"];
 const typeList=["전체","아크릴","지류","뱃지","피규어","키링","기타"];
-const seriesList=["전체","헌터헌터","귀멸의칼날","나의히어로아카데미아","프리렌","진격의거인","치이카와","나루토","기타"];
+const seriesList=["전체","헌터헌터","귀멸의칼날","나의히어로아카데미아","프리렌","진격의거인","치이카와","약사의혼잣말","나루토","기타"];
 const currencyList=["JPY","CNY"];
 
 function normalizedLink(value?: string|null){
