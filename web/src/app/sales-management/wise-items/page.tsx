@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import {useEffect,useMemo,useState,type CSSProperties} from "react";
+import {Fragment,useEffect,useMemo,useState,type CSSProperties} from "react";
 import {classifySeriesByKeywords,type SeriesKeywordRule} from "@/lib/item-analysis-series";
 type Sale={id:string;order_id:string;item_name:string;item_price:number;buyer_nickname:string;ordered_at:string;video_id?:string|null;image_url?:string|null};
 type Report={ok:boolean;all_time_sales_rows:Sale[];settings?:{item_settings?:{id:string;deleted:boolean}[]}};
@@ -188,7 +188,7 @@ export default function WiseItemAnalysis(){
        return <ReactFragmentItem key={x.key} item={x} expanded={expanded===x.key} onToggle={()=>setExpanded(current=>current===x.key?null:x.key)} onClassify={saveClassify} options={seriesList} saving={savingKey===itemKey(x.name)} manual={!!overrides[itemKey(x.name)]} checked={!!selectedNames[itemKey(x.name)]&&(x.series==="미분류"||x.series==="키워드 충돌")} selectable={eligible.length>0} onCheckedChange={checked=>setSelectedNames(current=>({...current,[itemKey(x.name)]:checked}))}/>;
       }
       const photo=group.children.flatMap(x=>x.rows).find(row=>row.image_url)?.image_url;
-      return <React.Fragment key={group.key}>
+      return <Fragment key={group.key}>
         <tr style={{background:"#f8fafc",cursor:"pointer",fontWeight:700}} onClick={()=>setExpandedFamilies(current=>({...current,[group.key]:!opened}))}>
          <td style={{...td,textAlign:"center"}} onClick={e=>e.stopPropagation()}><input type="checkbox" aria-label={group.name+" 묶음 일괄 분류 선택"} disabled={!eligible.length||bulkSaving} checked={groupSelected} onChange={e=>setSelectedNames(current=>{const next={...current};for(const child of eligible)next[itemKey(child.name)]=e.target.checked;return next;})}/></td>
          <td style={{...td,textAlign:"left",whiteSpace:"normal",minWidth:250}}><div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -198,7 +198,7 @@ export default function WiseItemAnalysis(){
          <td style={td}>{group.series}</td><td style={td}>{cash(group.revenue)}원</td><td style={td}>{cash(group.count)}개</td><td style={td}>{group.buyers.size}명</td><td style={td}>{group.orders.size}건</td>
         </tr>
         {opened&&group.children.map(x=><ReactFragmentItem key={x.key} item={x} expanded={expanded===x.key} onToggle={()=>setExpanded(current=>current===x.key?null:x.key)} onClassify={saveClassify} options={seriesList} saving={savingKey===itemKey(x.name)} manual={!!overrides[itemKey(x.name)]} checked={!!selectedNames[itemKey(x.name)]&&(x.series==="미분류"||x.series==="키워드 충돌")} selectable={eligible.length>0} onCheckedChange={checked=>setSelectedNames(current=>({...current,[itemKey(x.name)]:checked}))}/>)}
-      </React.Fragment>;
+      </Fragment>;
     })}</tbody></table></div>
     <p style={{fontSize:12,color:"#64748b",marginTop:12}}>{byFamily.length}묶음 ({byTitle.length}개 상품명) 중 {Math.min(limit,byFamily.length)}묶음 표시 {limit<byFamily.length&&<button style={{...field,marginLeft:8}} onClick={()=>setLimit(v=>v+50)}>50종 더 보기</button>}</p>
    </section>
