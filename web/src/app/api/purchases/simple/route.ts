@@ -76,7 +76,7 @@ export async function POST(req: Request) {
       ordered_at: date, paid_amount: amount, currency: "KRW",
       local_shipping: 0, order_status: "입고완료",
       memo: String(body.memo ?? "").slice(0, 5000) || null,
-      raw_data: { simple_purchase: true, invoice_total_confirmed: true, payment_currency: "KRW", simple_images: {}, invoice_check_needed: body.invoice_check_needed === true, purchase_registered: false, purchase_category: body.category ?? "매입" }
+      raw_data: { simple_purchase: true, invoice_total_confirmed: true, payment_currency: "KRW", simple_images: {}, invoice_check_needed: body.invoice_check_needed === true, purchase_registered: body.purchase_registered === true, purchase_category: body.category ?? "매입" }
     }).select("id").single();
     if (error) throw error;
     return NextResponse.json({ ok: true, id: data.id });
