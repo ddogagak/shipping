@@ -17,7 +17,7 @@ export async function PUT(req:Request){
   const original=normalize(body.original_series_name);
   if(series_name.length<1||series_name.length>80)return NextResponse.json({ok:false,message:"작품명은 1~80자로 입력해줘."},{status:400});
   if(!Array.isArray(body.keywords))return NextResponse.json({ok:false,message:"키워드 목록이 올바르지 않아."},{status:400});
-  const keywords=[...new Set(body.keywords.map(normalize).filter(Boolean))];
+  const keywords: string[]=[...new Set<string>((body.keywords as unknown[]).map((value: unknown) => normalize(value)).filter((value: string) => value.length > 0))];
   if(keywords.length>200||keywords.some(x=>x.length>100))return NextResponse.json({ok:false,message:"키워드는 최대 200개, 각각 100자 이하여야 해."},{status:400});
   const sb=createServiceRoleClient();
   if(original&&original!==series_name){
