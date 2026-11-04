@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect,useMemo,useState,type CSSProperties } from "react";
-const seriesList=["전체","헌터헌터","귀멸의칼날","나의히어로아카데미아","프리렌","진격의거인","치이카와","나루토","기타"];
+const seriesList=["전체","헌터헌터","귀멸의칼날","나의히어로아카데미아","프리렌","진격의거인","치이카와","약사의혼잣말","나루토","기타"];
 const typeList=["전체","아크릴","지류","뱃지","피규어","키링","기타"];
 const input:CSSProperties={height:36,border:"1px solid #d1d5db",borderRadius:7,padding:"0 9px",boxSizing:"border-box",background:"#fff"};
 function won(v:any){const n=Number(v||0);return Number.isFinite(n)&&n!==0?Math.round(n).toLocaleString("ko-KR")+"원":"-";}
