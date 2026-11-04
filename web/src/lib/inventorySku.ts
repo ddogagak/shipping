@@ -37,6 +37,7 @@ function getSeriesCode(seriesName: string) {
     case "프리렌": return "FRN";
     case "진격의거인": return "AOT";
     case "치이카와": return "CHI";
+    case "약사의혼잣말": return "APD";
     default: return "ETC";
   }
 }
