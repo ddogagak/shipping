@@ -59,10 +59,21 @@ export async function POST(req: Request) {
       }
 
       const sb = createServiceRoleClient();
+      const simpleId = typeof body.simple_order_id === "string" ? body.simple_order_id.trim() : "";
+      let simpleOrder: any = null;
+      if (simpleId) {
+        if (isJapan) return NextResponse.json({ok:false,message:"간이 매입은 한국 매입으로만 전환할 수 있어."},{status:400});
+        const {data,error} = await sb.from("purchase_orders").select("*").eq("id",simpleId).maybeSingle();
+        if (error) throw error;
+        if (!data || data.source_site!=="간이" || data.raw_data?.simple_purchase!==true) return NextResponse.json({ok:false,message:"전환 가능한 간이 매입을 찾을 수 없어."},{status:409});
+        simpleOrder=data;
+        if (Number(purchase.total_amount)!==Number(data.paid_amount)) return NextResponse.json({ok:false,message:"간이 등록된 총금액을 유지해야 해. 금액을 확인해줘."},{status:400});
+        if (currency!=="KRW") return NextResponse.json({ok:false,message:"간이 전환은 원화(KRW)만 지원해."},{status:400});
+      }
       const prefix = isJapan ? "JP" : "DOM";
-      const orderNumber =
-        purchase.invoice_number ||
-        `${prefix}-${purchase.purchased_at.replace(/-/g, "")}-${Date.now().toString().slice(-6)}`;
+      const orderNumber = simpleOrder
+        ? (purchase.invoice_number || `DOM-${simpleOrder.id.slice(0,8)}`)
+        : (purchase.invoice_number || `${prefix}-${purchase.purchased_at.replace(/-/g, "")}-${Date.now().toString().slice(-6)}`);
       const { data: existing, error: existingError } = await sb
         .from("purchase_orders")
         .select("id")
@@ -110,7 +121,10 @@ export async function POST(req: Request) {
       }
       const paidAmount = totalAmount;
 
-      const { data: order, error } = await sb
+      // 간이 주문은 같은 DB 행을 정식 주문으로 전환한다. 금액 중복 및 증빙사진 유실을 방지한다.
+      const { data: order, error } = simpleOrder
+        ? { data:{id:simpleOrder.id},error:null }
+        : await sb
         .from("purchase_orders")
         .insert({
           country,
@@ -165,8 +179,25 @@ export async function POST(req: Request) {
       });
       const { error: itemError } = await sb.from("purchase_items").insert(rows);
       if (itemError) {
-        await sb.from("purchase_orders").delete().eq("id", order.id);
+        if (!simpleOrder) await sb.from("purchase_orders").delete().eq("id", order.id);
         throw itemError;
+      }
+      if (simpleOrder) {
+        const previousRaw = simpleOrder.raw_data ?? {};
+        const newRaw = { ...previousRaw, simple_purchase: false, converted_from_simple: true,
+          converted_at: new Date().toISOString(), previous_simple_order_number: simpleOrder.order_number,
+          source_status: "주문완료", text_import_type: "korea", domestic_items: textItems,
+          invoice_total_confirmed: true };
+        const {error: conversionError} = await sb.from("purchase_orders")
+          .update({country:"KR",source_site:"Domestic",order_number:orderNumber,
+            shop_name:purchase.supplier,ordered_at:simpleOrder.ordered_at,
+            paid_amount:simpleOrder.paid_amount,currency:"KRW",local_shipping:0,
+            memo:purchase.memo || simpleOrder.memo || null,order_status:"주문완료",raw_data:newRaw})
+          .eq("id", simpleOrder.id).eq("source_site","간이");
+        if (conversionError) {
+          await sb.from("purchase_items").delete().eq("purchase_order_id",simpleOrder.id);
+          throw conversionError;
+        }
       }
       return NextResponse.json({ ok: true, saved: 1, itemCount: rows.length, matchedCount, orderNumber, sourceType });
     }
