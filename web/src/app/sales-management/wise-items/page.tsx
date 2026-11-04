@@ -36,8 +36,8 @@ function summarize(rows:Classified[]):Summary[]{
  for(const x of rows){const g=map.get(x.series)||{series:x.series,revenue:0,items:0,orders:new Set<string>(),buyers:new Set<string>(),broadcasts:new Set<string>()};g.revenue+=Number(x.item_price)||0;g.items++;g.orders.add(x.order_id);g.buyers.add(x.buyer_nickname.trim().toLocaleLowerCase());if(x.video_id)g.broadcasts.add(x.video_id);map.set(x.series,g)}
  return [...map.values()].sort((a,b)=>b.revenue-a.revenue);
 }
-type TitleDetail={key:string;name:string;series:string;imageKey:string;count:number;revenue:number;buyers:Set<string>;orders:Set<string>;rows:Classified[]};
-type TitleFamily={key:string;name:string;series:string;imageKey:string;count:number;revenue:number;buyers:Set<string>;orders:Set<string>;children:TitleDetail[]};
+type TitleDetail={key:string;name:string;series:string;imageKey:string;count:number;revenue:number;latestSaleAt:string;buyers:Set<string>;orders:Set<string>;rows:Classified[]};
+type TitleFamily={key:string;name:string;series:string;imageKey:string;count:number;revenue:number;latestSaleAt:string;buyers:Set<string>;orders:Set<string>;children:TitleDetail[]};
 function ReactFragmentItem({item,expanded,onToggle,onClassify,options,saving,manual,checked,onCheckedChange,selectable}:{item:TitleDetail;expanded:boolean;onToggle:()=>void;onClassify:(name:string,imageKey:string,series:string)=>void;options:string[];saving:boolean;manual:boolean;checked:boolean;onCheckedChange:(value:boolean)=>void;selectable:boolean}){
  const buyers=new Map<string,{name:string;revenue:number;count:number;orders:Set<string>}>();
  for(const sale of item.rows){const key=sale.buyer_nickname.trim().toLocaleLowerCase();const buyer=buyers.get(key)||{name:sale.buyer_nickname,revenue:0,count:0,orders:new Set<string>()};buyer.revenue+=Number(sale.item_price)||0;buyer.count++;buyer.orders.add(sale.order_id);buyers.set(key,buyer)}
@@ -47,8 +47,8 @@ function ReactFragmentItem({item,expanded,onToggle,onClassify,options,saving,man
  <td style={{...td,textAlign:"left",whiteSpace:"normal",minWidth:250,fontWeight:600}}><div style={{display:"flex",alignItems:"center",gap:10}}>
  {item.rows.find(row=>row.image_url)?.image_url?<img src={item.rows.find(row=>row.image_url)?.image_url||""} alt={item.name} loading="lazy" style={{width:54,height:54,objectFit:"cover",borderRadius:7,border:"1px solid #e2e8f0",flexShrink:0}}/>:<span style={{display:"flex",alignItems:"center",justifyContent:"center",width:54,height:54,background:"#f1f5f9",borderRadius:7,color:"#94a3b8",flexShrink:0}}>사진 없음</span>}
  <span><span style={{marginRight:8}}>{expanded?"▾":"▸"}</span>{item.name}</span></div></td>
- <td style={td} onClick={event=>event.stopPropagation()}><select aria-label={item.name+" 작품 분류"} disabled={saving} value={item.series} onChange={event=>onClassify(item.name,item.imageKey,event.target.value)} style={{...field,maxWidth:190,padding:"6px 8px",fontSize:12}}>{[...new Set([...options,item.series])].map(value=><option key={value} value={value}>{value}</option>)}</select>{manual&&<div style={{fontSize:10,color:"#0f766e",marginTop:3}}>수동 분류</div>}</td><td style={td}>{cash(item.revenue)}원</td><td style={td}>{cash(item.count)}개</td><td style={td}>{item.buyers.size}명</td><td style={td}>{item.orders.size}건</td></tr>
- {expanded&&<tr><td colSpan={7} style={{padding:16,background:"#f8fafc",borderBottom:"1px solid #cbd5e1"}}>
+ <td style={td} onClick={event=>event.stopPropagation()}><select aria-label={item.name+" 작품 분류"} disabled={saving} value={item.series} onChange={event=>onClassify(item.name,item.imageKey,event.target.value)} style={{...field,maxWidth:190,padding:"6px 8px",fontSize:12}}>{[...new Set([...options,item.series])].map(value=><option key={value} value={value}>{value}</option>)}</select>{manual&&<div style={{fontSize:10,color:"#0f766e",marginTop:3}}>수동 분류</div>}</td><td style={td}>{cash(item.revenue)}원</td><td style={td}>{cash(item.count)}개</td><td style={td}>{item.buyers.size}명</td><td style={td}>{item.orders.size}건</td><td style={td}>{item.latestSaleAt?day(item.latestSaleAt):"—"}</td></tr>
+ {expanded&&<tr><td colSpan={8} style={{padding:16,background:"#f8fafc",borderBottom:"1px solid #cbd5e1"}}>
  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",gap:16}}>
  <div><b>구매자별 매출 ({ranking.length}명)</b><div style={{overflowX:"auto",maxHeight:350,overflowY:"auto",marginTop:8}}><table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr>{["구매자","매출","구매수량","주문"].map(t=><th key={t} style={th}>{t}</th>)}</tr></thead><tbody>{ranking.map((b,i)=><tr key={i}><td style={{...td,textAlign:"left"}}>{b.name}</td><td style={td}>{cash(b.revenue)}원</td><td style={td}>{b.count}개</td><td style={td}>{b.orders.size}건</td></tr>)}</tbody></table></div></div>
  <div><b>실제 판매 내역 ({item.rows.length}건)</b><div style={{overflowX:"auto",maxHeight:350,overflowY:"auto",marginTop:8}}><table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr>{["판매일","구매자","판매금액"].map(t=><th key={t} style={th}>{t}</th>)}</tr></thead><tbody>{[...item.rows].sort((a,b)=>b.ordered_at.localeCompare(a.ordered_at)).map((sale,i)=><tr key={sale.id+"-"+i}><td style={{...td,textAlign:"left"}}>{day(sale.ordered_at)}</td><td style={td}>{sale.buyer_nickname}</td><td style={td}>{cash(sale.item_price)}원</td></tr>)}</tbody></table></div></div>
@@ -96,12 +96,13 @@ export default function WiseItemAnalysis(){
    const imageKey=photoKey(x.image_url);
    // Identical labels may refer to entirely different goods: keep their photo identities distinct.
    const key=x.series+"|"+itemKey(x.item_name)+"|"+imageKey;
-   const v:TitleDetail=map.get(key)??{key,name:x.item_name,series:x.series,imageKey,count:0,revenue:0,buyers:new Set<string>(),orders:new Set<string>(),rows:[]};
+   const v:TitleDetail=map.get(key)??{key,name:x.item_name,series:x.series,imageKey,count:0,revenue:0,latestSaleAt:"",buyers:new Set<string>(),orders:new Set<string>(),rows:[]};
    v.count++;v.revenue+=Number(x.item_price)||0;
+   if(Number.isFinite(Date.parse(x.ordered_at))&&(!v.latestSaleAt||Date.parse(x.ordered_at)>Date.parse(v.latestSaleAt)))v.latestSaleAt=x.ordered_at;
    v.buyers.add(x.buyer_nickname.trim().toLocaleLowerCase());
    v.orders.add(x.order_id);v.rows.push(x);map.set(key,v);
   }
-  return [...map.values()].sort((a,b)=>sort==="count"?b.count-a.count:sort==="buyers"?b.buyers.size-a.buyers.size:b.revenue-a.revenue);
+  return [...map.values()].sort((a,b)=>sort==="date"?(Date.parse(b.latestSaleAt)||0)-(Date.parse(a.latestSaleAt)||0):sort==="count"?b.count-a.count:sort==="buyers"?b.buyers.size-a.buyers.size:b.revenue-a.revenue);
  },[filtered,sort]);
  const byFamily=useMemo(()=>{
   const map=new Map<string,TitleFamily>();
@@ -110,13 +111,14 @@ export default function WiseItemAnalysis(){
    // Without a photo we never strip the number, to avoid mixing unrelated listings.
    const name=item.imageKey?familyName(item.name):item.name;
    const key=item.series+"|"+itemKey(name)+"|"+item.imageKey;
-   const family:TitleFamily=map.get(key)??{key,name,series:item.series,imageKey:item.imageKey,count:0,revenue:0,buyers:new Set<string>(),orders:new Set<string>(),children:[]};
+   const family:TitleFamily=map.get(key)??{key,name,series:item.series,imageKey:item.imageKey,count:0,revenue:0,latestSaleAt:"",buyers:new Set<string>(),orders:new Set<string>(),children:[]};
    family.children.push(item);family.count+=item.count;family.revenue+=item.revenue;
+   if(item.latestSaleAt&&(!family.latestSaleAt||Date.parse(item.latestSaleAt)>Date.parse(family.latestSaleAt)))family.latestSaleAt=item.latestSaleAt;
    for(const buyer of item.buyers)family.buyers.add(buyer);
    for(const order of item.orders)family.orders.add(order);
    map.set(key,family);
   }
-  return [...map.values()].sort((a,b)=>sort==="count"?b.count-a.count:sort==="buyers"?b.buyers.size-a.buyers.size:b.revenue-a.revenue);
+  return [...map.values()].sort((a,b)=>sort==="date"?(Date.parse(b.latestSaleAt)||0)-(Date.parse(a.latestSaleAt)||0):sort==="count"?b.count-a.count:sort==="buyers"?b.buyers.size-a.buyers.size:b.revenue-a.revenue);
  },[byTitle,sort]);
  const visibleTitles=byFamily.slice(0,limit).flatMap(group=>group.children);
  const selectedTitleKeys=[...new Set(byTitle.filter(x=>selectedNames[x.key]).map(x=>classificationKey(x.name,x.imageKey)))];
@@ -189,7 +191,7 @@ export default function WiseItemAnalysis(){
     <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead><tr>{["작품","매출","매출 비중","판매 아이템","구매 고객","주문","방송"].map(x=><th key={x} style={th}>{x}</th>)}</tr></thead><tbody>{buckets.map(x=><tr key={x.series} onClick={()=>setSeries(x.series)} style={{cursor:"pointer"}}><td style={{...td,textAlign:"left",fontWeight:700}}>{x.series}</td><td style={td}>{cash(x.revenue)}원</td><td style={td}>{ratio(x.revenue,revenue)}</td><td style={td}>{cash(x.items)}개</td><td style={td}>{x.buyers.size}명</td><td style={td}>{x.orders.size}건</td><td style={td}>{x.broadcasts.size}회</td></tr>)}</tbody></table></div>
     <p style={{fontSize:12,color:"#64748b"}}>작품 행을 클릭하면 해당 작품으로 필터링해.</p>
    </section>
-   <section style={surface}><div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"center"}}><h2 style={{fontSize:18}}>상품별 실판매 상세 분석</h2><label>정렬 <select style={field} value={sort} onChange={e=>setSort(e.target.value)}><option value="revenue">매출액순</option><option value="count">판매 건수순</option><option value="buyers">구매 고객순</option></select></label></div>
+   <section style={surface}><div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"center"}}><h2 style={{fontSize:18}}>상품별 실판매 상세 분석</h2><label>정렬 <select style={field} value={sort} onChange={e=>setSort(e.target.value)}><option value="revenue">매출액순</option><option value="count">판매 건수순</option><option value="buyers">구매 고객순</option><option value="date">판매날짜순 (최신)</option></select></label></div>
     <div style={{display:"flex",gap:9,alignItems:"center",flexWrap:"wrap",padding:"12px 0"}}>
       <label style={{display:"inline-flex",gap:7,alignItems:"center",fontSize:13,fontWeight:700}}>
         <input type="checkbox" disabled={bulkSaving||!visibleTitles.length} checked={allVisibleChecked} onChange={e=>setSelectedNames(current=>{const next={...current};for(const item of visibleTitles)next[item.key]=e.target.checked;return next;})}/>
@@ -202,8 +204,8 @@ export default function WiseItemAnalysis(){
       <button style={{...field,background:"#111827",color:"#fff",fontWeight:800,cursor:"pointer"}} disabled={bulkSaving||!selectedTitleKeys.length||!bulkSeries} onClick={()=>void bulkClassify()}>{bulkSaving?"일괄 저장 중...":"선택 작품 일괄 분류"}</button>
       <button style={field} disabled={bulkSaving||!selectedTitleKeys.length} onClick={()=>setSelectedNames({})}>선택 해제</button>
     </div>
-    <p style={{fontSize:12,color:"#64748b"}}>번호를 제외한 상품명과 원본 상품사진이 모두 같으면(예: #1 귀칼 / #2 귀칼) 같은 대표 행으로 묶어 표시해. 이름이 같아도 사진이 다르면 별도 행으로 표시하고, 사진이 없는 번호 상품은 임의로 합치지 않아. 묶음을 펼치면 번호별 매출·구매자·주문과 작품 분류를 각각 확인할 수 있어. 같은 이름은 기존처럼 합산하고, 번호별 판매 기록은 유지해. 체크박스와 수동 작품 분류는 상품명+원본 사진별로 독립 관리하며, 다른 사진의 동명 상품에는 영향이 없어.</p>
-    <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}><thead><tr>{["선택","상품명","분류 작품","판매금액 합계","판매 건수","구매 고객","주문 건수"].map(x=><th key={x} style={th}>{x}</th>)}</tr></thead><tbody>{byFamily.slice(0,limit).map(group=>{
+    <p style={{fontSize:12,color:"#64748b"}}>번호를 제외한 상품명과 원본 상품사진이 모두 같으면(예: #1 귀칼 / #2 귀칼) 같은 대표 행으로 묶어 표시해. 이름이 같아도 사진이 다르면 별도 행으로 표시하고, 사진이 없는 번호 상품은 임의로 합치지 않아. 묶음을 펼치면 번호별 매출·구매자·주문과 작품 분류를 각각 확인할 수 있어. 같은 이름은 기존처럼 합산하고, 번호별 판매 기록은 유지해. 판매일은 해당 상품의 가장 최근 판매일(한국시간)이야. 체크박스와 수동 작품 분류는 상품명+원본 사진별로 독립 관리하며, 다른 사진의 동명 상품에는 영향이 없어.</p>
+    <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}><thead><tr>{["선택","상품명","분류 작품","판매금액 합계","판매 건수","구매 고객","주문 건수","최근 판매일"].map(x=><th key={x} style={th}>{x}</th>)}</tr></thead><tbody>{byFamily.slice(0,limit).map(group=>{
       const multi=group.children.length>1;
       const opened=!!expandedFamilies[group.key];
       const eligible=group.children;
@@ -220,7 +222,7 @@ export default function WiseItemAnalysis(){
           {photo?<img src={photo} alt="" loading="lazy" style={{width:54,height:54,objectFit:"cover",borderRadius:7,border:"1px solid #e2e8f0",flexShrink:0}}/>:<span style={{display:"flex",width:54,height:54,alignItems:"center",justifyContent:"center",background:"#e2e8f0",borderRadius:7,fontSize:11,color:"#64748b"}}>사진 없음</span>}
           <span>{opened?"▾":"▸"} {group.name} <span style={{fontSize:11,color:"#64748b"}}>({group.children.length}종)</span></span>
          </div></td>
-         <td style={td}>{group.series}</td><td style={td}>{cash(group.revenue)}원</td><td style={td}>{cash(group.count)}개</td><td style={td}>{group.buyers.size}명</td><td style={td}>{group.orders.size}건</td>
+         <td style={td}>{group.series}</td><td style={td}>{cash(group.revenue)}원</td><td style={td}>{cash(group.count)}개</td><td style={td}>{group.buyers.size}명</td><td style={td}>{group.orders.size}건</td><td style={td}>{group.latestSaleAt?day(group.latestSaleAt):"—"}</td>
         </tr>
         {opened&&group.children.map(x=><ReactFragmentItem key={x.key} item={x} expanded={expanded===x.key} onToggle={()=>setExpanded(current=>current===x.key?null:x.key)} onClassify={saveClassify} options={seriesList} saving={savingKey===classificationKey(x.name,x.imageKey)} manual={!!(overrides[classificationKey(x.name,x.imageKey)]||overrides[itemKey(x.name)])} checked={!!selectedNames[x.key]} selectable={true} onCheckedChange={checked=>setSelectedNames(current=>({...current,[x.key]:checked}))}/>)}
       </Fragment>;
