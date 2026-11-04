@@ -9,6 +9,13 @@ type Summary={series:string;revenue:number;items:number;orders:Set<string>;buyer
 const cash=(n:number)=>Math.round(n).toLocaleString("ko-KR");
 const itemKey=(name:string)=>name.normalize("NFKC").toLocaleLowerCase().replace(/\s+/g,"");
 const photoKey=(url:string|null|undefined)=>String(url||"").trim().split("?")[0];
+const classificationKey=(name:string,image:string|null|undefined)=>{
+ const normalized=itemKey(name),url=photoKey(image);
+ if(!url)return normalized;
+ let h1=2166136261,h2=0x9e3779b9;
+ for(let i=0;i<url.length;i++){const c=url.charCodeAt(i);h1=Math.imul(h1^c,16777619);h2=Math.imul(h2^c,2246822519);}
+ return "photo:"+normalized.slice(0,370)+":"+(h1>>>0).toString(36)+":"+(h2>>>0).toString(36);
+};
 // Numbered variants (#1 귀칼, #2 귀칼) belong to one display family.
 // Keep each full original name as a separate child: prices, purchasers and orders are never merged across variants.
 const familyName=(name:string)=>{
@@ -30,7 +37,7 @@ function summarize(rows:Classified[]):Summary[]{
 }
 type TitleDetail={key:string;name:string;series:string;imageKey:string;count:number;revenue:number;buyers:Set<string>;orders:Set<string>;rows:Classified[]};
 type TitleFamily={key:string;name:string;series:string;imageKey:string;count:number;revenue:number;buyers:Set<string>;orders:Set<string>;children:TitleDetail[]};
-function ReactFragmentItem({item,expanded,onToggle,onClassify,options,saving,manual,checked,onCheckedChange,selectable}:{item:TitleDetail;expanded:boolean;onToggle:()=>void;onClassify:(name:string,series:string)=>void;options:string[];saving:boolean;manual:boolean;checked:boolean;onCheckedChange:(value:boolean)=>void;selectable:boolean}){
+function ReactFragmentItem({item,expanded,onToggle,onClassify,options,saving,manual,checked,onCheckedChange,selectable}:{item:TitleDetail;expanded:boolean;onToggle:()=>void;onClassify:(name:string,imageKey:string,series:string)=>void;options:string[];saving:boolean;manual:boolean;checked:boolean;onCheckedChange:(value:boolean)=>void;selectable:boolean}){
  const buyers=new Map<string,{name:string;revenue:number;count:number;orders:Set<string>}>();
  for(const sale of item.rows){const key=sale.buyer_nickname.trim().toLocaleLowerCase();const buyer=buyers.get(key)||{name:sale.buyer_nickname,revenue:0,count:0,orders:new Set<string>()};buyer.revenue+=Number(sale.item_price)||0;buyer.count++;buyer.orders.add(sale.order_id);buyers.set(key,buyer)}
  const ranking=[...buyers.values()].sort((a,b)=>b.revenue-a.revenue);
@@ -39,7 +46,7 @@ function ReactFragmentItem({item,expanded,onToggle,onClassify,options,saving,man
  <td style={{...td,textAlign:"left",whiteSpace:"normal",minWidth:250,fontWeight:600}}><div style={{display:"flex",alignItems:"center",gap:10}}>
  {item.rows.find(row=>row.image_url)?.image_url?<img src={item.rows.find(row=>row.image_url)?.image_url||""} alt={item.name} loading="lazy" style={{width:54,height:54,objectFit:"cover",borderRadius:7,border:"1px solid #e2e8f0",flexShrink:0}}/>:<span style={{display:"flex",alignItems:"center",justifyContent:"center",width:54,height:54,background:"#f1f5f9",borderRadius:7,color:"#94a3b8",flexShrink:0}}>사진 없음</span>}
  <span><span style={{marginRight:8}}>{expanded?"▾":"▸"}</span>{item.name}</span></div></td>
- <td style={td} onClick={event=>event.stopPropagation()}><select aria-label={item.name+" 작품 분류"} disabled={saving} value={item.series} onChange={event=>onClassify(item.name,event.target.value)} style={{...field,maxWidth:190,padding:"6px 8px",fontSize:12}}>{[...new Set([...options,item.series])].map(value=><option key={value} value={value}>{value}</option>)}</select>{manual&&<div style={{fontSize:10,color:"#0f766e",marginTop:3}}>수동 분류</div>}</td><td style={td}>{cash(item.revenue)}원</td><td style={td}>{cash(item.count)}개</td><td style={td}>{item.buyers.size}명</td><td style={td}>{item.orders.size}건</td></tr>
+ <td style={td} onClick={event=>event.stopPropagation()}><select aria-label={item.name+" 작품 분류"} disabled={saving} value={item.series} onChange={event=>onClassify(item.name,item.imageKey,event.target.value)} style={{...field,maxWidth:190,padding:"6px 8px",fontSize:12}}>{[...new Set([...options,item.series])].map(value=><option key={value} value={value}>{value}</option>)}</select>{manual&&<div style={{fontSize:10,color:"#0f766e",marginTop:3}}>수동 분류</div>}</td><td style={td}>{cash(item.revenue)}원</td><td style={td}>{cash(item.count)}개</td><td style={td}>{item.buyers.size}명</td><td style={td}>{item.orders.size}건</td></tr>
  {expanded&&<tr><td colSpan={7} style={{padding:16,background:"#f8fafc",borderBottom:"1px solid #cbd5e1"}}>
  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",gap:16}}>
  <div><b>구매자별 매출 ({ranking.length}명)</b><div style={{overflowX:"auto",maxHeight:350,overflowY:"auto",marginTop:8}}><table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr>{["구매자","매출","구매수량","주문"].map(t=><th key={t} style={th}>{t}</th>)}</tr></thead><tbody>{ranking.map((b,i)=><tr key={i}><td style={{...td,textAlign:"left"}}>{b.name}</td><td style={td}>{cash(b.revenue)}원</td><td style={td}>{b.count}개</td><td style={td}>{b.orders.size}건</td></tr>)}</tbody></table></div></div>
@@ -62,7 +69,7 @@ export default function WiseItemAnalysis(){
    if(deleted.has(String(row.id)))continue;
    const classification=classifySeriesByKeywords(row.item_name||"",rules);
    const monthValue=day(row.ordered_at).slice(0,7);
-   const manualSeries=overrides[itemKey(row.item_name||"")];
+   const manualSeries=overrides[classificationKey(row.item_name||"",row.image_url)]||overrides[itemKey(row.item_name||"")];
    result.push({...row,series:manualSeries|| (classification.matches.length>1?"키워드 충돌":classification.series||"미분류"),matched:manualSeries?[manualSeries]:classification.matches,month:monthValue,manual:!!manualSeries});
   }
   return result;
@@ -106,8 +113,8 @@ export default function WiseItemAnalysis(){
   return [...map.values()].sort((a,b)=>sort==="count"?b.count-a.count:sort==="buyers"?b.buyers.size-a.buyers.size:b.revenue-a.revenue);
  },[byTitle,sort]);
  const visibleTitles=byFamily.slice(0,limit).flatMap(group=>group.children);
- const selectedTitleKeys=[...new Set(byTitle.filter(x=>selectedNames[itemKey(x.name)]).map(x=>itemKey(x.name)))];
- const allVisibleChecked=visibleTitles.length>0&&visibleTitles.every(x=>selectedNames[itemKey(x.name)]);
+ const selectedTitleKeys=[...new Set(byTitle.filter(x=>selectedNames[x.key]).map(x=>classificationKey(x.name,x.imageKey)))];
+ const allVisibleChecked=visibleTitles.length>0&&visibleTitles.every(x=>selectedNames[x.key]);
  const bulkOptions=seriesList.filter(x=>x!=="미분류"&&x!=="키워드 충돌");
  const bulkClassify=async()=>{
    if(!selectedTitleKeys.length){setMessage("작품을 수정할 상품을 먼저 선택해줘.");return;}
@@ -119,19 +126,19 @@ export default function WiseItemAnalysis(){
      if(!response.ok||!data.ok)throw Error(data.message||"일괄 분류 저장 실패");
      setOverrides(current=>({...current,...Object.fromEntries(selectedTitleKeys.map(key=>[key,bulkSeries]))}));
      setSelectedNames({});
-     setMessage(`${data.count}종을 '${bulkSeries}' 작품으로 일괄 분류했어. 같은 상품명에 해당하는 판매 내역 전체에 적용돼.`);
+     setMessage(`${data.count}종을 '${bulkSeries}' 작품으로 일괄 분류했어. 선택한 상품명·사진의 판매 내역에 적용돼.`);
    }catch(e){setMessage(e instanceof Error?e.message:"일괄 분류 실패");}
    finally{setBulkSaving(false);}
  };
- const saveClassify=async(name:string,nextSeries:string)=>{
-  const key=itemKey(name),previous=overrides[key];
+ const saveClassify=async(name:string,image:string,nextSeries:string)=>{
+  const key=classificationKey(name,image),previous=overrides[key];
   setSavingKey(key);setMessage("");
   setOverrides(current=>({...current,[key]:nextSeries}));
   try{
    const response=await fetch("/api/sales-management/item-series-overrides",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({item_key:key,series_name:nextSeries})});
    const data=await response.json();
    if(!response.ok||!data.ok)throw Error(data.message||"분류 저장 실패");
-   setMessage("작품 분류를 저장했어. 동일 상품명 전체에 적용돼.");
+   setMessage("작품 분류를 저장했어. 같은 상품명·사진의 판매 내역에 적용돼.");
   }catch(e){
    setOverrides(current=>{const next={...current};if(previous===undefined)delete next[key];else next[key]=previous;return next});
    setMessage(e instanceof Error?e.message:"분류 저장 실패");
@@ -179,7 +186,7 @@ export default function WiseItemAnalysis(){
    <section style={surface}><div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"center"}}><h2 style={{fontSize:18}}>상품별 실판매 상세 분석</h2><label>정렬 <select style={field} value={sort} onChange={e=>setSort(e.target.value)}><option value="revenue">매출액순</option><option value="count">판매 건수순</option><option value="buyers">구매 고객순</option></select></label></div>
     <div style={{display:"flex",gap:9,alignItems:"center",flexWrap:"wrap",padding:"12px 0"}}>
       <label style={{display:"inline-flex",gap:7,alignItems:"center",fontSize:13,fontWeight:700}}>
-        <input type="checkbox" disabled={bulkSaving||!visibleTitles.length} checked={allVisibleChecked} onChange={e=>setSelectedNames(current=>{const next={...current};for(const item of visibleTitles)next[itemKey(item.name)]=e.target.checked;return next;})}/>
+        <input type="checkbox" disabled={bulkSaving||!visibleTitles.length} checked={allVisibleChecked} onChange={e=>setSelectedNames(current=>{const next={...current};for(const item of visibleTitles)next[item.key]=e.target.checked;return next;})}/>
         표시된 상품 전체 선택 ({visibleTitles.length}종)
       </label>
       <span style={{color:"#64748b",fontSize:12}}>선택 {selectedTitleKeys.length}종</span>
@@ -189,27 +196,27 @@ export default function WiseItemAnalysis(){
       <button style={{...field,background:"#111827",color:"#fff",fontWeight:800,cursor:"pointer"}} disabled={bulkSaving||!selectedTitleKeys.length||!bulkSeries} onClick={()=>void bulkClassify()}>{bulkSaving?"일괄 저장 중...":"선택 작품 일괄 분류"}</button>
       <button style={field} disabled={bulkSaving||!selectedTitleKeys.length} onClick={()=>setSelectedNames({})}>선택 해제</button>
     </div>
-    <p style={{fontSize:12,color:"#64748b"}}>번호를 제외한 상품명과 원본 상품사진이 모두 같으면(예: #1 귀칼 / #2 귀칼) 같은 대표 행으로 묶어 표시해. 이름이 같아도 사진이 다르면 별도 행으로 표시하고, 사진이 없는 번호 상품은 임의로 합치지 않아. 묶음을 펼치면 번호별 매출·구매자·주문과 작품 분류를 각각 확인할 수 있어. 같은 이름은 기존처럼 합산하고, 번호별 판매 기록은 유지해. 미분류뿐 아니라 이미 분류된 상품도 체크해서 일괄 재분류할 수 있어.</p>
+    <p style={{fontSize:12,color:"#64748b"}}>번호를 제외한 상품명과 원본 상품사진이 모두 같으면(예: #1 귀칼 / #2 귀칼) 같은 대표 행으로 묶어 표시해. 이름이 같아도 사진이 다르면 별도 행으로 표시하고, 사진이 없는 번호 상품은 임의로 합치지 않아. 묶음을 펼치면 번호별 매출·구매자·주문과 작품 분류를 각각 확인할 수 있어. 같은 이름은 기존처럼 합산하고, 번호별 판매 기록은 유지해. 체크박스와 수동 작품 분류는 상품명+원본 사진별로 독립 관리하며, 다른 사진의 동명 상품에는 영향이 없어.</p>
     <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}><thead><tr>{["선택","상품명","분류 작품","판매금액 합계","판매 건수","구매 고객","주문 건수"].map(x=><th key={x} style={th}>{x}</th>)}</tr></thead><tbody>{byFamily.slice(0,limit).map(group=>{
       const multi=group.children.length>1;
       const opened=!!expandedFamilies[group.key];
       const eligible=group.children;
-      const groupSelected=eligible.length>0&&eligible.every(x=>selectedNames[itemKey(x.name)]);
+      const groupSelected=eligible.length>0&&eligible.every(x=>selectedNames[x.key]);
       if(!multi){
        const x=group.children[0];
-       return <ReactFragmentItem key={x.key} item={x} expanded={expanded===x.key} onToggle={()=>setExpanded(current=>current===x.key?null:x.key)} onClassify={saveClassify} options={seriesList} saving={savingKey===itemKey(x.name)} manual={!!overrides[itemKey(x.name)]} checked={!!selectedNames[itemKey(x.name)]} selectable={true} onCheckedChange={checked=>setSelectedNames(current=>({...current,[itemKey(x.name)]:checked}))}/>;
+       return <ReactFragmentItem key={x.key} item={x} expanded={expanded===x.key} onToggle={()=>setExpanded(current=>current===x.key?null:x.key)} onClassify={saveClassify} options={seriesList} saving={savingKey===classificationKey(x.name,x.imageKey)} manual={!!(overrides[classificationKey(x.name,x.imageKey)]||overrides[itemKey(x.name)])} checked={!!selectedNames[x.key]} selectable={true} onCheckedChange={checked=>setSelectedNames(current=>({...current,[x.key]:checked}))}/>;
       }
       const photo=group.children.flatMap(x=>x.rows).find(row=>row.image_url)?.image_url;
       return <Fragment key={group.key}>
         <tr style={{background:"#f8fafc",cursor:"pointer",fontWeight:700}} onClick={()=>setExpandedFamilies(current=>({...current,[group.key]:!opened}))}>
-         <td style={{...td,textAlign:"center"}} onClick={e=>e.stopPropagation()}><input type="checkbox" aria-label={group.name+" 묶음 일괄 분류 선택"} disabled={!eligible.length||bulkSaving} checked={groupSelected} onChange={e=>setSelectedNames(current=>{const next={...current};for(const child of eligible)next[itemKey(child.name)]=e.target.checked;return next;})}/></td>
+         <td style={{...td,textAlign:"center"}} onClick={e=>e.stopPropagation()}><input type="checkbox" aria-label={group.name+" 묶음 일괄 분류 선택"} disabled={!eligible.length||bulkSaving} checked={groupSelected} onChange={e=>setSelectedNames(current=>{const next={...current};for(const child of eligible)next[child.key]=e.target.checked;return next;})}/></td>
          <td style={{...td,textAlign:"left",whiteSpace:"normal",minWidth:250}}><div style={{display:"flex",alignItems:"center",gap:10}}>
           {photo?<img src={photo} alt="" loading="lazy" style={{width:54,height:54,objectFit:"cover",borderRadius:7,border:"1px solid #e2e8f0",flexShrink:0}}/>:<span style={{display:"flex",width:54,height:54,alignItems:"center",justifyContent:"center",background:"#e2e8f0",borderRadius:7,fontSize:11,color:"#64748b"}}>사진 없음</span>}
           <span>{opened?"▾":"▸"} {group.name} <span style={{fontSize:11,color:"#64748b"}}>({group.children.length}종)</span></span>
          </div></td>
          <td style={td}>{group.series}</td><td style={td}>{cash(group.revenue)}원</td><td style={td}>{cash(group.count)}개</td><td style={td}>{group.buyers.size}명</td><td style={td}>{group.orders.size}건</td>
         </tr>
-        {opened&&group.children.map(x=><ReactFragmentItem key={x.key} item={x} expanded={expanded===x.key} onToggle={()=>setExpanded(current=>current===x.key?null:x.key)} onClassify={saveClassify} options={seriesList} saving={savingKey===itemKey(x.name)} manual={!!overrides[itemKey(x.name)]} checked={!!selectedNames[itemKey(x.name)]} selectable={true} onCheckedChange={checked=>setSelectedNames(current=>({...current,[itemKey(x.name)]:checked}))}/>)}
+        {opened&&group.children.map(x=><ReactFragmentItem key={x.key} item={x} expanded={expanded===x.key} onToggle={()=>setExpanded(current=>current===x.key?null:x.key)} onClassify={saveClassify} options={seriesList} saving={savingKey===classificationKey(x.name,x.imageKey)} manual={!!(overrides[classificationKey(x.name,x.imageKey)]||overrides[itemKey(x.name)])} checked={!!selectedNames[x.key]} selectable={true} onCheckedChange={checked=>setSelectedNames(current=>({...current,[x.key]:checked}))}/>)}
       </Fragment>;
     })}</tbody></table></div>
     <p style={{fontSize:12,color:"#64748b",marginTop:12}}>{byFamily.length}묶음 ({byTitle.length}개 상품명) 중 {Math.min(limit,byFamily.length)}묶음 표시 {limit<byFamily.length&&<button style={{...field,marginLeft:8}} onClick={()=>setLimit(v=>v+50)}>50종 더 보기</button>}</p>
