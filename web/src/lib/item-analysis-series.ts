@@ -1,3 +1,4 @@
+export const DEFAULT_ANALYSIS_SERIES=["헌터헌터","귀멸의칼날","나의히어로아카데미아","프리렌","진격의거인","치이카와","약사의혼잣말","나루토","쿠지","그비돌","디즈니","기타","미분류"] as const;
 export type SeriesKeywordRule={series_name:string;keywords:string[];updated_at?:string};
 export function normalizedKeywordText(value:unknown):string{
  return String(value??"").normalize("NFKC").toLocaleLowerCase().replace(/\s+/g,"");
