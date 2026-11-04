@@ -7,7 +7,7 @@ import path from "path";
 export const runtime="nodejs";
 type CustomsCategory={name:"doll"|"figure"|"postcard"|"poster"|"toy";code:"110"|"480"|"80"|"515"|"108"};
 const DOLL_KEYWORDS=["毛绒","毛絨","玩偶","娃娃","布偶"],FIGURE_KEYWORDS=["手办","手辦","模型","人偶","雕像","PVC手办","PVC手辦","盒蛋"],POSTCARD_KEYWORDS=["明信片","明信卡"],POSTER_KEYWORDS=["海报","海報","挂画","掛畫"];
-const SERIES_EN:Record<string,string>={"헌터헌터":"Hunter x Hunter","귀멸의칼날":"Demon Slayer","나의히어로아카데미아":"My Hero Academia","프리렌":"Frieren","진격의거인":"Attack on Titan","치이카와":"Chiikawa","나루토":"Naruto","기타":"Anime"};
+const SERIES_EN:Record<string,string>={"헌터헌터":"Hunter x Hunter","귀멸의칼날":"Demon Slayer","나의히어로아카데미아":"My Hero Academia","프리렌":"Frieren","진격의거인":"Attack on Titan","치이카와":"Chiikawa", "약사의혼잣말":"The Apothecary Diaries","나루토":"Naruto","기타":"Anime"};
 const TYPE_EN:Record<string,string>={"아크릴":"Acrylic","지류":"Paper Goods","뱃지":"Badge","피규어":"Figure","키링":"Keychain","기타":"Goods"};
 function forwarderEnglishName(series:unknown,type:unknown){const seriesEn=SERIES_EN[String(series||"")]||"Anime",typeEn=TYPE_EN[String(type||"")]||"Goods";return `${seriesEn} - ${typeEn}`;}
 function containsAny(text:string,keywords:string[]){return keywords.some(k=>text.includes(k));}
