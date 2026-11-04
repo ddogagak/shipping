@@ -27,7 +27,7 @@ function parseDate(value: unknown) {
 export async function GET() {
   try {
     const sb = createServiceRoleClient();
-    const { data, error } = await sb.from("purchase_orders").select("id,order_number,ordered_at,paid_amount,memo,raw_data,created_at").eq("source_site", "간이").order("created_at", { ascending: false });
+    const { data, error } = await sb.from("purchase_orders").select("id,order_number,ordered_at,paid_amount,memo,shop_name,raw_data,created_at").eq("source_site", "간이").order("created_at", { ascending: false });
     if (error) throw error;
     const rows = (data ?? []).filter(isSimple);
     const entries = await Promise.all(rows.map(async (row: any) => {
@@ -39,7 +39,7 @@ export async function GET() {
           if (!signError) images[kind] = signed?.signedUrl ?? null;
         }
       }));
-      return { id: row.id, order_number: row.order_number, ordered_at: row.ordered_at, paid_amount: row.paid_amount, memo: row.memo, invoice_check_needed: row.raw_data?.invoice_check_needed === true, images };
+      return { id: row.id, order_number: row.order_number, ordered_at: row.ordered_at, paid_amount: row.paid_amount, memo: row.memo, shop_name: row.shop_name === "간이 매입" ? "" : (row.shop_name || ""), invoice_check_needed: row.raw_data?.invoice_check_needed === true, images };
     }));
     return NextResponse.json({ ok: true, entries });
   } catch(e) {
@@ -56,7 +56,7 @@ export async function POST(req: Request) {
     if (!date) return bad("입금 날짜가 잘못됐어.");
     const sb = createServiceRoleClient();
     const { data, error } = await sb.from("purchase_orders").insert({
-      country: "KR", source_site: "간이", shop_name: "간이 매입",
+      country: "KR", source_site: "간이", shop_name: String(body.shop_name ?? "").trim().slice(0, 200) || null,
       order_number: "SIMPLE-" + crypto.randomUUID(),
       ordered_at: date, paid_amount: amount, currency: "KRW",
       local_shipping: 0, order_status: "입고완료",
@@ -76,14 +76,19 @@ export async function PATCH(req: Request) {
     if (req.headers.get("content-type")?.includes("application/json")) {
       const body = await req.json();
       const id = String(body.id ?? "");
-      if (!id || typeof body.invoice_check_needed !== "boolean") return bad("계산서 확인 여부가 잘못됐어.");
+      if (!id || (typeof body.invoice_check_needed !== "boolean" && typeof body.shop_name !== "string")) return bad("수정할 정보를 확인해줘.");
       const { data: row, error: readError } = await sb.from("purchase_orders").select("id,raw_data").eq("id", id).single();
       if (readError || !isSimple(row)) return bad("간이 매입을 찾을 수 없어.", 404);
-      const { error } = await sb.from("purchase_orders").update({
-        raw_data: { ...row.raw_data, invoice_check_needed: body.invoice_check_needed }
-      }).eq("id", id);
+      const update: Record<string, unknown> = {};
+      if (typeof body.invoice_check_needed === "boolean") {
+        update.raw_data = { ...row.raw_data, invoice_check_needed: body.invoice_check_needed };
+      }
+      if (typeof body.shop_name === "string") {
+        update.shop_name = body.shop_name.trim().slice(0, 200) || null;
+      }
+      const { error } = await sb.from("purchase_orders").update(update).eq("id", id);
       if (error) throw error;
-      return NextResponse.json({ ok: true, invoice_check_needed: body.invoice_check_needed });
+      return NextResponse.json({ ok: true });
     }
     const fd = await req.formData();
     const id = String(fd.get("id") ?? "");
