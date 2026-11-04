@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import {useEffect,useMemo,useState,type CSSProperties} from "react";
-import {classifySeriesByKeywords,type SeriesKeywordRule} from "@/lib/item-analysis-series";
+import {classifySeriesByKeywords,DEFAULT_ANALYSIS_SERIES,type SeriesKeywordRule} from "@/lib/item-analysis-series";
 const control:CSSProperties={border:"1px solid #cbd5e1",borderRadius:9,padding:"9px 11px",background:"#fff",color:"#0f172a"};
 const card:CSSProperties={padding:18,border:"1px solid #e2e8f0",background:"#fff",borderRadius:14};
 const split=(v:string)=>[...new Set(v.split(/[\n,，]+/).map(x=>x.trim()).filter(Boolean))];
@@ -15,12 +15,20 @@ export default function ItemKeywordEditor(){
   return next;
  }
  useEffect(()=>{let active=true;fetch("/api/sales-management/item-keywords",{cache:"no-store"}).then(async r=>{const j=await r.json();if(!r.ok||!j.ok)throw Error(j.message||"키워드 조회 실패");if(active)setRules(j.rules||[])}).catch(e=>{if(active)setMessage(String(e.message||e))}).finally(()=>{if(active)setLoading(false)});return()=>{active=false}},[]);
+ const catalog=useMemo(()=>{
+  const map=new Map(rules.map(rule=>[rule.series_name,rule]));
+  for(const name of DEFAULT_ANALYSIS_SERIES){
+   if(name==="기타"||name==="미분류")continue;
+   if(!map.has(name))map.set(name,{series_name:name,keywords:[]});
+  }
+  return [...map.values()].sort((a,b)=>a.series_name.localeCompare(b.series_name,"ko"));
+ },[rules]);
  const chosen=useMemo(()=>rules.find(x=>x.series_name===selected),[rules,selected]);
- function choose(name:string){const found=rules.find(x=>x.series_name===name);setSelected(name);setOriginal(name);setTitle(name);setRaw(found?.keywords.join("\n")||"");setMessage("")}
+ function choose(name:string){const found=rules.find(x=>x.series_name===name);setSelected(name);setOriginal(found?name:"");setTitle(name);setRaw(found?.keywords.join("\n")||"");setMessage("")}
  function fresh(){setSelected("");setOriginal("");setTitle("");setRaw("");setMessage("")}
  const keywords=split(raw);
  const duplicate=useMemo(()=>keywords.map(keyword=>({keyword,others:rules.filter(rule=>rule.series_name!==original&&rule.keywords.some(x=>x.normalize("NFKC").toLowerCase()===keyword.normalize("NFKC").toLowerCase())).map(x=>x.series_name)})).filter(x=>x.others.length>0),[keywords,rules,original]);
- const sampleResults=useMemo(()=>classifySeriesByKeywords(sample,[...rules.filter(x=>x.series_name!==original),...(title.trim()?[{series_name:title.trim(),keywords}]:[])]),[sample,rules,original,title,raw]);
+ const sampleResults=useMemo(()=>classifySeriesByKeywords(sample,[...rules.filter(x=>x.series_name!==(selected||original)),...(title.trim()?[{series_name:title.trim(),keywords}]:[])]),[sample,rules,selected,original,title,raw]);
  async function save(){
   if(!title.trim()){setMessage("작품명을 입력해줘.");return;}
   if(saving)return;
@@ -50,13 +58,13 @@ export default function ItemKeywordEditor(){
   {message&&<div role="status" style={{...card,marginBottom:14,background:"#f0f9ff",fontSize:13}}>{message}</div>}
   {loading?<div style={card}>작품 목록 불러오는 중…</div>:<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,350px),1fr))",gap:16,alignItems:"start"}}>
    <section style={card}>
-    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,gap:8}}><h2 style={{fontSize:18,margin:0}}>등록된 작품 · {rules.length}개</h2><button style={control} onClick={fresh}>+ 새 작품</button></div>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,gap:8}}><h2 style={{fontSize:18,margin:0}}>작품 목록 · {catalog.length}개</h2><button style={control} onClick={fresh}>+ 새 작품</button></div>
     <div style={{display:"grid",gap:7}}>
-     {rules.map(rule=><button key={rule.series_name} onClick={()=>choose(rule.series_name)} style={{...control,textAlign:"left",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,background:selected===rule.series_name?"#eff6ff":"#fff",borderColor:selected===rule.series_name?"#60a5fa":"#cbd5e1",cursor:"pointer"}}><b>{rule.series_name}</b><span style={{fontSize:12,color:"#64748b"}}>{rule.keywords.length}개 키워드</span></button>)}
+     {catalog.map(rule=><button key={rule.series_name} onClick={()=>choose(rule.series_name)} style={{...control,textAlign:"left",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,background:selected===rule.series_name?"#eff6ff":"#fff",borderColor:selected===rule.series_name?"#60a5fa":"#cbd5e1",cursor:"pointer"}}><b>{rule.series_name}</b><span style={{fontSize:12,color:"#64748b"}}>{rule.keywords.length}개 키워드</span></button>)}
     </div>
    </section>
    <section style={card}>
-    <h2 style={{fontSize:18,margin:"0 0 14px"}}>{original?"작품 키워드 수정":"새 작품 추가"}</h2>
+    <h2 style={{fontSize:18,margin:"0 0 14px"}}>{original?"작품 키워드 수정":selected?"새 작품 키워드 등록":"새 작품 추가"}</h2>
     <label style={{fontSize:13,fontWeight:700,display:"block",marginBottom:12}}>표준 작품명<input value={title} onChange={e=>setTitle(e.target.value)} placeholder="예: 치이카와" style={{...control,width:"100%",boxSizing:"border-box",marginTop:5}}/></label>
     <label style={{fontSize:13,fontWeight:700,display:"block"}}>인식할 키워드<textarea value={raw} onChange={e=>setRaw(e.target.value)} rows={12} placeholder={"치이카와\n먼작귀\n하치와레\nちいかわ"} style={{...control,width:"100%",boxSizing:"border-box",marginTop:6,resize:"vertical",lineHeight:1.7}}/></label>
     <p style={{fontSize:12,color:"#64748b",lineHeight:1.65}}>키워드를 한 줄에 하나씩 입력해. 쉼표로도 구분 가능해. 영문 대소문자와 띄어쓰기는 구분하지 않아. 너무 짧고 일반적인 단어는 다른 작품과 잘못 매칭될 수 있어.</p>
