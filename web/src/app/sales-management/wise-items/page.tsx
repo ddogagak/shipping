@@ -23,7 +23,8 @@ const familyName=(name:string)=>{
  const base=normalized.replace(/^#\s*\d+\s*(?:[.:-]\s*)?/u,"").trim();
  return base||normalized;
 };
-const fixedSeries=["헌터헌터","귀멸의칼날","나의히어로아카데미아","프리렌","진격의거인","치이카와","약사의혼잣말","나루토","야생","기타","미분류"];
+const fixedSeries=["헌터헌터","귀멸의칼날","나의히어로아카데미아","프리렌","진격의거인","치이카와","약사의혼잣말","나루토","쿠지","그비돌","디즈니","기타","미분류"];
+const normalizeSeries=(value:string)=>value==="야생"?"쿠지":value;
 const ratio=(a:number,b:number)=>b?(100*a/b).toFixed(1)+"%":"—";
 const day=(s:string)=>{const d=new Date(s);return Number.isNaN(d.getTime())?"":new Intl.DateTimeFormat("sv-SE",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(d)};
 const surface:CSSProperties={background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,padding:17};
@@ -61,7 +62,7 @@ export default function WiseItemAnalysis(){
  const [selectedNames,setSelectedNames]=useState<Record<string,boolean>>({});
  const [expandedFamilies,setExpandedFamilies]=useState<Record<string,boolean>>({});
  const [bulkSeries,setBulkSeries]=useState(""),[bulkSaving,setBulkSaving]=useState(false);
- useEffect(()=>{let active=true;Promise.all([fetch("/api/sales-management",{cache:"no-store"}),fetch("/api/sales-management/item-keywords",{cache:"no-store"}),fetch("/api/sales-management/item-series-overrides",{cache:"no-store"})]).then(async([a,b,d])=>{const [data,keywords,manual]=await Promise.all([a.json(),b.json(),d.json()]);if(!a.ok||!data.ok)throw Error(data.message||"매출관리 조회 실패");if(!b.ok||!keywords.ok)throw Error(keywords.message||"작품 키워드 조회 실패");if(!d.ok||!manual.ok)throw Error(manual.message||"수동 분류 조회 실패");if(active){setReport(data);setRules(keywords.rules||[]);setOverrides(Object.fromEntries((manual.overrides||[]).map((x:{item_key:string;series_name:string})=>[x.item_key,x.series_name])))}}).catch(e=>{if(active)setError(e instanceof Error?e.message:"조회 실패")}).finally(()=>{if(active)setLoading(false)});return()=>{active=false}},[]);
+ useEffect(()=>{let active=true;Promise.all([fetch("/api/sales-management",{cache:"no-store"}),fetch("/api/sales-management/item-keywords",{cache:"no-store"}),fetch("/api/sales-management/item-series-overrides",{cache:"no-store"})]).then(async([a,b,d])=>{const [data,keywords,manual]=await Promise.all([a.json(),b.json(),d.json()]);if(!a.ok||!data.ok)throw Error(data.message||"매출관리 조회 실패");if(!b.ok||!keywords.ok)throw Error(keywords.message||"작품 키워드 조회 실패");if(!d.ok||!manual.ok)throw Error(manual.message||"수동 분류 조회 실패");if(active){setReport(data);setRules((keywords.rules||[]).map((rule:SeriesKeywordRule)=>({...rule,series_name:normalizeSeries(rule.series_name)})));setOverrides(Object.fromEntries((manual.overrides||[]).map((x:{item_key:string;series_name:string})=>[x.item_key,normalizeSeries(x.series_name)])))}}).catch(e=>{if(active)setError(e instanceof Error?e.message:"조회 실패")}).finally(()=>{if(active)setLoading(false)});return()=>{active=false}},[]);
  const all=useMemo(()=>{
   const deleted=new Set((report?.settings?.item_settings||[]).filter(x=>x.deleted).map(x=>String(x.id)));
   const result:Classified[]=[];
@@ -75,7 +76,12 @@ export default function WiseItemAnalysis(){
   return result;
  },[report,rules,overrides]);
  const months=useMemo(()=>[...new Set(all.map(x=>x.month).filter(Boolean))].sort().reverse(),[all]);
- const seriesList=useMemo(()=>[...new Set([...fixedSeries,...rules.map(x=>x.series_name),...all.map(x=>x.series)])].sort((a,b)=>a.localeCompare(b,"ko")),[rules,all]);
+ const seriesList=useMemo(()=>{
+  const counts=new Map<string,number>();
+  for(const item of all)counts.set(item.series,(counts.get(item.series)||0)+1);
+  return [...new Set([...fixedSeries,...rules.map(x=>x.series_name),...all.map(x=>x.series)].map(normalizeSeries))]
+   .sort((a,b)=>(counts.get(b)||0)-(counts.get(a)||0)||a.localeCompare(b,"ko"));
+ },[rules,all]);
  const monthFiltered=useMemo(()=>all.filter(x=>month==="전체"||x.month===month),[all,month]);
  const filtered=useMemo(()=>monthFiltered.filter(x=>(series==="전체"||x.series===series)&&(!search||[x.item_name,x.buyer_nickname,x.series].join(" ").toLocaleLowerCase().includes(search.toLocaleLowerCase()))),[monthFiltered,series,search]);
  const buckets=useMemo(()=>summarize(filtered),[filtered]);
