@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 
 const SERIES_EN: Record<string,string> = {
   "헌터헌터":"hunter x hunter", "귀멸의칼날":"demon slayer", "나의히어로아카데미아":"my hero academia",
-  "프리렌":"frieren", "진격의거인":"attack on titan", "치이카와":"chiikawa", "나루토":"naruto", "기타":"other"
+  "프리렌":"frieren", "진격의거인":"attack on titan", "치이카와":"chiikawa", "약사의혼잣말":"The Apothecary Diaries", "나루토":"naruto", "기타":"other"
 };
 const TYPE_EN: Record<string,string> = {
   "아크릴":"acrylic", "지류":"paper goods", "뱃지":"badge", "피규어":"figure", "키링":"keychain", "기타":"goods"
