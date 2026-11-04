@@ -82,7 +82,7 @@ export default function WiseItemAnalysis(){
   for(const item of byTitle){
    const name=familyName(item.name);
    const key=item.series+"|"+itemKey(name);
-   const family=map.get(key)||{key,name,series:item.series,count:0,revenue:0,buyers:new Set<string>(),orders:new Set<string>(),children:[]};
+   const family:TitleFamily=map.get(key)??{key,name,series:item.series,count:0,revenue:0,buyers:new Set<string>(),orders:new Set<string>(),children:[]};
    family.children.push(item);
    family.count+=item.count;
    family.revenue+=item.revenue;
