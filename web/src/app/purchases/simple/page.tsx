@@ -8,6 +8,7 @@ type Entry = {
   ordered_at: string | null;
   paid_amount: number;
   memo: string | null;
+  invoice_check_needed: boolean;
   images: { invoice: string | null; payment: string | null };
 };
 
@@ -20,6 +21,7 @@ export default function SimplePurchasesPage() {
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState("");
   const [memo, setMemo] = useState("");
+  const [invoiceCheckNeeded, setInvoiceCheckNeeded] = useState(false);
   const [invoice, setInvoice] = useState<File | null>(null);
   const [payment, setPayment] = useState<File | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -59,7 +61,7 @@ export default function SimplePurchasesPage() {
     setBusy(true);
     setMessage("");
     try {
-      const res = await fetch("/api/purchases/simple", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ total_amount: total, paid_at: date, memo }) });
+      const res = await fetch("/api/purchases/simple", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ total_amount: total, paid_at: date, memo, invoice_check_needed: invoiceCheckNeeded }) });
       const body = await res.json();
       if (!res.ok) throw new Error(body.message || "저장 실패");
       const failures: string[] = [];
@@ -69,7 +71,7 @@ export default function SimplePurchasesPage() {
           catch (err) { failures.push(`${kind === "invoice" ? "명세서" : "입금내역"}: ${err instanceof Error ? err.message : "첨부 실패"}`); }
         }
       }
-      setAmount(""); setDate(""); setMemo(""); setInvoice(null); setPayment(null);
+      setAmount(""); setDate(""); setMemo(""); setInvoice(null); setPayment(null); setInvoiceCheckNeeded(false);
       const invoiceInput = document.getElementById("simple-invoice") as HTMLInputElement | null;
       const paymentInput = document.getElementById("simple-payment") as HTMLInputElement | null;
       if (invoiceInput) invoiceInput.value = "";
@@ -88,6 +90,18 @@ export default function SimplePurchasesPage() {
     setBusy(true); setMessage("");
     try { await upload(id, kind, file); await load(); setMessage("사진 저장 완료"); }
     catch (e) { setMessage(e instanceof Error ? e.message : "사진 저장 실패"); }
+    finally { setBusy(false); }
+  }
+
+  async function toggleInvoiceCheck(entry: Entry, checked: boolean) {
+    setBusy(true); setMessage("");
+    try {
+      const res = await fetch("/api/purchases/simple", {method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify({id:entry.id,invoice_check_needed:checked})});
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message || "저장 실패");
+      setEntries(prev=>prev.map(e=>e.id===entry.id?{...e,invoice_check_needed:checked}:e));
+      setMessage("계산서 확인필요 상태 저장 완료");
+    } catch(e) { setMessage(e instanceof Error?e.message:"체크 상태 저장 실패"); }
     finally { setBusy(false); }
   }
 
@@ -129,6 +143,10 @@ export default function SimplePurchasesPage() {
       <label style={{display:"grid",gap:6,fontWeight:700,fontSize:14}}>메모 (선택)
         <textarea style={{...field,minHeight:85,resize:"vertical"}} value={memo} onChange={e=>setMemo(e.target.value)} placeholder="예: 한스지몰 일부 매입, 계좌이체"/>
       </label>
+      <label style={{display:"flex",alignItems:"center",gap:10,fontWeight:700,fontSize:14,cursor:"pointer"}}>
+        <input type="checkbox" checked={invoiceCheckNeeded} onChange={e=>setInvoiceCheckNeeded(e.target.checked)} style={{width:19,height:19}}/>
+        계산서 확인필요 <span style={{fontWeight:400,color:"#6b7280",fontSize:12}}>(선택)</span>
+      </label>
       <button style={{...button,opacity:busy?0.6:1}} type="submit" disabled={busy}>{busy?"저장 중...":"간이 매입 저장"}</button>
     </form>
     {message&&<div role="status" style={{...card,marginTop:12,fontSize:13,whiteSpace:"pre-wrap"}}>{message}</div>}
@@ -142,6 +160,10 @@ export default function SimplePurchasesPage() {
           <div><strong style={{fontSize:20}}>{money(entry.paid_amount)}원</strong><p style={{fontSize:13,color:"#6b7280",margin:"5px 0 0"}}>{entry.ordered_at ? new Intl.DateTimeFormat("ko-KR",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(entry.ordered_at)) : "날짜 없음"}</p></div>
           <button disabled={busy} onClick={()=>void remove(entry.id)} style={{padding:"6px 9px",border:"1px solid #fecdd3",background:"#fff1f2",color:"#be123c",borderRadius:7,cursor:"pointer"}}>삭제</button>
         </div>
+        <label style={{display:"flex",alignItems:"center",gap:9,marginTop:12,fontSize:13,fontWeight:700,cursor:"pointer"}}>
+          <input type="checkbox" checked={entry.invoice_check_needed===true} disabled={busy} onChange={e=>void toggleInvoiceCheck(entry,e.target.checked)} style={{width:18,height:18}}/>
+          계산서 확인필요
+        </label>
         {entry.memo&&<p style={{fontSize:13,whiteSpace:"pre-wrap"}}>{entry.memo}</p>}
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:12,marginTop:12}}>
           {(["invoice","payment"] as const).map(kind=><div key={kind} style={{display:"grid",gap:7}}>
