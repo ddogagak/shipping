@@ -57,6 +57,7 @@ const seriesList = [
   "프리렌",
   "진격의거인",
   "치이카와",
+  "약사의혼잣말",
   "나루토",
   "기타",
 ];
@@ -641,6 +642,7 @@ function detectSeriesName(text: string) {
   if (lower.includes("frieren") || text.includes("フリーレン") || text.includes("프리렌")) return "프리렌";
   if (lower.includes("attack on titan") || lower.includes("shingeki") || text.includes("進撃") || text.includes("진격")) return "진격의거인";
   if (lower.includes("chiikawa") || text.includes("ちいかわ") || text.includes("치이카와")) return "치이카와";
+  if (lower.includes("the apothecary diaries") || text.includes("薬屋のひとりごと") || text.includes("약사의 혼잣말") || text.includes("약사의혼잣말") || text.includes("마오마오")) return "약사의혼잣말";
   if (lower.includes("naruto") || text.includes("ナルト") || text.includes("나루토")) return "나루토";
 
   return "기타";
