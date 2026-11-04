@@ -40,7 +40,8 @@ export async function POST(req: Request) {
       const isJapan = sourceType === "japan";
       const sourceSite = isJapan ? "JapanProxy" : "Domestic";
       const country = isJapan ? "JP" : "KR";
-      const currency = isJapan ? "JPY" : "KRW";
+      const defaultCurrency = isJapan ? "JPY" : "KRW";
+      const currency = ["KRW", "JPY", "CNY"].includes(String(purchase.currency || "").toUpperCase()) ? String(purchase.currency).toUpperCase() : defaultCurrency;
 
       if (!String(purchase.supplier || "").trim()) {
         return NextResponse.json({ ok: false, message: "거래처명을 입력해줘." }, { status: 400 });
@@ -103,12 +104,11 @@ export async function POST(req: Request) {
         quantity: item.quantity,
         memo: item.memo,
       }));
-      const paidAmount =
-        purchase.items.reduce(
-          (sum, item) =>
-            sum + Math.max(0, Number(item.unit_price || 0)) * Math.max(1, Math.trunc(Number(item.quantity || 1))),
-          0
-        ) + Math.max(0, Number(purchase.local_shipping || 0));
+      const totalAmount = Number(purchase.total_amount);
+      if (purchase.total_amount === null || purchase.total_amount === undefined || !Number.isFinite(totalAmount) || totalAmount <= 0) {
+        return NextResponse.json({ok:false,message:"명세서 총금액을 입력해줘. 배송비를 포함한 실제 결제 총액 기준이야."},{status:400});
+      }
+      const paidAmount = totalAmount;
 
       const { data: order, error } = await sb
         .from("purchase_orders")
@@ -123,7 +123,7 @@ export async function POST(req: Request) {
           currency,
           order_status: "주문완료",
           memo: purchase.memo || null,
-          raw_data: { source_status: "주문완료", text_import_type: sourceType, domestic_items: textItems },
+          raw_data: { source_status: "주문완료", text_import_type: sourceType, domestic_items: textItems, invoice_total_confirmed: true },
         })
         .select("id")
         .single();
