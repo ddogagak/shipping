@@ -1,9 +1,10 @@
 "use client";
 import Link from "next/link";
+import {analysisSeriesForSale,type SeriesKeywordRule} from "@/lib/item-analysis-series";
 import {useEffect,useMemo,useState,type CSSProperties} from "react";
-type Sale={id:string;order_id:string;buyer_nickname:string;item_price:number;item_name:string;ordered_at:string;sold_at?:string|null;video_id?:string|null};
+type Sale={id:string;order_id:string;buyer_nickname:string;item_price:number;item_name:string;ordered_at:string;sold_at?:string|null;video_id?:string|null;image_url?:string|null};
 type Report={ok:boolean;message?:string;all_time_sales_rows:Sale[];settings?:{item_settings?:{id:string;deleted:boolean}[]}};
-type Entry={id:string;order:string;video:string|null;amount:number;at:number;name:string};
+type Entry={id:string;order:string;video:string|null;amount:number;at:number;name:string;series:string};
 type Buyer={key:string;name:string;entries:Entry[];videos:Set<string>;orders:Set<string>;first:number;last:number;total:number;events:number[];second:number|null};
 const won=(n:number)=>Math.round(n).toLocaleString("ko-KR");
 const normalize=(s:string)=>s.normalize("NFKC").replace(/\s+/g,"").trim().toLowerCase();
@@ -12,7 +13,7 @@ const panel:CSSProperties={padding:18,border:"1px solid #e2e8f0",borderRadius:14
 const control:CSSProperties={padding:"9px 12px",border:"1px solid #cbd5e1",borderRadius:8,background:"#fff",color:"#0f172a"};
 const head:CSSProperties={textAlign:"right",padding:"11px 12px",fontSize:12,color:"#64748b",borderBottom:"1px solid #e2e8f0",whiteSpace:"nowrap"};
 const cell:CSSProperties={textAlign:"right",padding:"11px 12px",borderBottom:"1px solid #f1f5f9",whiteSpace:"nowrap"};
-function customersFrom(rows:Sale[],deleted:Set<string>){
+function customersFrom(rows:Sale[],deleted:Set<string>,rules:SeriesKeywordRule[],overrides:Record<string,string>){
  const grouped=new Map<string,{name:string;entries:Entry[]}>();
  for(const r of rows){
   if(deleted.has(String(r.id)))continue;
@@ -21,7 +22,7 @@ function customersFrom(rows:Sale[],deleted:Set<string>){
   const at=Date.parse(r.sold_at||r.ordered_at);
   if(!Number.isFinite(at))continue;
   const key=normalize(name),group=grouped.get(key)||{name,entries:[]};
-  group.entries.push({id:String(r.id),order:String(r.order_id),video:r.video_id||null,amount:Number(r.item_price)||0,at,name:r.item_name});
+  group.entries.push({id:String(r.id),order:String(r.order_id),video:r.video_id||null,amount:Number(r.item_price)||0,at,name:r.item_name,series:analysisSeriesForSale(r.item_name,r.image_url,rules,overrides)});
   grouped.set(key,group);
  }
  const all:Buyer[]=[];
@@ -40,28 +41,10 @@ function customersFrom(rows:Sale[],deleted:Set<string>){
 const percent=(n:number,d:number)=>d?(100*n/d).toFixed(1)+"%":"—";
 
 type Favorite={series:string;amount:number;count:number};
-const SERIES_RULES:{series:string;patterns:RegExp[]}[]=[
- {series:"치이카와",patterns:[/치이카와/i,/먼작귀/i,/하치와레/i,/모몽가/i,/쿠리만쥬/i,/ちいかわ/i,/ハチワレ/i,/モモンガ/i]},
- {series:"나히아",patterns:[/나히아/i,/히로아카/i,/히어로\s*아카데미아/i,/僕のヒーローアカデミア/i,/미도리야/i,/바쿠고/i,/토도로키/i,/토가\s*히미코/i]},
- {series:"헌터×헌터",patterns:[/헌터\s*[x×]?\s*헌터/i,/hunter\s*[x×]?\s*hunter/i,/곤\s*프릭스/i,/키르아/i,/크라피카/i,/히소카/i,/환영여단/i]},
- {series:"귀멸의 칼날",patterns:[/귀멸/i,/鬼滅/i,/탄지로/i,/네즈코/i,/젠이츠/i,/이노스케/i]},
- {series:"프리렌",patterns:[/프리렌/i,/葬送のフリーレン/i,/페른/i,/슈타르크/i]},
- {series:"진격의 거인",patterns:[/진격의\s*거인/i,/進撃の巨人/i,/리바이/i,/엘런\s*예거/i,/미카사/i]},
- {series:"짱구",patterns:[/짱구/i,/クレヨンしんちゃん/i,/부리부리자에몽/i]},
- {series:"리락쿠마",patterns:[/리락쿠마/i,/リラックマ/i,/코리락쿠마/i,/키이로이토리/i]},
- {series:"나루토",patterns:[/나루토/i,/ナルト/i,/우치하\s*사스케/i,/우치하\s*이타치/i,/하타케\s*카카시/i]},
- {series:"약사의 혼잣말",patterns:[/약사의\s*혼잣말/i,/薬屋のひとりごと/i,/마오마오/i,/진시/i]},
- {series:"주술회전",patterns:[/주술회전/i,/呪術廻戦/i,/고죠/i,/게토/i,/이타도리/i,/스쿠나/i]},
- {series:"산리오",patterns:[/산리오/i,/サンリオ/i,/쿠로미/i,/시나모롤/i,/폼폼푸린/i,/마이멜로디/i]}
-];
-function seriesOf(name:string):string|null{
- const matches=SERIES_RULES.filter(rule=>rule.patterns.some(p=>p.test(name)));
- return matches.length===1?matches[0].series:null;
-}
 function topSeries(entries:Entry[]):Favorite[]{
  const groups=new Map<string,Favorite>();
  for(const e of entries){
-  const series=seriesOf(e.name);if(!series)continue;
+  const series=e.series;if(!series||series==="미분류"||series==="키워드 충돌"||series==="기타")continue;
   const row=groups.get(series)||{series,amount:0,count:0};
   row.amount+=e.amount;row.count++;groups.set(series,row);
  }
@@ -100,10 +83,20 @@ function buildLifecycle(buyers:Buyer[],asOf:number):Lifecycle[]{
 }
 
 export default function CustomerAnalysis(){
- const [report,setReport]=useState<Report|null>(null),[error,setError]=useState(""),[loading,setLoading]=useState(true);
+ const [report,setReport]=useState<Report|null>(null),[rules,setRules]=useState<SeriesKeywordRule[]>([]),[overrides,setOverrides]=useState<Record<string,string>>({}),[error,setError]=useState(""),[loading,setLoading]=useState(true);
  const [month,setMonth]=useState("all"),[search,setSearch]=useState(""),[sort,setSort]=useState("amount"),[repeatOnly,setRepeatOnly]=useState(false),[selected,setSelected]=useState<string|null>(null),[visible,setVisible]=useState(50);
- useEffect(()=>{let live=true;fetch("/api/sales-management",{cache:"no-store"}).then(async r=>{const d=await r.json();if(!r.ok||!d.ok)throw Error(d.message||"데이터 조회 실패");if(live)setReport(d);}).catch(e=>{if(live)setError(String(e.message||e))}).finally(()=>{if(live)setLoading(false)});return()=>{live=false}},[]);
- const all=useMemo(()=>customersFrom(report?.all_time_sales_rows||[],new Set((report?.settings?.item_settings||[]).filter(x=>x.deleted).map(x=>String(x.id)))),[report]);
+ useEffect(()=>{let live=true;Promise.all([
+   fetch("/api/sales-management",{cache:"no-store"}),
+   fetch("/api/sales-management/item-keywords",{cache:"no-store"}),
+   fetch("/api/sales-management/item-series-overrides",{cache:"no-store"})
+  ]).then(async responses=>{
+   const [sales,keywords,manual]=await Promise.all(responses.map(response=>response.json()));
+   if(!responses[0].ok||!sales.ok)throw Error(sales.message||"고객 데이터 조회 실패");
+   if(!responses[1].ok||!keywords.ok)throw Error(keywords.message||"작품 키워드 조회 실패");
+   if(!responses[2].ok||!manual.ok)throw Error(manual.message||"수동 작품 분류 조회 실패");
+   if(live){setReport(sales);setRules((keywords.rules||[]).map((rule:SeriesKeywordRule)=>({...rule,series_name:rule.series_name==="야생"?"쿠지":rule.series_name})));setOverrides(Object.fromEntries((manual.overrides||[]).map((row:{item_key:string;series_name:string})=>[row.item_key,row.series_name])));}
+  }).catch(e=>{if(live)setError(String(e.message||e))}).finally(()=>{if(live)setLoading(false)});return()=>{live=false}},[]);
+ const all=useMemo(()=>customersFrom(report?.all_time_sales_rows||[],new Set((report?.settings?.item_settings||[]).filter(x=>x.deleted).map(x=>String(x.id))),rules,overrides),[report,rules,overrides]);
  const months=useMemo(()=>[...new Set(all.flatMap(c=>c.entries.map(e=>day(e.at).slice(0,7))))].sort().reverse(),[all]);
  const monthRows=useMemo(()=>months.map(m=>{
   const buyers=all.filter(c=>c.entries.some(e=>day(e.at).startsWith(m))),newBuyers=buyers.filter(c=>day(c.first).startsWith(m));
@@ -183,7 +176,7 @@ export default function CustomerAnalysis(){
     <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}><thead><tr>{["고객","유형","첫 구매 후 경과","최근 구매 경과","첫 0~29일","30~59일","60~89일","90일 이후","누적 구매"].map(x=><th key={x} style={head}>{x}</th>)}</tr></thead><tbody>{lifecycle.slice(0,30).map(x=><tr key={x.buyer.key} onClick={()=>setSelected(x.buyer.key)} style={{cursor:"pointer"}}><td style={{...cell,textAlign:"left",fontWeight:700}}>{x.buyer.name}</td><td style={cell}>{x.stage}</td><td style={cell}>{x.ageDays}일</td><td style={cell}>{x.idleDays}일</td>{x.bins.map((v,i)=><td key={i} style={cell}>{i<3&&x.ageDays<(i+1)*30?won(v)+"원 · 진행 중":won(v)+"원"}</td>)}<td style={cell}>{won(x.buyer.total)}원</td></tr>)}</tbody></table></div>
     <p style={{fontSize:11,color:"#64748b",marginTop:10}}>첫 30일이나 60일이 아직 지나지 않은 고객은 해당 구간을 ‘진행 중’으로 표시해. 관측 시작인 8월 이전 구매 이력은 확인되지 않으므로 오래된 단골도 신규로 보일 수 있어.</p>
    </section>
-   <section style={{...panel,marginBottom:16}}><h2 style={{fontSize:18,margin:"0 0 8px"}}>고객별 누적 실적</h2><p style={{fontSize:12,color:"#64748b",lineHeight:1.6}}>닉네임 옆 🥇·🥈·🥉 배지는 상품명으로 식별되는 작품별 <b>누적 구매금액 순위</b>야. 작품을 식별할 수 없거나 여러 작품이 섞인 상품은 제외하고 최대 3개만 표시해.</p>
+   <section style={{...panel,marginBottom:16}}><h2 style={{fontSize:18,margin:"0 0 8px"}}>고객별 누적 실적</h2><p style={{fontSize:12,color:"#64748b",lineHeight:1.6}}>닉네임 옆 🥇·🥈·🥉 배지는 <b>실판매 상세 분석의 수동 작품 분류를 우선 적용</b>하고, 해당 분류가 없으면 작품 키워드 규칙으로 분류한 누적 구매금액 상위 3개 작품이야. 미분류·키워드 충돌·기타는 선호 작품 순위에서 제외해.</p>
     <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:12}}><input aria-label="고객 검색" placeholder="닉네임 검색" style={control} value={search} onChange={e=>{setSearch(e.target.value);setVisible(50)}}/><select aria-label="정렬" style={control} value={sort} onChange={e=>setSort(e.target.value)}><option value="amount">구매금액순</option><option value="broadcast">참여 방송순</option><option value="orders">주문 건수순</option><option value="latest">최근 구매순</option></select><label style={{fontSize:13}}><input type="checkbox" checked={repeatOnly} onChange={e=>setRepeatOnly(e.target.checked)}/> 재구매 고객만</label></div>
     <div style={{overflowX:"auto"}}><table style={{borderCollapse:"collapse",width:"100%",fontSize:13}}><thead><tr>{["고객","누적 구매금액","주문","상품","구매 참여 방송","첫 구매","최근 구매","재구매"].map(x=><th style={head} key={x}>{x}</th>)}</tr></thead><tbody>{list.slice(0,visible).map(c=><tr key={c.key} style={{background:selected===c.key?"#eff6ff":"#fff",cursor:"pointer"}} onClick={()=>setSelected(selected===c.key?null:c.key)}><td style={{...cell,textAlign:"left",fontWeight:700}}>{c.name}<FavoriteBadges entries={c.entries}/></td><td style={cell}>{won(c.total)}원</td><td style={cell}>{c.orders.size}건</td><td style={cell}>{c.entries.length}개</td><td style={cell}>{c.videos.size}회</td><td style={cell}>{day(c.first)}</td><td style={cell}>{day(c.last)}</td><td style={cell}>{c.events.length>1?"재구매":"첫 구매만"}</td></tr>)}</tbody></table></div>
     <div style={{fontSize:12,color:"#64748b",marginTop:12}}>{list.length}명 중 {Math.min(visible,list.length)}명 표시 {visible<list.length&&<button style={{...control,marginLeft:12}} onClick={()=>setVisible(n=>n+50)}>50명 더 보기</button>}</div>
@@ -191,7 +184,7 @@ export default function CustomerAnalysis(){
    {detail&&<section style={panel}><div style={{display:"flex",justifyContent:"space-between",gap:12}}><h2 style={{fontSize:19,margin:0}}>{detail.name} 고객 상세</h2><button style={control} onClick={()=>setSelected(null)}>닫기</button></div>
     <p style={{fontSize:13}}>총 {won(detail.total)}원 · 주문 {detail.orders.size}건 · 방송 {detail.videos.size}회 · 구매 {detail.entries.length}개</p>
     <h3 style={{fontSize:15}}>구매 참여 방송</h3><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead><tr>{["방송 ID","최초 구매일","구매금액","상품"].map(x=><th style={head} key={x}>{x}</th>)}</tr></thead><tbody>{[...detail.videos].map(id=>{const items=detail.entries.filter(x=>x.video===id);return {id,items,first:Math.min(...items.map(x=>x.at))}}).sort((a,b)=>b.first-a.first).map(v=><tr key={v.id}><td style={{...cell,textAlign:"left",fontFamily:"monospace"}} title={v.id}>{v.id.slice(0,14)}…</td><td style={cell}>{day(v.first)}</td><td style={cell}>{won(v.items.reduce((s,e)=>s+e.amount,0))}원</td><td style={cell}>{v.items.length}개</td></tr>)}</tbody></table></div>
-    <h3 style={{fontSize:15}}>최근 구매 상품</h3><div style={{overflowX:"auto",maxHeight:350,overflowY:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead><tr>{["판매일","주문 ID","상품명","금액"].map(x=><th style={head} key={x}>{x}</th>)}</tr></thead><tbody>{[...detail.entries].reverse().slice(0,100).map(x=><tr key={x.id}><td style={cell}>{day(x.at)}</td><td style={cell}>{x.order}</td><td style={{...cell,textAlign:"left",whiteSpace:"normal"}}>{x.name}</td><td style={cell}>{won(x.amount)}원</td></tr>)}</tbody></table></div>
+    <h3 style={{fontSize:15}}>최근 구매 상품</h3><div style={{overflowX:"auto",maxHeight:350,overflowY:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead><tr>{["판매일","주문 ID","상품명","작품","금액"].map(x=><th style={head} key={x}>{x}</th>)}</tr></thead><tbody>{[...detail.entries].reverse().slice(0,100).map(x=><tr key={x.id}><td style={cell}>{day(x.at)}</td><td style={cell}>{x.order}</td><td style={{...cell,textAlign:"left",whiteSpace:"normal"}}>{x.name}</td><td style={cell}>{x.series}</td><td style={cell}>{won(x.amount)}원</td></tr>)}</tbody></table></div>
    </section>}
    <p style={{fontSize:12,color:"#64748b",lineHeight:1.6}}>7일/30일 재구매율은 첫 구매 후 해당 기간이 지난 고객만 분모에 포함했어. 현재 수집된 데이터 안에서만 계산하며, 방송 참여율이 아닌 방송 내 구매 참여 횟수야. 더 정확한 고객 추적에는 와이스 고정 고객 ID 연동이 필요해.</p>
   </>}
