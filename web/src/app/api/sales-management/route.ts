@@ -10,7 +10,7 @@ const PURCHASE_EXCHANGE_RATE: Record<string, number> = { KRW: 1, JPY: 10, CNY: 2
 const OVERSEAS_TAX_MULTIPLIER = 1.2;
 const OVERSEAS_SHIPPING_PER_ORDER_KRW = 50000;
 async function purchaseTotals() {
-  const orders = await readAll("purchase_orders", "id,ordered_at,paid_amount,currency,raw_data");
+  const orders = await readAll("purchase_orders", "id,ordered_at,paid_amount,currency,raw_data,local_shipping");
   const monthly: Record<string, number> = {};
   const quarterly: Record<string, number> = {};
   const unsupportedCurrencies = new Set<string>();
@@ -35,14 +35,17 @@ async function purchaseTotals() {
       : isOverseas
         ? amount * rate * OVERSEAS_TAX_MULTIPLIER + OVERSEAS_SHIPPING_PER_ORDER_KRW
         : amount * rate;
-    cumulative += won;
+    // 새로 확정 입력한 2차금만 별도 비용으로 더한다. 기존 현지배송 금액은 자동 추가하지 않는다.
+    const secondPayment = order.raw_data?.second_payment_confirmed === true ? Number(order.local_shipping || 0) : 0;
+    const secondWon = Number.isFinite(secondPayment) && secondPayment > 0 ? secondPayment * rate : 0;
+    cumulative += won + secondWon;
     includedOrders++;
     const day = kstDate(order.ordered_at);
     if (!day) continue;
     const month = day.slice(0, 7);
     const quarter = day.slice(0, 4) + "-Q" + (Math.floor((Number(day.slice(5, 7)) - 1) / 3) + 1);
-    monthly[month] = (monthly[month] || 0) + won;
-    quarterly[quarter] = (quarterly[quarter] || 0) + won;
+    monthly[month] = (monthly[month] || 0) + won + secondWon;
+    quarterly[quarter] = (quarterly[quarter] || 0) + won + secondWon;
   }
   return { monthly, quarterly, cumulative, included_orders: includedOrders, unsupported_currencies: Array.from(unsupportedCurrencies), exchange_rates: PURCHASE_EXCHANGE_RATE, overseas_tax_multiplier: OVERSEAS_TAX_MULTIPLIER, overseas_shipping_per_order_krw: OVERSEAS_SHIPPING_PER_ORDER_KRW };
 }
