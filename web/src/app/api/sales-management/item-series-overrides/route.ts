@@ -30,7 +30,7 @@ export async function PATCH(request:Request){
   if(!series_name||series_name.length>80) return NextResponse.json({ok:false,message:"작품명이 올바르지 않아."},{status:400});
   if(!Array.isArray(body.item_keys)||body.item_keys.length===0||body.item_keys.length>500)
    return NextResponse.json({ok:false,message:"분류할 상품을 1~500개 선택해줘."},{status:400});
-  const keys=[...new Set(body.item_keys.map(clean))];
+  const keys: string[] = [...new Set<string>((body.item_keys as unknown[]).map((value: unknown) => clean(value)))];
   if(keys.some(key=>!key||key.length>500))return NextResponse.json({ok:false,message:"상품명이 올바르지 않아."},{status:400});
   const sb=createServiceRoleClient();
   const updated_at=new Date().toISOString();
