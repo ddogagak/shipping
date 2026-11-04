@@ -11,6 +11,8 @@ type Entry = {
   shop_name: string;
   category: "매입" | "비용" | "세금";
   invoice_check_needed: boolean;
+  purchase_registered: boolean;
+  converted: boolean;
   images: { invoice: string | null; payment: string | null };
 };
 
@@ -27,6 +29,7 @@ export default function SimplePurchasesPage() {
   const [category, setCategory] = useState<"매입" | "비용" | "세금">("매입");
   const [editingSuppliers, setEditingSuppliers] = useState<Record<string,string>>({});
   const [invoiceCheckNeeded, setInvoiceCheckNeeded] = useState(false);
+  const [purchaseRegistered, setPurchaseRegistered] = useState(false);
   const [invoice, setInvoice] = useState<File | null>(null);
   const [payment, setPayment] = useState<File | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -66,7 +69,7 @@ export default function SimplePurchasesPage() {
     setBusy(true);
     setMessage("");
     try {
-      const res = await fetch("/api/purchases/simple", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ total_amount: total, paid_at: date, memo, shop_name: shopName.trim(), category, invoice_check_needed: invoiceCheckNeeded }) });
+      const res = await fetch("/api/purchases/simple", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ total_amount: total, paid_at: date, memo, shop_name: shopName.trim(), category, invoice_check_needed: invoiceCheckNeeded, purchase_registered: purchaseRegistered }) });
       const body = await res.json();
       if (!res.ok) throw new Error(body.message || "저장 실패");
       const failures: string[] = [];
@@ -76,7 +79,7 @@ export default function SimplePurchasesPage() {
           catch (err) { failures.push(`${kind === "invoice" ? "명세서" : "입금내역"}: ${err instanceof Error ? err.message : "첨부 실패"}`); }
         }
       }
-      setAmount(""); setDate(""); setMemo(""); setShopName(""); setCategory("매입"); setInvoice(null); setPayment(null); setInvoiceCheckNeeded(false);
+      setAmount(""); setDate(""); setMemo(""); setShopName(""); setCategory("매입"); setInvoice(null); setPayment(null); setInvoiceCheckNeeded(false); setPurchaseRegistered(false);
       const invoiceInput = document.getElementById("simple-invoice") as HTMLInputElement | null;
       const paymentInput = document.getElementById("simple-payment") as HTMLInputElement | null;
       if (invoiceInput) invoiceInput.value = "";
@@ -136,6 +139,19 @@ export default function SimplePurchasesPage() {
     finally { setBusy(false); }
   }
 
+  async function togglePurchaseRegistered(entry: Entry, checked: boolean) {
+    if (entry.converted && !checked) { setMessage("정식 매입 전환을 완료한 내역은 N으로 변경할 수 없어."); return; }
+    setBusy(true); setMessage("");
+    try {
+      const res = await fetch("/api/purchases/simple", {method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:entry.id,purchase_registered:checked})});
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || "등록 여부 저장 실패");
+      setEntries(prev=>prev.map(e=>e.id===entry.id?{...e,purchase_registered:checked}:e));
+      setMessage(checked?"매입 등록 완료 Y 저장 · 매입 비용 중복 집계 제외":"매입 등록 완료 N 저장");
+    } catch(e) { setMessage(e instanceof Error?e.message:"등록 여부 저장 실패"); }
+    finally { setBusy(false); }
+  }
+
   async function remove(id: string) {
     if (!confirm("이 간이 매입 기록과 첨부사진을 삭제할까?")) return;
     setBusy(true); setMessage("");
@@ -187,6 +203,13 @@ export default function SimplePurchasesPage() {
         <input type="checkbox" checked={invoiceCheckNeeded} onChange={e=>setInvoiceCheckNeeded(e.target.checked)} style={{width:19,height:19}}/>
         계산서 확인필요 <span style={{fontWeight:400,color:"#6b7280",fontSize:12}}>(선택)</span>
       </label>
+      <label style={{display:"flex",alignItems:"center",gap:10,fontWeight:700,fontSize:14,cursor:"pointer"}}>
+        매입 등록 완료
+        <select aria-label="신규 매입 등록 완료 여부" style={{...field,width:96,fontSize:13,padding:"8px 10px"}} value={purchaseRegistered?"Y":"N"} onChange={e=>setPurchaseRegistered(e.target.value==="Y")}>
+          <option value="N">N</option><option value="Y">Y</option>
+        </select>
+        <span style={{fontWeight:400,color:"#6b7280",fontSize:12}}>(기본 N)</span>
+      </label>
       <button style={{...button,opacity:busy?0.6:1}} type="submit" disabled={busy}>{busy?"저장 중...":"간이 매입 저장"}</button>
     </form>
     {message&&<div role="status" style={{...card,marginTop:12,fontSize:13,whiteSpace:"pre-wrap"}}>{message}</div>}
@@ -198,7 +221,7 @@ export default function SimplePurchasesPage() {
       {entries.map(entry=><article key={entry.id} style={card}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",gap:12}}>
           <div><strong style={{fontSize:20}}>{money(entry.paid_amount)}원</strong><p style={{fontSize:13,color:"#6b7280",margin:"5px 0 0"}}>{entry.ordered_at ? new Intl.DateTimeFormat("ko-KR",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(entry.ordered_at)) : "날짜 없음"}</p></div>
-          <button disabled={busy} onClick={()=>void remove(entry.id)} style={{padding:"6px 9px",border:"1px solid #fecdd3",background:"#fff1f2",color:"#be123c",borderRadius:7,cursor:"pointer"}}>삭제</button>
+          <button disabled={busy || entry.converted} onClick={()=>void remove(entry.id)} style={{padding:"6px 9px",border:"1px solid #fecdd3",background:"#fff1f2",color:"#be123c",borderRadius:7,cursor:"pointer"}}>삭제</button>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap",marginTop:12}}>
           <input list="simple-suppliers" aria-label="거래처 수정" value={editingSuppliers[entry.id] ?? entry.shop_name ?? ""} onChange={e=>setEditingSuppliers(prev=>({...prev,[entry.id]:e.target.value}))} placeholder="거래처 없음" style={{...field,width:"min(100%,240px)",fontSize:13,padding:"8px 10px"}}/>
@@ -209,6 +232,13 @@ export default function SimplePurchasesPage() {
           <select aria-label="매입 분류 변경" value={entry.category || "매입"} disabled={busy} onChange={e=>void changeCategory(entry,e.target.value as "매입" | "비용" | "세금")} style={{...field,width:130,fontSize:13,padding:"8px 10px"}}>
             <option value="매입">매입</option><option value="비용">비용</option><option value="세금">세금</option>
           </select>
+        </label>
+        <label style={{display:"flex",alignItems:"center",gap:9,marginTop:12,fontSize:13,fontWeight:700}}>
+          매입 등록 완료
+          <select aria-label="매입 등록 완료 여부 변경" value={entry.purchase_registered || entry.converted ? "Y":"N"} disabled={busy || entry.converted} onChange={e=>void togglePurchaseRegistered(entry,e.target.value==="Y")} style={{...field,width:92,fontSize:13,padding:"8px 10px"}}>
+            <option value="N">N</option><option value="Y">Y</option>
+          </select>
+          {entry.converted&&<span style={{fontSize:12,color:"#6b7280"}}>한국 매입으로 전환됨</span>}
         </label>
         <label style={{display:"flex",alignItems:"center",gap:9,marginTop:12,fontSize:13,fontWeight:700,cursor:"pointer"}}>
           <input type="checkbox" checked={entry.invoice_check_needed===true} disabled={busy} onChange={e=>void toggleInvoiceCheck(entry,e.target.checked)} style={{width:18,height:18}}/>
