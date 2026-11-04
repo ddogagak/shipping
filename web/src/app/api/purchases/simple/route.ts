@@ -5,6 +5,8 @@ export const runtime = "nodejs";
 const BUCKET = "purchase-files";
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 const allowedKinds = ["invoice", "payment"] as const;
+const categories = ["매입", "비용", "세금"] as const;
+function validCategory(v: unknown): v is typeof categories[number] { return typeof v === "string" && categories.some(c => c === v); }
 
 function bad(message: string, status = 400) {
   return NextResponse.json({ ok: false, message }, { status });
@@ -39,7 +41,7 @@ export async function GET() {
           if (!signError) images[kind] = signed?.signedUrl ?? null;
         }
       }));
-      return { id: row.id, order_number: row.order_number, ordered_at: row.ordered_at, paid_amount: row.paid_amount, memo: row.memo, shop_name: row.shop_name === "간이 매입" ? "" : (row.shop_name || ""), invoice_check_needed: row.raw_data?.invoice_check_needed === true, images };
+      return { id: row.id, order_number: row.order_number, ordered_at: row.ordered_at, paid_amount: row.paid_amount, memo: row.memo, shop_name: row.shop_name === "간이 매입" ? "" : (row.shop_name || ""), invoice_check_needed: row.raw_data?.invoice_check_needed === true, category: validCategory(row.raw_data?.purchase_category) ? row.raw_data.purchase_category : "매입", images };
     }));
     return NextResponse.json({ ok: true, entries });
   } catch(e) {
@@ -50,6 +52,7 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+    if (body.category !== undefined && !validCategory(body.category)) return bad("분류는 매입, 비용, 세금 중 하나여야 해.");
     const amount = parseAmount(body.total_amount);
     if (amount === null) return bad("총금액은 0보다 큰 숫자로 입력해줘.");
     const date = parseDate(body.paid_at);
@@ -61,7 +64,7 @@ export async function POST(req: Request) {
       ordered_at: date, paid_amount: amount, currency: "KRW",
       local_shipping: 0, order_status: "입고완료",
       memo: String(body.memo ?? "").slice(0, 5000) || null,
-      raw_data: { simple_purchase: true, invoice_total_confirmed: true, payment_currency: "KRW", simple_images: {}, invoice_check_needed: body.invoice_check_needed === true }
+      raw_data: { simple_purchase: true, invoice_total_confirmed: true, payment_currency: "KRW", simple_images: {}, invoice_check_needed: body.invoice_check_needed === true, purchase_category: body.category ?? "매입" }
     }).select("id").single();
     if (error) throw error;
     return NextResponse.json({ ok: true, id: data.id });
@@ -76,12 +79,16 @@ export async function PATCH(req: Request) {
     if (req.headers.get("content-type")?.includes("application/json")) {
       const body = await req.json();
       const id = String(body.id ?? "");
-      if (!id || (typeof body.invoice_check_needed !== "boolean" && typeof body.shop_name !== "string")) return bad("수정할 정보를 확인해줘.");
+      if (body.category !== undefined && !validCategory(body.category)) return bad("분류는 매입, 비용, 세금 중 하나여야 해.");
+      if (!id || (typeof body.invoice_check_needed !== "boolean" && typeof body.shop_name !== "string" && body.category === undefined)) return bad("수정할 정보를 확인해줘.");
       const { data: row, error: readError } = await sb.from("purchase_orders").select("id,raw_data").eq("id", id).single();
       if (readError || !isSimple(row)) return bad("간이 매입을 찾을 수 없어.", 404);
       const update: Record<string, unknown> = {};
       if (typeof body.invoice_check_needed === "boolean") {
         update.raw_data = { ...row.raw_data, invoice_check_needed: body.invoice_check_needed };
+      }
+      if (body.category !== undefined) {
+        update.raw_data = { ...(update.raw_data as Record<string,unknown> || row.raw_data), purchase_category: body.category };
       }
       if (typeof body.shop_name === "string") {
         update.shop_name = body.shop_name.trim().slice(0, 200) || null;
