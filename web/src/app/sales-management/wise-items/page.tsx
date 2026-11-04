@@ -4,9 +4,11 @@ import {useEffect,useMemo,useState,type CSSProperties} from "react";
 import {classifySeriesByKeywords,type SeriesKeywordRule} from "@/lib/item-analysis-series";
 type Sale={id:string;order_id:string;item_name:string;item_price:number;buyer_nickname:string;ordered_at:string;video_id?:string|null;image_url?:string|null};
 type Report={ok:boolean;all_time_sales_rows:Sale[];settings?:{item_settings?:{id:string;deleted:boolean}[]}};
-type Classified=Sale & {series:string;matched:string[];month:string};
+type Classified=Sale & {series:string;matched:string[];month:string;manual:boolean};
 type Summary={series:string;revenue:number;items:number;orders:Set<string>;buyers:Set<string>;broadcasts:Set<string>};
 const cash=(n:number)=>Math.round(n).toLocaleString("ko-KR");
+const itemKey=(name:string)=>name.normalize("NFKC").toLocaleLowerCase().replace(/\\s+/g,"");
+const fixedSeries=["헌터헌터","귀멸의칼날","나의히어로아카데미아","프리렌","진격의거인","치이카와","약사의혼잣말","나루토","기타","미분류"];
 const ratio=(a:number,b:number)=>b?(100*a/b).toFixed(1)+"%":"—";
 const day=(s:string)=>{const d=new Date(s);return Number.isNaN(d.getTime())?"":new Intl.DateTimeFormat("sv-SE",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(d)};
 const surface:CSSProperties={background:"#fff",border:"1px solid #e2e8f0",borderRadius:14,padding:17};
@@ -19,13 +21,15 @@ function summarize(rows:Classified[]):Summary[]{
  return [...map.values()].sort((a,b)=>b.revenue-a.revenue);
 }
 type TitleDetail={key:string;name:string;series:string;count:number;revenue:number;buyers:Set<string>;orders:Set<string>;rows:Classified[]};
-function ReactFragmentItem({item,expanded,onToggle}:{item:TitleDetail;expanded:boolean;onToggle:()=>void}){
+function ReactFragmentItem({item,expanded,onToggle,onClassify,options,saving,manual}:{item:TitleDetail;expanded:boolean;onToggle:()=>void;onClassify:(name:string,series:string)=>void;options:string[];saving:boolean;manual:boolean}){
  const buyers=new Map<string,{name:string;revenue:number;count:number;orders:Set<string>}>();
  for(const sale of item.rows){const key=sale.buyer_nickname.trim().toLocaleLowerCase();const buyer=buyers.get(key)||{name:sale.buyer_nickname,revenue:0,count:0,orders:new Set<string>()};buyer.revenue+=Number(sale.item_price)||0;buyer.count++;buyer.orders.add(sale.order_id);buyers.set(key,buyer)}
  const ranking=[...buyers.values()].sort((a,b)=>b.revenue-a.revenue);
  return <><tr style={{cursor:"pointer",background:expanded?"#f0fdfa":"transparent"}} onClick={onToggle}>
- <td style={{...td,textAlign:"left",whiteSpace:"normal",minWidth:250,fontWeight:600}}><span style={{marginRight:8}}>{expanded?"▾":"▸"}</span>{item.name}</td>
- <td style={td}>{item.series}</td><td style={td}>{cash(item.revenue)}원</td><td style={td}>{cash(item.count)}개</td><td style={td}>{item.buyers.size}명</td><td style={td}>{item.orders.size}건</td></tr>
+ <td style={{...td,textAlign:"left",whiteSpace:"normal",minWidth:250,fontWeight:600}}><div style={{display:"flex",alignItems:"center",gap:10}}>
+ {item.rows.find(row=>row.image_url)?.image_url?<img src={item.rows.find(row=>row.image_url)?.image_url||""} alt={item.name} loading="lazy" style={{width:54,height:54,objectFit:"cover",borderRadius:7,border:"1px solid #e2e8f0",flexShrink:0}}/>:<span style={{display:"flex",alignItems:"center",justifyContent:"center",width:54,height:54,background:"#f1f5f9",borderRadius:7,color:"#94a3b8",flexShrink:0}}>사진 없음</span>}
+ <span><span style={{marginRight:8}}>{expanded?"▾":"▸"}</span>{item.name}</span></div></td>
+ <td style={td} onClick={event=>event.stopPropagation()}><select aria-label={item.name+" 작품 분류"} disabled={saving} value={item.series} onChange={event=>onClassify(item.name,event.target.value)} style={{...field,maxWidth:190,padding:"6px 8px",fontSize:12}}>{![...options,item.series].includes(item.series)?null:null}{[...new Set([...options,item.series])].map(value=><option key={value} value={value}>{value}</option>)}</select>{manual&&<div style={{fontSize:10,color:"#0f766e",marginTop:3}}>수동 분류</div>}</td><td style={td}>{cash(item.revenue)}원</td><td style={td}>{cash(item.count)}개</td><td style={td}>{item.buyers.size}명</td><td style={td}>{item.orders.size}건</td></tr>
  {expanded&&<tr><td colSpan={6} style={{padding:16,background:"#f8fafc",borderBottom:"1px solid #cbd5e1"}}>
  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",gap:16}}>
  <div><b>구매자별 매출 ({ranking.length}명)</b><div style={{overflowX:"auto",maxHeight:350,overflowY:"auto",marginTop:8}}><table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr>{["구매자","매출","구매수량","주문"].map(t=><th key={t} style={th}>{t}</th>)}</tr></thead><tbody>{ranking.map((b,i)=><tr key={i}><td style={{...td,textAlign:"left"}}>{b.name}</td><td style={td}>{cash(b.revenue)}원</td><td style={td}>{b.count}개</td><td style={td}>{b.orders.size}건</td></tr>)}</tbody></table></div></div>
@@ -35,9 +39,9 @@ function ReactFragmentItem({item,expanded,onToggle}:{item:TitleDetail;expanded:b
 }
 function Bar({value,max}:{value:number;max:number}){return <div style={{background:"#e2e8f0",height:9,borderRadius:8,overflow:"hidden",minWidth:75}}><div style={{height:"100%",width:(value/Math.max(max,1)*100)+"%",background:"#0d9488",borderRadius:8}}/></div>}
 export default function WiseItemAnalysis(){
- const [report,setReport]=useState<Report|null>(null),[rules,setRules]=useState<SeriesKeywordRule[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState("");
+ const [report,setReport]=useState<Report|null>(null),[rules,setRules]=useState<SeriesKeywordRule[]>([]),[overrides,setOverrides]=useState<Record<string,string>>({}),[savingKey,setSavingKey]=useState(""),[message,setMessage]=useState(""),[loading,setLoading]=useState(true),[error,setError]=useState("");
  const [month,setMonth]=useState("전체"),[series,setSeries]=useState("전체"),[search,setSearch]=useState(""),[sort,setSort]=useState("revenue"),[limit,setLimit]=useState(50),[expanded,setExpanded]=useState<string|null>(null);
- useEffect(()=>{let active=true;Promise.all([fetch("/api/sales-management",{cache:"no-store"}),fetch("/api/sales-management/item-keywords",{cache:"no-store"})]).then(async([a,b])=>{const [data,keywords]=await Promise.all([a.json(),b.json()]);if(!a.ok||!data.ok)throw Error(data.message||"매출관리 조회 실패");if(!b.ok||!keywords.ok)throw Error(keywords.message||"작품 키워드 조회 실패");if(active){setReport(data);setRules(keywords.rules||[])}}).catch(e=>{if(active)setError(e instanceof Error?e.message:"조회 실패")}).finally(()=>{if(active)setLoading(false)});return()=>{active=false}},[]);
+ useEffect(()=>{let active=true;Promise.all([fetch("/api/sales-management",{cache:"no-store"}),fetch("/api/sales-management/item-keywords",{cache:"no-store"}),fetch("/api/sales-management/item-series-overrides",{cache:"no-store"})]).then(async([a,b,d])=>{const [data,keywords,manual]=await Promise.all([a.json(),b.json(),d.json()]);if(!a.ok||!data.ok)throw Error(data.message||"매출관리 조회 실패");if(!b.ok||!keywords.ok)throw Error(keywords.message||"작품 키워드 조회 실패");if(!d.ok||!manual.ok)throw Error(manual.message||"수동 분류 조회 실패");if(active){setReport(data);setRules(keywords.rules||[]);setOverrides(Object.fromEntries((manual.overrides||[]).map((x:{item_key:string;series_name:string})=>[x.item_key,x.series_name])))}}).catch(e=>{if(active)setError(e instanceof Error?e.message:"조회 실패")}).finally(()=>{if(active)setLoading(false)});return()=>{active=false}},[]);
  const all=useMemo(()=>{
   const deleted=new Set((report?.settings?.item_settings||[]).filter(x=>x.deleted).map(x=>String(x.id)));
   const result:Classified[]=[];
@@ -45,12 +49,13 @@ export default function WiseItemAnalysis(){
    if(deleted.has(String(row.id)))continue;
    const classification=classifySeriesByKeywords(row.item_name||"",rules);
    const monthValue=day(row.ordered_at).slice(0,7);
-   result.push({...row,series:classification.matches.length>1?"키워드 충돌":classification.series||"미분류",matched:classification.matches,month:monthValue});
+   const manualSeries=overrides[itemKey(row.item_name||"")];
+   result.push({...row,series:manualSeries|| (classification.matches.length>1?"키워드 충돌":classification.series||"미분류"),matched:manualSeries?[manualSeries]:classification.matches,month:monthValue,manual:!!manualSeries});
   }
   return result;
- },[report,rules]);
+ },[report,rules,overrides]);
  const months=useMemo(()=>[...new Set(all.map(x=>x.month).filter(Boolean))].sort().reverse(),[all]);
- const seriesList=useMemo(()=>[...new Set([...rules.map(x=>x.series_name),...all.map(x=>x.series)])].sort((a,b)=>a.localeCompare(b,"ko")),[rules,all]);
+ const seriesList=useMemo(()=>[...new Set([...fixedSeries,...rules.map(x=>x.series_name),...all.map(x=>x.series)])].sort((a,b)=>a.localeCompare(b,"ko")),[rules,all]);
  const monthFiltered=useMemo(()=>all.filter(x=>month==="전체"||x.month===month),[all,month]);
  const filtered=useMemo(()=>monthFiltered.filter(x=>(series==="전체"||x.series===series)&&(!search||[x.item_name,x.buyer_nickname,x.series].join(" ").toLocaleLowerCase().includes(search.toLocaleLowerCase()))),[monthFiltered,series,search]);
  const buckets=useMemo(()=>summarize(filtered),[filtered]);
@@ -59,7 +64,21 @@ export default function WiseItemAnalysis(){
  const known=filtered.filter(x=>x.matched.length===1);
  const unknown=filtered.filter(x=>x.matched.length!==1);
  const byMonth=useMemo(()=>{const map=new Map<string,number>();for(const x of all.filter(x=>series==="전체"||x.series===series)){if(!x.month)continue;map.set(x.month,(map.get(x.month)||0)+(Number(x.item_price)||0))}return [...map].sort((a,b)=>a[0].localeCompare(b[0]))},[all,series]);
- const byTitle=useMemo(()=>{const map=new Map<string,{key:string;name:string;series:string;count:number;revenue:number;buyers:Set<string>;orders:Set<string>;rows:Classified[]}>();for(const x of filtered){const key=x.series+"|"+x.item_name.normalize("NFKC").toLocaleLowerCase().replace(/\s+/g,"");const v=map.get(key)||{key,name:x.item_name,series:x.series,count:0,revenue:0,buyers:new Set<string>(),orders:new Set<string>(),rows:[] as Classified[]};v.count++;v.revenue+=Number(x.item_price)||0;v.buyers.add(x.buyer_nickname.trim().toLocaleLowerCase());v.orders.add(x.order_id);v.rows.push(x);map.set(key,v)}const result=[...map.values()];result.sort((a,b)=>sort==="count"?b.count-a.count:sort==="buyers"?b.buyers.size-a.buyers.size:b.revenue-a.revenue);return result},[filtered,sort]);
+ const byTitle=useMemo(()=>{const map=new Map<string,{key:string;name:string;series:string;count:number;revenue:number;buyers:Set<string>;orders:Set<string>;rows:Classified[]}>();for(const x of filtered){const key=x.series+"|"+itemKey(x.item_name);const v=map.get(key)||{key,name:x.item_name,series:x.series,count:0,revenue:0,buyers:new Set<string>(),orders:new Set<string>(),rows:[] as Classified[]};v.count++;v.revenue+=Number(x.item_price)||0;v.buyers.add(x.buyer_nickname.trim().toLocaleLowerCase());v.orders.add(x.order_id);v.rows.push(x);map.set(key,v)}const result=[...map.values()];result.sort((a,b)=>sort==="count"?b.count-a.count:sort==="buyers"?b.buyers.size-a.buyers.size:b.revenue-a.revenue);return result},[filtered,sort]);
+ const saveClassify=async(name:string,nextSeries:string)=>{
+  const key=itemKey(name),previous=overrides[key];
+  setSavingKey(key);setMessage("");
+  setOverrides(current=>({...current,[key]:nextSeries}));
+  try{
+   const response=await fetch("/api/sales-management/item-series-overrides",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({item_key:key,series_name:nextSeries})});
+   const data=await response.json();
+   if(!response.ok||!data.ok)throw Error(data.message||"분류 저장 실패");
+   setMessage("작품 분류를 저장했어. 동일 상품명 전체에 적용돼.");
+  }catch(e){
+   setOverrides(current=>{const next={...current};if(previous===undefined)delete next[key];else next[key]=previous;return next});
+   setMessage(e instanceof Error?e.message:"분류 저장 실패");
+  }finally{setSavingKey("")}
+ };
  const maxRevenue=Math.max(1,...buckets.map(x=>x.revenue)),maxMonth=Math.max(1,...byMonth.map(x=>x[1]));
  return <main style={{maxWidth:1450,margin:"auto",padding:"25px 20px 70px",color:"#0f172a"}}>
   <header style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:17}}>
@@ -67,6 +86,7 @@ export default function WiseItemAnalysis(){
    <nav style={{display:"flex",gap:8,flexWrap:"wrap"}}><Link style={field} href="/sales-management">← 매출관리</Link><Link style={field} href="/sales-management/items">판매재고 추정 분석</Link><Link style={{...field,background:"#eff6ff",fontWeight:700}} href="/sales-management/items/keywords">작품 키워드 관리</Link></nav>
   </header>
   <div style={{...surface,background:"#f8fafc",marginBottom:15,fontSize:13,lineHeight:1.75}}><b>기준:</b> 와이스 매출관리에 수집된 실제 판매 아이템·금액을 사용하고, 매출관리에서 제외 처리한 아이템은 제외해. 상품명에 등록한 키워드가 들어가면 작품으로 집계해. 여러 작품에 동시에 해당하면 <b>키워드 충돌</b>, 하나도 없으면 <b>미분류</b>로 표시해. 이 데이터에는 아이템별 확정 원가가 없으므로 <b>순이익이나 수익률은 계산하지 않아.</b> 작품 키워드는 원본 매출·매입 데이터를 바꾸지 않아.</div>
+  {message&&<div role="status" style={{...surface,marginBottom:12,fontSize:13}}>{message}</div>}
   {loading&&<div style={surface}>매출과 키워드 데이터를 읽는 중…</div>}
   {error&&<div role="alert" style={{...surface,color:"#b91c1c"}}>{error}</div>}
   {!loading&&!error&&<>
@@ -99,8 +119,8 @@ export default function WiseItemAnalysis(){
     <p style={{fontSize:12,color:"#64748b"}}>작품 행을 클릭하면 해당 작품으로 필터링해.</p>
    </section>
    <section style={surface}><div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"center"}}><h2 style={{fontSize:18}}>상품별 실판매 상세 분석</h2><label>정렬 <select style={field} value={sort} onChange={e=>setSort(e.target.value)}><option value="revenue">매출액순</option><option value="count">판매 건수순</option><option value="buyers">구매 고객순</option></select></label></div>
-    <p style={{fontSize:12,color:"#64748b"}}>상품을 클릭하면 실제 구매자별 매출과 판매 기록을 펼쳐 볼 수 있어. 구매자 수는 닉네임 기준이며, 동일 상품명은 공백을 제외하고 묶어.</p>
-    <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}><thead><tr>{["상품명","분류 작품","판매금액 합계","판매 건수","구매 고객","주문 건수"].map(x=><th key={x} style={th}>{x}</th>)}</tr></thead><tbody>{byTitle.slice(0,limit).map(x=><ReactFragmentItem key={x.key} item={x} expanded={expanded===x.key} onToggle={()=>setExpanded(current=>current===x.key?null:x.key)}/>)}</tbody></table></div>
+    <p style={{fontSize:12,color:"#64748b"}}>상품명 옆에는 판매 기록에 저장된 이미지를 보여줘. 작품 분류는 바로 수정·저장할 수 있어. 상품을 클릭하면 구매자별 기록을 펼쳐 볼 수 있어. 구매자 수는 닉네임 기준이야.</p>
+    <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}><thead><tr>{["상품명","분류 작품","판매금액 합계","판매 건수","구매 고객","주문 건수"].map(x=><th key={x} style={th}>{x}</th>)}</tr></thead><tbody>{byTitle.slice(0,limit).map(x=><ReactFragmentItem key={x.key} item={x} expanded={expanded===x.key} onToggle={()=>setExpanded(current=>current===x.key?null:x.key)} onClassify={saveClassify} options={seriesList} saving={savingKey===itemKey(x.name)} manual={!!overrides[itemKey(x.name)]}/>)}</tbody></table></div>
     <p style={{fontSize:12,color:"#64748b",marginTop:12}}>{byTitle.length}종 중 {Math.min(limit,byTitle.length)}종 표시 {limit<byTitle.length&&<button style={{...field,marginLeft:8}} onClick={()=>setLimit(v=>v+50)}>50종 더 보기</button>}</p>
    </section>
   </>}
