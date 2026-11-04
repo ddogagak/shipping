@@ -5,9 +5,22 @@ const clean=(value:unknown)=>String(value??"").normalize("NFKC").trim();
 export async function GET(){
  try{
   const sb=createServiceRoleClient();
-  const {data,error}=await sb.from("item_analysis_series_overrides").select("item_key,series_name").order("item_key");
-  if(error)throw error;
-  return NextResponse.json({ok:true,overrides:data||[]});
+  // Supabase/PostgREST returns at most 1,000 rows per request by default.
+  // Fetch every page so saved manual classifications never disappear after
+  // the override table exceeds the first page.
+  const overrides: {item_key:string;series_name:string}[]=[];
+  const pageSize=1000;
+  for(let offset=0;;offset+=pageSize){
+   const {data,error}=await sb.from("item_analysis_series_overrides")
+    .select("item_key,series_name")
+    .order("item_key",{ascending:true})
+    .range(offset,offset+pageSize-1);
+   if(error)throw error;
+   const page=data||[];
+   overrides.push(...page);
+   if(page.length<pageSize)break;
+  }
+  return NextResponse.json({ok:true,overrides});
  }catch(e){return NextResponse.json({ok:false,message:e instanceof Error?e.message:"수동 분류 조회 실패"},{status:500});}
 }
 export async function PUT(request:Request){
