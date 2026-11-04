@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import {Fragment,useEffect,useMemo,useState,type CSSProperties} from "react";
-import {classifySeriesByKeywords,type SeriesKeywordRule} from "@/lib/item-analysis-series";
+import {classifySeriesByKeywords,DEFAULT_ANALYSIS_SERIES,type SeriesKeywordRule} from "@/lib/item-analysis-series";
 type Sale={id:string;order_id:string;item_name:string;item_price:number;buyer_nickname:string;ordered_at:string;video_id?:string|null;image_url?:string|null};
 type Report={ok:boolean;all_time_sales_rows:Sale[];settings?:{item_settings?:{id:string;deleted:boolean}[]}};
 type Classified=Sale & {series:string;matched:string[];month:string;manual:boolean};
@@ -23,7 +23,7 @@ const familyName=(name:string)=>{
  const base=normalized.replace(/^#\s*\d+\s*(?:[.:-]\s*)?/u,"").trim();
  return base||normalized;
 };
-const fixedSeries=["헌터헌터","귀멸의칼날","나의히어로아카데미아","프리렌","진격의거인","치이카와","약사의혼잣말","나루토","쿠지","그비돌","디즈니","기타","미분류"];
+const fixedSeries=[...DEFAULT_ANALYSIS_SERIES];
 const normalizeSeries=(value:string)=>value==="야생"?"쿠지":value;
 const ratio=(a:number,b:number)=>b?(100*a/b).toFixed(1)+"%":"—";
 const day=(s:string)=>{const d=new Date(s);return Number.isNaN(d.getTime())?"":new Intl.DateTimeFormat("sv-SE",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(d)};
