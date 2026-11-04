@@ -8,6 +8,7 @@ type Classified=Sale & {series:string;matched:string[];month:string;manual:boole
 type Summary={series:string;revenue:number;items:number;orders:Set<string>;buyers:Set<string>;broadcasts:Set<string>};
 const cash=(n:number)=>Math.round(n).toLocaleString("ko-KR");
 const itemKey=(name:string)=>name.normalize("NFKC").toLocaleLowerCase().replace(/\s+/g,"");
+const photoKey=(url:string|null|undefined)=>String(url||"").trim().split("?")[0];
 // Numbered variants (#1 귀칼, #2 귀칼) belong to one display family.
 // Keep each full original name as a separate child: prices, purchasers and orders are never merged across variants.
 const familyName=(name:string)=>{
@@ -27,8 +28,8 @@ function summarize(rows:Classified[]):Summary[]{
  for(const x of rows){const g=map.get(x.series)||{series:x.series,revenue:0,items:0,orders:new Set<string>(),buyers:new Set<string>(),broadcasts:new Set<string>()};g.revenue+=Number(x.item_price)||0;g.items++;g.orders.add(x.order_id);g.buyers.add(x.buyer_nickname.trim().toLocaleLowerCase());if(x.video_id)g.broadcasts.add(x.video_id);map.set(x.series,g)}
  return [...map.values()].sort((a,b)=>b.revenue-a.revenue);
 }
-type TitleDetail={key:string;name:string;series:string;count:number;revenue:number;buyers:Set<string>;orders:Set<string>;rows:Classified[]};
-type TitleFamily={key:string;name:string;series:string;count:number;revenue:number;buyers:Set<string>;orders:Set<string>;children:TitleDetail[]};
+type TitleDetail={key:string;name:string;series:string;imageKey:string;count:number;revenue:number;buyers:Set<string>;orders:Set<string>;rows:Classified[]};
+type TitleFamily={key:string;name:string;series:string;imageKey:string;count:number;revenue:number;buyers:Set<string>;orders:Set<string>;children:TitleDetail[]};
 function ReactFragmentItem({item,expanded,onToggle,onClassify,options,saving,manual,checked,onCheckedChange,selectable}:{item:TitleDetail;expanded:boolean;onToggle:()=>void;onClassify:(name:string,series:string)=>void;options:string[];saving:boolean;manual:boolean;checked:boolean;onCheckedChange:(value:boolean)=>void;selectable:boolean}){
  const buyers=new Map<string,{name:string;revenue:number;count:number;orders:Set<string>}>();
  for(const sale of item.rows){const key=sale.buyer_nickname.trim().toLocaleLowerCase();const buyer=buyers.get(key)||{name:sale.buyer_nickname,revenue:0,count:0,orders:new Set<string>()};buyer.revenue+=Number(sale.item_price)||0;buyer.count++;buyer.orders.add(sale.order_id);buyers.set(key,buyer)}
@@ -76,16 +77,28 @@ export default function WiseItemAnalysis(){
  const known=filtered.filter(x=>x.matched.length===1);
  const unknown=filtered.filter(x=>x.matched.length!==1);
  const byMonth=useMemo(()=>{const map=new Map<string,number>();for(const x of all.filter(x=>series==="전체"||x.series===series)){if(!x.month)continue;map.set(x.month,(map.get(x.month)||0)+(Number(x.item_price)||0))}return [...map].sort((a,b)=>a[0].localeCompare(b[0]))},[all,series]);
- const byTitle=useMemo(()=>{const map=new Map<string,{key:string;name:string;series:string;count:number;revenue:number;buyers:Set<string>;orders:Set<string>;rows:Classified[]}>();for(const x of filtered){const key=x.series+"|"+itemKey(x.item_name);const v=map.get(key)||{key,name:x.item_name,series:x.series,count:0,revenue:0,buyers:new Set<string>(),orders:new Set<string>(),rows:[] as Classified[]};v.count++;v.revenue+=Number(x.item_price)||0;v.buyers.add(x.buyer_nickname.trim().toLocaleLowerCase());v.orders.add(x.order_id);v.rows.push(x);map.set(key,v)}const result=[...map.values()];result.sort((a,b)=>sort==="count"?b.count-a.count:sort==="buyers"?b.buyers.size-a.buyers.size:b.revenue-a.revenue);return result},[filtered,sort]);
+ const byTitle=useMemo(()=>{
+  const map=new Map<string,TitleDetail>();
+  for(const x of filtered){
+   const imageKey=photoKey(x.image_url);
+   // Identical labels may refer to entirely different goods: keep their photo identities distinct.
+   const key=x.series+"|"+itemKey(x.item_name)+"|"+imageKey;
+   const v:TitleDetail=map.get(key)??{key,name:x.item_name,series:x.series,imageKey,count:0,revenue:0,buyers:new Set<string>(),orders:new Set<string>(),rows:[]};
+   v.count++;v.revenue+=Number(x.item_price)||0;
+   v.buyers.add(x.buyer_nickname.trim().toLocaleLowerCase());
+   v.orders.add(x.order_id);v.rows.push(x);map.set(key,v);
+  }
+  return [...map.values()].sort((a,b)=>sort==="count"?b.count-a.count:sort==="buyers"?b.buyers.size-a.buyers.size:b.revenue-a.revenue);
+ },[filtered,sort]);
  const byFamily=useMemo(()=>{
   const map=new Map<string,TitleFamily>();
   for(const item of byTitle){
-   const name=familyName(item.name);
-   const key=item.series+"|"+itemKey(name);
-   const family:TitleFamily=map.get(key)??{key,name,series:item.series,count:0,revenue:0,buyers:new Set<string>(),orders:new Set<string>(),children:[]};
-   family.children.push(item);
-   family.count+=item.count;
-   family.revenue+=item.revenue;
+   // A numbered variant may be collapsed only when its source photo is actually identical.
+   // Without a photo we never strip the number, to avoid mixing unrelated listings.
+   const name=item.imageKey?familyName(item.name):item.name;
+   const key=item.series+"|"+itemKey(name)+"|"+item.imageKey;
+   const family:TitleFamily=map.get(key)??{key,name,series:item.series,imageKey:item.imageKey,count:0,revenue:0,buyers:new Set<string>(),orders:new Set<string>(),children:[]};
+   family.children.push(item);family.count+=item.count;family.revenue+=item.revenue;
    for(const buyer of item.buyers)family.buyers.add(buyer);
    for(const order of item.orders)family.orders.add(order);
    map.set(key,family);
@@ -177,7 +190,7 @@ export default function WiseItemAnalysis(){
       <button style={{...field,background:"#111827",color:"#fff",fontWeight:800,cursor:"pointer"}} disabled={bulkSaving||!selectedTitleKeys.length||!bulkSeries} onClick={()=>void bulkClassify()}>{bulkSaving?"일괄 저장 중...":"선택 작품 일괄 분류"}</button>
       <button style={field} disabled={bulkSaving||!selectedTitleKeys.length} onClick={()=>setSelectedNames({})}>선택 해제</button>
     </div>
-    <p style={{fontSize:12,color:"#64748b"}}>상품명 앞의 번호만 다른 상품(예: #1 귀칼 / #2 귀칼)은 대표 행으로 묶어 표시해. 사진이 같다는 이유만으로 묶지는 않아. 묶음을 펼치면 번호별 매출·구매자·주문과 작품 분류를 각각 확인할 수 있어. 같은 이름은 기존처럼 합산하고, 번호별 판매 기록은 유지해.</p>
+    <p style={{fontSize:12,color:"#64748b"}}>번호를 제외한 상품명과 원본 상품사진이 모두 같으면(예: #1 귀칼 / #2 귀칼) 같은 대표 행으로 묶어 표시해. 이름이 같아도 사진이 다르면 별도 행으로 표시하고, 사진이 없는 번호 상품은 임의로 합치지 않아. 묶음을 펼치면 번호별 매출·구매자·주문과 작품 분류를 각각 확인할 수 있어. 같은 이름은 기존처럼 합산하고, 번호별 판매 기록은 유지해.</p>
     <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}><thead><tr>{["선택","상품명","분류 작품","판매금액 합계","판매 건수","구매 고객","주문 건수"].map(x=><th key={x} style={th}>{x}</th>)}</tr></thead><tbody>{byFamily.slice(0,limit).map(group=>{
       const multi=group.children.length>1;
       const opened=!!expandedFamilies[group.key];
