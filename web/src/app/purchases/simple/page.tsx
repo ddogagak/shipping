@@ -9,6 +9,7 @@ type Entry = {
   paid_amount: number;
   memo: string | null;
   shop_name: string;
+  category: "매입" | "비용" | "세금";
   invoice_check_needed: boolean;
   images: { invoice: string | null; payment: string | null };
 };
@@ -23,6 +24,7 @@ export default function SimplePurchasesPage() {
   const [date, setDate] = useState("");
   const [memo, setMemo] = useState("");
   const [shopName, setShopName] = useState("");
+  const [category, setCategory] = useState<"매입" | "비용" | "세금">("매입");
   const [editingSuppliers, setEditingSuppliers] = useState<Record<string,string>>({});
   const [invoiceCheckNeeded, setInvoiceCheckNeeded] = useState(false);
   const [invoice, setInvoice] = useState<File | null>(null);
@@ -64,7 +66,7 @@ export default function SimplePurchasesPage() {
     setBusy(true);
     setMessage("");
     try {
-      const res = await fetch("/api/purchases/simple", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ total_amount: total, paid_at: date, memo, shop_name: shopName.trim(), invoice_check_needed: invoiceCheckNeeded }) });
+      const res = await fetch("/api/purchases/simple", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ total_amount: total, paid_at: date, memo, shop_name: shopName.trim(), category, invoice_check_needed: invoiceCheckNeeded }) });
       const body = await res.json();
       if (!res.ok) throw new Error(body.message || "저장 실패");
       const failures: string[] = [];
@@ -74,7 +76,7 @@ export default function SimplePurchasesPage() {
           catch (err) { failures.push(`${kind === "invoice" ? "명세서" : "입금내역"}: ${err instanceof Error ? err.message : "첨부 실패"}`); }
         }
       }
-      setAmount(""); setDate(""); setMemo(""); setShopName(""); setInvoice(null); setPayment(null); setInvoiceCheckNeeded(false);
+      setAmount(""); setDate(""); setMemo(""); setShopName(""); setCategory("매입"); setInvoice(null); setPayment(null); setInvoiceCheckNeeded(false);
       const invoiceInput = document.getElementById("simple-invoice") as HTMLInputElement | null;
       const paymentInput = document.getElementById("simple-payment") as HTMLInputElement | null;
       if (invoiceInput) invoiceInput.value = "";
@@ -122,6 +124,18 @@ export default function SimplePurchasesPage() {
     finally {setBusy(false);}
   }
 
+  async function changeCategory(entry: Entry, next: "매입" | "비용" | "세금") {
+    setBusy(true); setMessage("");
+    try {
+      const res = await fetch("/api/purchases/simple", { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({id:entry.id,category:next}) });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || "분류 저장 실패");
+      setEntries(prev=>prev.map(e=>e.id===entry.id?{...e,category:next}:e));
+      setMessage("분류 저장 완료");
+    } catch(e) { setMessage(e instanceof Error?e.message:"분류 저장 실패"); }
+    finally { setBusy(false); }
+  }
+
   async function remove(id: string) {
     if (!confirm("이 간이 매입 기록과 첨부사진을 삭제할까?")) return;
     setBusy(true); setMessage("");
@@ -148,6 +162,11 @@ export default function SimplePurchasesPage() {
       <h2 style={{fontSize:18,margin:0}}>간이 매입 등록</h2>
       <label style={{display:"grid",gap:6,fontWeight:700,fontSize:14}}>거래처 (선택 · 기존 간이 매입 거래처 자동완성)
         <input style={field} list="simple-suppliers" autoComplete="off" placeholder="예: 한스지몰" value={shopName} onChange={e=>setShopName(e.target.value)}/>
+      </label>
+      <label style={{display:"grid",gap:6,fontWeight:700,fontSize:14}}>분류 (선택 · 기본 매입)
+        <select style={field} value={category} onChange={e=>setCategory(e.target.value as "매입" | "비용" | "세금")}>
+          <option value="매입">매입</option><option value="비용">비용</option><option value="세금">세금</option>
+        </select>
       </label>
       <label style={{display:"grid",gap:6,fontWeight:700,fontSize:14}}>총금액 (원) <span style={{color:"#be123c",fontSize:12}}>필수</span>
         <input style={field} inputMode="decimal" required placeholder="예: 150000" value={amount} onChange={e=>setAmount(e.target.value)} />
@@ -185,6 +204,12 @@ export default function SimplePurchasesPage() {
           <input list="simple-suppliers" aria-label="거래처 수정" value={editingSuppliers[entry.id] ?? entry.shop_name ?? ""} onChange={e=>setEditingSuppliers(prev=>({...prev,[entry.id]:e.target.value}))} placeholder="거래처 없음" style={{...field,width:"min(100%,240px)",fontSize:13,padding:"8px 10px"}}/>
           <button type="button" disabled={busy || (editingSuppliers[entry.id] ?? entry.shop_name ?? "") === (entry.shop_name ?? "")} onClick={()=>void saveSupplier(entry)} style={{...button,padding:"9px 12px",fontSize:12}}>거래처 저장</button>
         </div>
+        <label style={{display:"flex",alignItems:"center",gap:9,marginTop:12,fontSize:13,fontWeight:700}}>
+          분류
+          <select aria-label="매입 분류 변경" value={entry.category || "매입"} disabled={busy} onChange={e=>void changeCategory(entry,e.target.value as "매입" | "비용" | "세금")} style={{...field,width:130,fontSize:13,padding:"8px 10px"}}>
+            <option value="매입">매입</option><option value="비용">비용</option><option value="세금">세금</option>
+          </select>
+        </label>
         <label style={{display:"flex",alignItems:"center",gap:9,marginTop:12,fontSize:13,fontWeight:700,cursor:"pointer"}}>
           <input type="checkbox" checked={entry.invoice_check_needed===true} disabled={busy} onChange={e=>void toggleInvoiceCheck(entry,e.target.checked)} style={{width:18,height:18}}/>
           계산서 확인필요
