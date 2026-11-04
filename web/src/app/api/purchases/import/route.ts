@@ -66,6 +66,7 @@ export async function POST(req: Request) {
         const {data,error} = await sb.from("purchase_orders").select("*").eq("id",simpleId).maybeSingle();
         if (error) throw error;
         if (!data || data.source_site!=="간이" || data.raw_data?.simple_purchase!==true) return NextResponse.json({ok:false,message:"전환 가능한 간이 매입을 찾을 수 없어."},{status:409});
+        if (data.raw_data?.purchase_registered === true) return NextResponse.json({ok:false,message:"이미 매입 등록 완료 Y인 간이 내역이야. 중복 전환할 수 없어."},{status:409});
         simpleOrder=data;
         if (Number(purchase.total_amount)!==Number(data.paid_amount)) return NextResponse.json({ok:false,message:"간이 등록된 총금액을 유지해야 해. 금액을 확인해줘."},{status:400});
         if (currency!=="KRW") return NextResponse.json({ok:false,message:"간이 전환은 원화(KRW)만 지원해."},{status:400});
@@ -184,7 +185,7 @@ export async function POST(req: Request) {
       }
       if (simpleOrder) {
         const previousRaw = simpleOrder.raw_data ?? {};
-        const newRaw = { ...previousRaw, simple_purchase: false, converted_from_simple: true,
+        const newRaw = { ...previousRaw, simple_purchase: false, purchase_registered: true, converted_from_simple: true,
           converted_at: new Date().toISOString(), previous_simple_order_number: simpleOrder.order_number,
           source_status: "주문완료", text_import_type: "korea", domestic_items: textItems,
           invoice_total_confirmed: true };
