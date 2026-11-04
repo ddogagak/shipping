@@ -39,7 +39,7 @@ export async function GET() {
           if (!signError) images[kind] = signed?.signedUrl ?? null;
         }
       }));
-      return { id: row.id, order_number: row.order_number, ordered_at: row.ordered_at, paid_amount: row.paid_amount, memo: row.memo, images };
+      return { id: row.id, order_number: row.order_number, ordered_at: row.ordered_at, paid_amount: row.paid_amount, memo: row.memo, invoice_check_needed: row.raw_data?.invoice_check_needed === true, images };
     }));
     return NextResponse.json({ ok: true, entries });
   } catch(e) {
@@ -61,7 +61,7 @@ export async function POST(req: Request) {
       ordered_at: date, paid_amount: amount, currency: "KRW",
       local_shipping: 0, order_status: "입고완료",
       memo: String(body.memo ?? "").slice(0, 5000) || null,
-      raw_data: { simple_purchase: true, invoice_total_confirmed: true, payment_currency: "KRW", simple_images: {} }
+      raw_data: { simple_purchase: true, invoice_total_confirmed: true, payment_currency: "KRW", simple_images: {}, invoice_check_needed: body.invoice_check_needed === true }
     }).select("id").single();
     if (error) throw error;
     return NextResponse.json({ ok: true, id: data.id });
@@ -73,6 +73,18 @@ export async function POST(req: Request) {
 export async function PATCH(req: Request) {
   try {
     const sb = createServiceRoleClient();
+    if (req.headers.get("content-type")?.includes("application/json")) {
+      const body = await req.json();
+      const id = String(body.id ?? "");
+      if (!id || typeof body.invoice_check_needed !== "boolean") return bad("계산서 확인 여부가 잘못됐어.");
+      const { data: row, error: readError } = await sb.from("purchase_orders").select("id,raw_data").eq("id", id).single();
+      if (readError || !isSimple(row)) return bad("간이 매입을 찾을 수 없어.", 404);
+      const { error } = await sb.from("purchase_orders").update({
+        raw_data: { ...row.raw_data, invoice_check_needed: body.invoice_check_needed }
+      }).eq("id", id);
+      if (error) throw error;
+      return NextResponse.json({ ok: true, invoice_check_needed: body.invoice_check_needed });
+    }
     const fd = await req.formData();
     const id = String(fd.get("id") ?? "");
     const kind = String(fd.get("kind") ?? "");
