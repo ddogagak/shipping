@@ -8,7 +8,7 @@ export type DomesticPurchaseItem = {
 
 export type DomesticPurchase = {
   supplier: string; purchased_at: string; invoice_number: string;
-  local_shipping: number; total_amount: number | null; currency: "KRW" | "JPY" | "CNY"; memo: string; items: DomesticPurchaseItem[];
+  local_shipping: number; total_amount: number | null; currency: "KRW" | "JPY" | "CNY" | null; memo: string; items: DomesticPurchaseItem[];
 };
 
 function field(text:string,key:string){return text.match(new RegExp(`^${key}:[ \\t]*(.*)$`,"im"))?.[1]?.trim()??"";}
@@ -24,5 +24,9 @@ export function parseDomesticPurchaseText(text:string):DomesticPurchase{
     return{product_name:name,display_name_ko:name,series_name:normalizeSeriesName(field(block,"SERIES"),name,field(block,"OPTION"),field(block,"MEMO")),item_type:field(block,"TYPE")||"기타",option_text:field(block,"OPTION"),unit_price:unitPrice,quantity,line_total:unitPrice*quantity,component_count:componentCount||null,product_url:field(block,"PRODUCT_URL"),image_url:field(block,"IMAGE"),lineup_image_url:field(block,"LINEUP_IMAGE"),memo:field(block,"MEMO")};
   });
   if(!items.length)throw new Error("저장할 상품이 없어.");
+  const totalRaw=field(header,"TOTAL_AMOUNT");
+  const total_amount=totalRaw?number(totalRaw):null;
+  const currencyRaw=field(header,"CURRENCY").toUpperCase();
+  const currency=(["KRW","JPY","CNY"].includes(currencyRaw)?currencyRaw:null) as "KRW"|"JPY"|"CNY"|null;
   return{supplier,purchased_at:purchasedAt||new Date().toISOString().slice(0,10),invoice_number:invoiceNumber,local_shipping:Math.max(0,Math.round(number(field(header,"LOCAL_SHIPPING")))),total_amount,currency,memo:field(header,"MEMO"),items};
 }
