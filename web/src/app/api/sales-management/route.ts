@@ -17,6 +17,9 @@ async function purchaseTotals() {
   let cumulative = 0;
   let includedOrders = 0;
   for (const order of orders) {
+    // 간이 기록이 별도로 정식 매입에 등록되었다고 표시된 경우 중복 매입비용에서 제외한다.
+    // 같은 주문행을 정식 매입으로 전환한 건(simple_purchase=false)은 정상 집계한다.
+    if (order.raw_data?.simple_purchase === true && order.raw_data?.purchase_registered === true) continue;
     // 상품 표시 통화(currency)와 실제 결제 통화(payment_currency)는 다를 수 있다.
     // 예: 일본 구매대행 상품은 JPY이지만 1·2차금은 KRW로 결제한다.
     const currency = String(order.raw_data?.payment_currency || order.currency || "").toUpperCase().trim();
