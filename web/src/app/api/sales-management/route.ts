@@ -17,7 +17,9 @@ async function purchaseTotals() {
   let cumulative = 0;
   let includedOrders = 0;
   for (const order of orders) {
-    const currency = String(order.currency || "").toUpperCase().trim();
+    // 상품 표시 통화(currency)와 실제 결제 통화(payment_currency)는 다를 수 있다.
+    // 예: 일본 구매대행 상품은 JPY이지만 1·2차금은 KRW로 결제한다.
+    const currency = String(order.raw_data?.payment_currency || order.currency || "").toUpperCase().trim();
     const rate = PURCHASE_EXCHANGE_RATE[currency];
     if (rate === undefined) {
       unsupportedCurrencies.add(currency || "(미설정)");
@@ -25,19 +27,28 @@ async function purchaseTotals() {
     }
     const amount = Number(order.paid_amount);
     if (!Number.isFinite(amount) || amount < 0) continue;
-    // 명세서 총액을 직접 확인·저장한 주문은 그 금액만 환산한다.
-    // 총액에 포함된 배송비와 세금을 다시 추정 가산하지 않는다.
-    // 기존 미확인 주문은 종전 추정 계산식을 유지한다.
     const confirmedTotal = order.raw_data?.invoice_total_confirmed === true;
-    const isOverseas = currency !== "KRW";
-    const won = confirmedTotal
+    const isOverseas = String(order.currency || "").toUpperCase().trim() !== "KRW";
+    // 확인된 실제 원화 결제에는 엔화 환산이나 해외 세금 추정을 다시 적용하지 않는다.
+    const baseWon = confirmedTotal || !isOverseas || currency === "KRW"
       ? amount * rate
-      : isOverseas
-        ? amount * rate * OVERSEAS_TAX_MULTIPLIER + OVERSEAS_SHIPPING_PER_ORDER_KRW
-        : amount * rate;
-    // 새로 확정 입력한 2차금만 별도 비용으로 더한다. 기존 현지배송 금액은 자동 추가하지 않는다.
-    const secondPayment = order.raw_data?.second_payment_confirmed === true ? Number(order.local_shipping || 0) : 0;
-    const secondWon = Number.isFinite(secondPayment) && secondPayment > 0 ? secondPayment * rate : 0;
+      : amount * rate * OVERSEAS_TAX_MULTIPLIER;
+    const secondPayment = Number(order.local_shipping || 0);
+    const hasSecondPayment = Number.isFinite(secondPayment) && secondPayment > 0;
+    const secondConfirmed = order.raw_data?.second_payment_confirmed === true;
+    const firstPayment = order.raw_data?.first_payment;
+    const first = firstPayment === null || firstPayment === undefined || String(firstPayment).trim() === "" ? null : Number(firstPayment);
+    // 이미 paid_amount = 1차금 + 2차금인 주문은 2차금을 중복 가산하지 않는다.
+    // first_payment가 없는 확정 총액은 전체 결제금액으로 간주한다.
+    const secondIncluded = confirmedTotal && (
+      first === null || (Number.isFinite(first) && amount >= first + secondPayment - 0.01)
+    );
+    const secondWon = secondConfirmed && hasSecondPayment && !secondIncluded
+      ? secondPayment * rate
+      : 0;
+    // 주문당 배송비 5만원 추정은 해외 매입에서 2차금이 비어 있을 때만 붙인다.
+    const estimatedShipping = isOverseas && !hasSecondPayment ? OVERSEAS_SHIPPING_PER_ORDER_KRW : 0;
+    const won = baseWon + estimatedShipping;
     cumulative += won + secondWon;
     includedOrders++;
     const day = kstDate(order.ordered_at);
