@@ -8,6 +8,7 @@ export const SERIES_CODE: Record<string, string> = {
   "프리렌": "FRN",
   "진격의거인": "AOT",
   "치이카와": "CHI",
+  "약사의혼잣말": "APD",
   "기타": "ETC",
 };
 
