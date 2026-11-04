@@ -10,7 +10,7 @@ const PURCHASE_EXCHANGE_RATE: Record<string, number> = { KRW: 1, JPY: 10, CNY: 2
 const OVERSEAS_TAX_MULTIPLIER = 1.2;
 const OVERSEAS_SHIPPING_PER_ORDER_KRW = 50000;
 async function purchaseTotals() {
-  const orders = await readAll("purchase_orders", "id,ordered_at,paid_amount,currency");
+  const orders = await readAll("purchase_orders", "id,ordered_at,paid_amount,currency,raw_data");
   const monthly: Record<string, number> = {};
   const quarterly: Record<string, number> = {};
   const unsupportedCurrencies = new Set<string>();
@@ -25,10 +25,16 @@ async function purchaseTotals() {
     }
     const amount = Number(order.paid_amount);
     if (!Number.isFinite(amount) || amount < 0) continue;
+    // 명세서 총액을 직접 확인·저장한 주문은 그 금액만 환산한다.
+    // 총액에 포함된 배송비와 세금을 다시 추정 가산하지 않는다.
+    // 기존 미확인 주문은 종전 추정 계산식을 유지한다.
+    const confirmedTotal = order.raw_data?.invoice_total_confirmed === true;
     const isOverseas = currency !== "KRW";
-    const won = isOverseas
-      ? amount * rate * OVERSEAS_TAX_MULTIPLIER + OVERSEAS_SHIPPING_PER_ORDER_KRW
-      : amount * rate;
+    const won = confirmedTotal
+      ? amount * rate
+      : isOverseas
+        ? amount * rate * OVERSEAS_TAX_MULTIPLIER + OVERSEAS_SHIPPING_PER_ORDER_KRW
+        : amount * rate;
     cumulative += won;
     includedOrders++;
     const day = kstDate(order.ordered_at);
