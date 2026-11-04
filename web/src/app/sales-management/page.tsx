@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import {analysisSeriesForSale,type SeriesKeywordRule} from "@/lib/item-analysis-series";
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
 
 type SortKey = "ordered_at" | "buyer_nickname" | "item_name" | "item_price";
@@ -145,6 +146,8 @@ function cleanPrefs(value: unknown): ItemPrefs {
 export default function SalesManagementPage() {
   const [report, setReport] = useState<Report | null>(null);
   const [inventory, setInventory] = useState<StockItem[]>([]);
+  const [seriesRules, setSeriesRules] = useState<SeriesKeywordRule[]>([]);
+  const [seriesOverrides, setSeriesOverrides] = useState<Record<string,string>>({});
   const [keywords, setKeywords] = useState<string[]>([]);
   const [keywordInput, setKeywordInput] = useState("");
   const [savedPrefs, setSavedPrefs] = useState<ItemPrefs>({});
@@ -167,13 +170,19 @@ export default function SalesManagementPage() {
     setLoading(true);
     setError("");
     try {
-      const [salesResponse, stockResponse] = await Promise.all([
+      const [salesResponse, stockResponse, seriesResponse, overridesResponse] = await Promise.all([
         fetch("/api/sales-management", { cache: "no-store" }),
         fetch("/api/sale-inventory", { cache: "no-store" }),
+        fetch("/api/sales-management/item-keywords", { cache: "no-store" }),
+        fetch("/api/sales-management/item-series-overrides", { cache: "no-store" }),
       ]);
-      const [salesData, stockData] = await Promise.all([salesResponse.json(), stockResponse.json()]);
+      const [salesData, stockData, seriesData, overridesData] = await Promise.all([salesResponse.json(), stockResponse.json(), seriesResponse.json(), overridesResponse.json()]);
       if (!salesResponse.ok || !salesData.ok) throw new Error(salesData.message || "매출 자료를 불러오지 못했습니다.");
       if (!stockResponse.ok || !stockData.ok) throw new Error(stockData.message || "방송판매재고 원가를 불러오지 못했습니다.");
+      if (!seriesResponse.ok || !seriesData.ok) throw new Error(seriesData.message || "작품 키워드 조회 실패");
+      if (!overridesResponse.ok || !overridesData.ok) throw new Error(overridesData.message || "수동 작품 분류 조회 실패");
+      setSeriesRules((seriesData.rules || []).map((rule: SeriesKeywordRule) => ({...rule, series_name: rule.series_name === "야생" ? "쿠지" : rule.series_name})));
+      setSeriesOverrides(Object.fromEntries((overridesData.overrides || []).map((rule: {item_key:string;series_name:string}) => [rule.item_key,rule.series_name])));
       setReport(salesData);
       setInventory(Array.isArray(stockData.items) ? stockData.items : []);
       const amount = Number(salesData.settings?.cumulative_settled_amount || 0);
@@ -213,8 +222,8 @@ export default function SalesManagementPage() {
     const key = row.id;
     const unitCost = costIndex.get(itemKey(row.item_name));
     const includeCost = draftPrefs[key]?.includeCost !== false;
-    return { ...row, key, unitCost: unitCost ?? null, includeCost, memo: draftPrefs[key]?.memo || "", cost: includeCost && unitCost != null ? unitCost : null };
-  }), [currentRows, costIndex, draftPrefs]);
+    return { ...row, key, series: analysisSeriesForSale(row.item_name,row.image_url,seriesRules,seriesOverrides), unitCost: unitCost ?? null, includeCost, memo: draftPrefs[key]?.memo || "", cost: includeCost && unitCost != null ? unitCost : null };
+  }), [currentRows, costIndex, draftPrefs, seriesRules, seriesOverrides]);
   const filteredItemRows = useMemo(() => {
     const productQuery = productSearch.normalize("NFKC").trim().toLowerCase();
     const buyerQuery = buyerSearch.normalize("NFKC").trim().toLowerCase();
@@ -434,8 +443,8 @@ export default function SalesManagementPage() {
         <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><input aria-label="상품명 검색" type="search" value={productSearch} onChange={e => setProductSearch(e.target.value)} placeholder="상품명 검색" style={{ height: 36, padding: "0 10px", border: "1px solid #d1d5db", borderRadius: 8, flex: "1 1 220px", maxWidth: 400 }} /><input aria-label="구매자 닉네임 검색" type="search" value={buyerSearch} onChange={e => setBuyerSearch(e.target.value)} placeholder="구매자 닉네임 검색" style={{ height: 36, padding: "0 10px", border: "1px solid #d1d5db", borderRadius: 8, flex: "1 1 220px", maxWidth: 400 }} /><span style={{ color: "#6b7280", fontSize: 12 }}>검색 결과 {filteredItemRows.length}건</span></div>
         {hasUnsaved && <div style={{ padding: "8px 14px", background: "#fffbeb", color: "#92400e", fontSize: 12 }}>저장되지 않은 원가 설정·삭제·메모가 있습니다.</div>}
         {!filteredItemRows.length ? <div style={{ padding: 24, color: "#6b7280" }}>{productSearch.trim() || buyerSearch.trim() ? "검색 결과가 없습니다." : "이 기간의 판매 내역이 없습니다."}</div> :
-          <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1240, fontSize: 13 }}>
-            <thead><tr style={{ background: "#f9fafb" }}><th style={th}><input aria-label="현재 판매 내역 전체 선택" type="checkbox" checked={filteredItemRows.length > 0 && filteredItemRows.every(row => selectedItems.includes(row.key))} onChange={e => setSelectedItems(current => e.target.checked ? Array.from(new Set([...current, ...filteredItemRows.map(row => row.key)])) : current.filter(key => !filteredItemRows.some(row => row.key === key)))} /></th><th style={th} aria-sort={saleSort.key === "ordered_at" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("ordered_at", "판매 날짜")}</th><th style={th} aria-sort={saleSort.key === "buyer_nickname" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("buyer_nickname", "구매자 닉네임")}</th><th style={th} aria-sort={saleSort.key === "item_name" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("item_name", "아이템")}</th><th style={th} aria-sort={saleSort.key === "item_price" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("item_price", "판매가")}</th><th style={th}>판매원가 포함</th><th style={th}>개당 원가</th><th style={th}>계산 원가</th><th style={th}>메모</th></tr></thead>
+          <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1350, fontSize: 13 }}>
+            <thead><tr style={{ background: "#f9fafb" }}><th style={th}><input aria-label="현재 판매 내역 전체 선택" type="checkbox" checked={filteredItemRows.length > 0 && filteredItemRows.every(row => selectedItems.includes(row.key))} onChange={e => setSelectedItems(current => e.target.checked ? Array.from(new Set([...current, ...filteredItemRows.map(row => row.key)])) : current.filter(key => !filteredItemRows.some(row => row.key === key)))} /></th><th style={th} aria-sort={saleSort.key === "ordered_at" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("ordered_at", "판매 날짜")}</th><th style={th} aria-sort={saleSort.key === "buyer_nickname" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("buyer_nickname", "구매자 닉네임")}</th><th style={th} aria-sort={saleSort.key === "item_name" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("item_name", "아이템")}</th><th style={th}>작품</th><th style={th} aria-sort={saleSort.key === "item_price" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("item_price", "판매가")}</th><th style={th}>판매원가 포함</th><th style={th}>개당 원가</th><th style={th}>계산 원가</th><th style={th}>메모</th></tr></thead>
             <tbody>{sortedItemRows.map(row => {
               const draft = draftPrefs[row.key] || { includeCost: true, memo: "", deleted: false };
               const pendingDelete = draft.deleted === true && !savedPrefs[row.key]?.deleted;
@@ -448,6 +457,7 @@ export default function SalesManagementPage() {
                   </button> : <span aria-label="사진 없음" title="사진 없음" style={{ display: "inline-flex", width: 44, height: 44, justifyContent: "center", alignItems: "center", border: "1px solid #e5e7eb", borderRadius: 7, background: "#f9fafb", color: "#9ca3af", fontSize: 11, flexShrink: 0 }}>사진 없음</span>}
                   <div><b>{row.item_name}</b>{pendingDelete && <div style={{ color: "#b45309", fontSize: 11 }}>저장하면 삭제</div>}</div>
                 </div></td>
+                <td style={td}><span style={{...chip,whiteSpace:"nowrap"}}>{row.series}</span></td>
                 <td style={td}>{money(row.item_price)}원</td>
                 <td style={td}><button onClick={() => updateDraft(row.key, { includeCost: !draft.includeCost })} aria-label="판매원가 포함 여부 전환" style={{ ...button, minWidth: 44, padding: "5px 10px", background: draft.includeCost ? "#dcfce7" : "#f3f4f6", borderColor: draft.includeCost ? "#86efac" : "#d1d5db", color: draft.includeCost ? "#166534" : "#6b7280" }}>{draft.includeCost ? "Y" : "N"}</button></td>
                 <td style={td}>{row.unitCost == null ? <span style={{ color: "#b91c1c" }}>미매칭</span> : money(row.unitCost) + "원"}</td>
@@ -455,7 +465,7 @@ export default function SalesManagementPage() {
                 <td style={td}><input value={draft.memo} onChange={e => updateDraft(row.key, { memo: e.target.value })} placeholder="메모 입력" style={{ width: 220, maxWidth: "45vw", height: 32, padding: "0 8px", border: "1px solid #d1d5db", borderRadius: 6 }} /></td>
               </tr>;
             })}</tbody>
-            <tfoot><tr style={{ background: "#f9fafb", fontWeight: 800 }}><td style={td} colSpan={4}>합계</td><td style={td}>{money(currentSummary.sales)}원</td><td style={td}>—</td><td style={td}>—</td><td style={td}>{money(knownCost)}원</td><td style={td}>—</td></tr></tfoot>
+            <tfoot><tr style={{ background: "#f9fafb", fontWeight: 800 }}><td style={td} colSpan={5}>합계</td><td style={td}>{money(currentSummary.sales)}원</td><td style={td}>—</td><td style={td}>—</td><td style={td}>{money(knownCost)}원</td><td style={td}>—</td></tr></tfoot>
           </table></div>}
         {deletedItems.length > 0 && <div style={{ padding: 14, borderTop: "1px solid #e5e7eb", fontSize: 12 }}>
           <b>삭제된 판매 내역 · {deletedItems.length}건</b>
