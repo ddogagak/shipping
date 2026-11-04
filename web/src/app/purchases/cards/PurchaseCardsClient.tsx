@@ -5,7 +5,7 @@ import { useMemo, useState, type CSSProperties } from "react";
 
 type PurchaseItem = {id:string;order_id:string;order_number:string|null;ordered_at:string|null;shop_name:string|null;product_name:string|null;display_name:string|null;internal_sku:string|null;option_text:string|null;product_url:string|null;quantity:number|null;unit_price:number|null;image_url:string|null;lineup_image_url:string|null;series_name:string|null;item_type:string|null;memo:string|null};
 const typeList=["전체","아크릴","지류","뱃지","피규어","키링","기타"];
-const seriesList=["전체","헌터헌터","귀멸의칼날","나의히어로아카데미아","프리렌","진격의거인","치이카와","나루토","기타"];
+const seriesList=["전체","헌터헌터","귀멸의칼날","나의히어로아카데미아","프리렌","진격의거인","치이카와","약사의혼잣말","나루토","기타"];
 export default function PurchaseCardsClient({initialItems=[]}:{initialItems?:PurchaseItem[]}){
  const[q,setQ]=useState(""),[type,setType]=useState("전체"),[series,setSeries]=useState("전체"),[lineupImage,setLineupImage]=useState<string|null>(null);
  const filtered=useMemo(()=>{const keyword=q.trim().toLowerCase();return initialItems.filter(item=>{const matchKeyword=!keyword||[item.display_name,item.product_name,item.option_text,item.order_number,item.memo,item.internal_sku].filter(Boolean).join(" ").toLowerCase().includes(keyword);return matchKeyword&&(type==="전체"||item.item_type===type)&&(series==="전체"||item.series_name===series);});},[initialItems,q,type,series]);
