@@ -254,7 +254,8 @@ export default function SalesManagementPage() {
     style={{ border: 0, padding: 0, background: "transparent", font: "inherit", color: saleSort.key === key ? "#1d4ed8" : "inherit", fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}>
     {title} <span aria-hidden="true">{saleSort.key === key ? (saleSort.direction === "desc" ? "▼" : "▲") : "↕"}</span>
   </button>;
-  const knownCost = itemRows.reduce((sum, row) => sum + (row.cost ?? 0), 0);
+  const filteredSales = filteredItemRows.reduce((sum, row) => sum + Number(row.item_price || 0), 0);
+  const filteredKnownCost = filteredItemRows.reduce((sum, row) => sum + (row.cost ?? 0), 0);
   const unmatchedQuantity = itemRows.reduce((sum, row) => sum + (row.includeCost && row.unitCost == null ? 1 : 0), 0);
   const selectedPurchaseAmount = Number((granularity === "month" ? report?.purchases?.monthly : report?.purchases?.quarterly)?.[selectedKey] || 0);
   const cumulativePurchaseAmount = Number(report?.purchases?.cumulative || 0);
@@ -465,7 +466,7 @@ export default function SalesManagementPage() {
                 <td style={td}><input value={draft.memo} onChange={e => updateDraft(row.key, { memo: e.target.value })} placeholder="메모 입력" style={{ width: 220, maxWidth: "45vw", height: 32, padding: "0 8px", border: "1px solid #d1d5db", borderRadius: 6 }} /></td>
               </tr>;
             })}</tbody>
-            <tfoot><tr style={{ background: "#f9fafb", fontWeight: 800 }}><td style={td} colSpan={5}>합계</td><td style={td}>{money(currentSummary.sales)}원</td><td style={td}>—</td><td style={td}>—</td><td style={td}>{money(knownCost)}원</td><td style={td}>—</td></tr></tfoot>
+            <tfoot><tr style={{ background: "#f9fafb", fontWeight: 800 }}><td style={td} colSpan={5}>합계</td><td style={td}>{money(filteredSales)}원</td><td style={td}>—</td><td style={td}>—</td><td style={td}>{money(filteredKnownCost)}원</td><td style={td}>—</td></tr></tfoot>
           </table></div>}
         {deletedItems.length > 0 && <div style={{ padding: 14, borderTop: "1px solid #e5e7eb", fontSize: 12 }}>
           <b>삭제된 판매 내역 · {deletedItems.length}건</b>
