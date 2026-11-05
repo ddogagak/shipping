@@ -754,8 +754,11 @@ export default function DomesticOrdersPage() {
 
     setMessage("합배송 처리 중...");
 
-    try {
-      for (const group of selectedGroups) {
+    const successes: string[] = [];
+    const failures: string[] = [];
+
+    for (const group of selectedGroups) {
+      try {
         const sorted = [...group.rows].sort((a, b) =>
           String(a.first_order_date || a.created_at || "").localeCompare(
             String(b.first_order_date || b.created_at || "")
@@ -820,19 +823,27 @@ export default function DomesticOrdersPage() {
         const json = await res.json();
 
         if (!res.ok) {
-          throw new Error(json.detail || json.error || `${group.nickname} 합배송 실패`);
+          throw new Error(json.detail || json.error || "서버 검증 실패");
         }
+        successes.push(group.nickname);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "알 수 없는 오류";
+        failures.push(`${group.nickname}: ${reason}`);
       }
-
-      alert(`합배송 묶음 ${selectedGroups.length}개 처리 완료`);
-      setSelectedCombineKeys([]);
-      setCombineDraft(null);
-      await load();
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "합배송 처리 실패";
-      alert(errorMessage);
-      setMessage(errorMessage);
     }
+
+    // 부분 성공도 즉시 반영해 이미 합쳐진 주문이 다시 후보로 보이지 않도록 한다.
+    setSelectedCombineKeys([]);
+    setCombineDraft(null);
+    await load();
+
+    const report = [
+      `합배송 결과: 성공 ${successes.length}개 / 실패 ${failures.length}개`,
+      successes.length ? `성공: ${successes.join(", ")}` : "",
+      failures.length ? `실패:\n${failures.join("\n")}` : "",
+    ].filter(Boolean).join("\n\n");
+    setMessage(report);
+    alert(report);
   }
 
   function buildCombineDraft(targetRows: Row[]) {
