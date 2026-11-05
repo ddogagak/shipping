@@ -280,7 +280,7 @@ export async function POST(req:Request){
    const summary=asText(row.item_summary);
    const amount=Number(row.item_total_price);
    if(!minute||!summary||!Number.isFinite(amount)||amount<=0)continue;
-   const k=signature(minute,amount,summary.split(/\\s*\\/\\s*/));
+   const k=signature(minute,amount,summary.split(/\s*\/\s*/));
    candidates.set(k,[...(candidates.get(k)??[]),String(row.order_id)]);
   }
   const wiseCandidates=new Map<string,typeof salesRows>();
