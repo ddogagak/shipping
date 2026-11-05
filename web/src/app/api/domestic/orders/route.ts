@@ -289,9 +289,8 @@ export async function PATCH(req: Request) {
       const o=byOrder.get(id),sh=byShip.get(id);
       const reason=!o?"DDOGA 주문 없음":!sh?"배송정보 없음":
         o.order_status==="done"?"주문 완료":
-        !["start","ready","excel_exported"].includes(sh.shipping_status)?"배송상태 "+sh.shipping_status:
-        Boolean(sh.tracking_number)?"이미 운송장번호 있음":
-        sh.tracking_registered===true?"운송장 등록 Y":"";
+        Boolean(sh.tracking_number)?"기존 운송장번호 보유 (변경하지 않음)":
+        !["start","ready","registered","excel_exported"].includes(sh.shipping_status)?"배송상태 "+sh.shipping_status:"";
       if(!sh || reason){
         results.push({order_id:id,ok:false,error:reason || "배송정보 없음"});
         continue;
@@ -302,8 +301,8 @@ export async function PATCH(req: Request) {
       }
       const {data,error}=await supabase.from("domestic_shipping")
         .update({shipping_status:"excel_exported",excel_exported_at:now,updated_at:now})
-        .eq("order_id",id).in("shipping_status",["start","ready"]).is("tracking_number",null)
-        .or("tracking_registered.is.null,tracking_registered.eq.false").select("order_id");
+        .eq("order_id",id).in("shipping_status",["start","ready","registered"]).is("tracking_number",null)
+        .select("order_id");
       results.push({order_id:id,ok:!error&&Boolean(data?.length),error:error?.message||(!data?.length?"조건 변경됨":undefined)});
     }
     return NextResponse.json({ok:true,results});
