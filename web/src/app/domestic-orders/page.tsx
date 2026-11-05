@@ -1819,7 +1819,7 @@ export default function DomesticOrdersPage() {
           </div>
         </div>
 
-        <WiseDeadlineBoard orders={rows.map(row => ({order_id:row.order_id,nickname:row.nickname || "",platform:row.platform,first_order_date:row.first_order_date,order_status:row.order_status,tracking_registered:Boolean(shipping(row)?.tracking_registered)}))} />
+        <WiseDeadlineBoard orders={rows.map(row => ({order_id:row.order_id,nickname:row.nickname || "",platform:row.platform,first_order_date:row.first_order_date,order_status:row.order_status,request_status:row.request_status,tracking_registered:Boolean(shipping(row)?.tracking_registered)}))} />
       </section>
 
       <section style={checkBoardStyle}>
