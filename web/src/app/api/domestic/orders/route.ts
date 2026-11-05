@@ -284,16 +284,19 @@ export async function PATCH(req: Request) {
     if(ordersError||shipsError) return NextResponse.json({error:"접수 대상 조회 실패",detail:ordersError?.message||shipsError?.message},{status:500});
     const byOrder=new Map((orders||[]).map(o=>[o.order_id,o]));
     const byShip=new Map((ships||[]).map(o=>[o.order_id,o]));
-    const invalid=ids.filter(id=>{
-      const o=byOrder.get(id),sh=byShip.get(id);
-      return !o||!sh||o.order_status==="done"||
-        !["start","ready","excel_exported"].includes(sh.shipping_status)||
-        Boolean(sh.tracking_number)||sh.tracking_registered===true;
-    });
-    if(invalid.length) return NextResponse.json({error:"접수 대상이 없거나 이미 송장 등록·배송완료된 주문입니다.",order_ids:invalid},{status:409});
     const results=[];
     for(const id of ids){
-      if(byShip.get(id)?.shipping_status==="excel_exported"){
+      const o=byOrder.get(id),sh=byShip.get(id);
+      const reason=!o?"DDOGA 주문 없음":!sh?"배송정보 없음":
+        o.order_status==="done"?"주문 완료":
+        !["start","ready","excel_exported"].includes(sh.shipping_status)?"배송상태 "+sh.shipping_status:
+        Boolean(sh.tracking_number)?"이미 운송장번호 있음":
+        sh.tracking_registered===true?"운송장 등록 Y":"";
+      if(reason){
+        results.push({order_id:id,ok:false,error:reason});
+        continue;
+      }
+      if(sh.shipping_status==="excel_exported"){
         results.push({order_id:id,ok:true,already:true});
         continue;
       }
