@@ -16,6 +16,8 @@ function daysSince(date:string|null){
 export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
  const [open,setOpen]=useState(false);
  const popupRef=useRef<Window|null>(null);
+ const snapshotRequestedRef=useRef(false);
+ const snapshotHandledRef=useRef(false);
  const [wiseRows,setWiseRows]=useState<WiseRow[]|null>(null);
  const [busy,setBusy]=useState(false);
  const [updatedAt,setUpdatedAt]=useState<string|null>(null);
@@ -50,9 +52,13 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
   const onMessage=(event:MessageEvent)=>{
    if(event.origin!=="https://wyyyes.com"||event.source!==popupRef.current)return;
    if(event.data?.type==="DDOGA_WISE_SHIP_READY"){
+    if(snapshotRequestedRef.current)return;
+    snapshotRequestedRef.current=true;
     popupRef.current?.postMessage({type:"DDOGA_WISE_SNAPSHOT_REQUEST"},"https://wyyyes.com");
    }
    if(event.data?.type==="DDOGA_WISE_SNAPSHOT_RESULT"){
+    if(snapshotHandledRef.current)return;
+    snapshotHandledRef.current=true;
     if(event.data.error){setBusy(false);setNotice(String(event.data.error));return;}
     if((event.data.records||[]).some((r:Snapshot & {error?:string})=>r.error)){setBusy(false);setNotice("와이스 일부 주문 조회 실패 · 이전 기록 유지");return;}
     const buyers:Snapshot[]=Array.isArray(event.data.records)?event.data.records:[];
@@ -88,6 +94,9 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
  const confirmed=unique(rows.filter(r=>r.status==="confirmed"));
  const urgent=unique(rows.filter(r=>(r.status==="urgent"||r.status==="unshipped")&&r.days>=13));
  function refresh(){
+  if(busy)return;
+  snapshotRequestedRef.current=false;
+  snapshotHandledRef.current=false;
   setBusy(true);setNotice("와이스 응답을 기다리는 중...");
   const popup=window.open("https://wyyyes.com/shipping-waiting-user-list","ddoga_wise_shipping");
   if(!popup){setBusy(false);setNotice("팝업 차단을 해제해줘.");return;}
