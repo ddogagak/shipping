@@ -271,12 +271,14 @@ export async function PATCH(req: Request) {
     });
   }
 
-  // 로젠 접수 성공 후: 준비 → 엑셀추출. 송장 발급 및 와이스 등록은 하지 않는다.
+  // 로젠 '서버전송 완료' 팝업을 확인한 뒤 전송한 주문의 배송단계만 변경한다.
+  // 주문상태(accepted 등) 및 연락처 유무는 접수 후 단계 변경 조건이 아니다.
+  // 집하 송장 및 와이스 등록은 별도의 기존 동기화 과정에서 처리한다.
   if (action === "confirm_logen_receipt") {
     const ids = [...new Set(orderIds)];
     if (!ids.length || ids.length > 100) return NextResponse.json({error:"접수 주문은 1~100건이어야 합니다."},{status:400});
     const {data:orders,error:ordersError}=await supabase.from("domestic_order")
-      .select("order_id,phone,order_status").in("order_id",ids);
+      .select("order_id,order_status").in("order_id",ids);
     const {data:ships,error:shipsError}=await supabase.from("domestic_shipping")
       .select("order_id,shipping_status,tracking_number,tracking_registered").in("order_id",ids);
     if(ordersError||shipsError) return NextResponse.json({error:"접수 대상 조회 실패",detail:ordersError?.message||shipsError?.message},{status:500});
@@ -284,10 +286,11 @@ export async function PATCH(req: Request) {
     const byShip=new Map((ships||[]).map(o=>[o.order_id,o]));
     const invalid=ids.filter(id=>{
       const o=byOrder.get(id),sh=byShip.get(id);
-      return !o||!sh||o.order_status==="done"||!["ready","excel_exported"].includes(sh.shipping_status)||
-        Boolean(sh.tracking_number)||sh.tracking_registered===true||!String(o.phone||"").trim();
+      return !o||!sh||o.order_status==="done"||
+        !["start","ready","excel_exported"].includes(sh.shipping_status)||
+        Boolean(sh.tracking_number)||sh.tracking_registered===true;
     });
-    if(invalid.length) return NextResponse.json({error:"준비 상태·연락처·미등록 조건 불일치",order_ids:invalid},{status:409});
+    if(invalid.length) return NextResponse.json({error:"접수 대상이 없거나 이미 송장 등록·배송완료된 주문입니다.",order_ids:invalid},{status:409});
     const results=[];
     for(const id of ids){
       if(byShip.get(id)?.shipping_status==="excel_exported"){
@@ -296,8 +299,8 @@ export async function PATCH(req: Request) {
       }
       const {data,error}=await supabase.from("domestic_shipping")
         .update({shipping_status:"excel_exported",excel_exported_at:now,updated_at:now})
-        .eq("order_id",id).eq("shipping_status","ready").is("tracking_number",null)
-        .eq("tracking_registered",false).select("order_id");
+        .eq("order_id",id).in("shipping_status",["start","ready"]).is("tracking_number",null)
+        .or("tracking_registered.is.null,tracking_registered.eq.false").select("order_id");
       results.push({order_id:id,ok:!error&&Boolean(data?.length),error:error?.message||(!data?.length?"조건 변경됨":undefined)});
     }
     return NextResponse.json({ok:true,results});
