@@ -292,8 +292,8 @@ export async function PATCH(req: Request) {
         !["start","ready","excel_exported"].includes(sh.shipping_status)?"배송상태 "+sh.shipping_status:
         Boolean(sh.tracking_number)?"이미 운송장번호 있음":
         sh.tracking_registered===true?"운송장 등록 Y":"";
-      if(reason){
-        results.push({order_id:id,ok:false,error:reason});
+      if(!sh || reason){
+        results.push({order_id:id,ok:false,error:reason || "배송정보 없음"});
         continue;
       }
       if(sh.shipping_status==="excel_exported"){
