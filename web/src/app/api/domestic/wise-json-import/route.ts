@@ -66,9 +66,9 @@ export async function POST(req:Request){
    return NextResponse.json({ok:true,sales_saved_orders:salesOrders.length,sales_saved_items:salesRows.length,sold_at_count:salesRows.filter(row=>row.sold_at).length,missing_sold_at_count:salesRows.filter(row=>!row.sold_at).length,imported_at:importedAt});
   }
   // Page through all orders; otherwise Supabase's default row cap hides older phone-only changes.
-  const domestic:Array<{order_id:string;customer_order_no:string|null;nickname:string|null;platform:string|null;order_status:string|null;phone:string|null;first_order_date:string|null;source_order_dates:string[]|null}>=[];
+  const domestic:Array<{order_id:string;customer_order_no:string|null;nickname:string|null;platform:string|null;order_status:string|null;phone:string|null;first_order_date:string|null;source_order_dates:string[]|null;item_total_price:number|null;item_summary:string|null;order_count:number|null}>=[];
   for(let offset=0;;offset+=500){
-   const {data,error}=await db.from("domestic_order").select("order_id,customer_order_no,nickname,platform,order_status,phone,first_order_date,source_order_dates").order("order_id").range(offset,offset+499);
+   const {data,error}=await db.from("domestic_order").select("order_id,customer_order_no,nickname,platform,order_status,phone,first_order_date,source_order_dates,item_total_price,item_summary,order_count").order("order_id").range(offset,offset+499);
    if(error)return NextResponse.json({error:"기존 주문 조회 실패",detail:error.message},{status:500});
    domestic.push(...(data??[]));
    if((data??[]).length<500)break;
@@ -246,6 +246,69 @@ export async function POST(req:Request){
    const {error}=await db.from("domestic_wise_sales_order").upsert(chunk,{onConflict:"wise_order_id"});
    if(error)throw new Error("와이스 매출 스냅샷 저장 실패: "+error.message);
   }
+  // Recover missing Wise order-ID links after a nickname change. Never infer from
+  // nickname/address alone: exact KST minute, total amount, and ordered item names
+  // must match a single unlinked DDOGA order and a single unlinked Wise order.
+  // Combined orders (order_count !== 1) and orders with existing links are excluded.
+  const linkedWiseIds=new Set<number>();
+  const linkedDomesticIds=new Set<string>();
+  for(const chunk of batches(salesRows.map(row=>row.wise_order_id))){
+   const {data:links,error}=await db.from("domestic_wise_order_link")
+    .select("wise_order_id,domestic_order_id").in("wise_order_id",chunk);
+   if(error)throw new Error("와이스 기존 연결 조회 실패: "+error.message);
+   for(const link of links??[]){
+    linkedWiseIds.add(Number(link.wise_order_id));
+    linkedDomesticIds.add(String(link.domestic_order_id));
+   }
+  }
+  for(const chunk of batches(wiseDomestic.map(row=>String(row.order_id)))){
+   const {data:links,error}=await db.from("domestic_wise_order_link")
+    .select("wise_order_id,domestic_order_id").in("domestic_order_id",chunk);
+   if(error)throw new Error("DDOGA 기존 연결 조회 실패: "+error.message);
+   for(const link of links??[]){
+    linkedWiseIds.add(Number(link.wise_order_id));
+    linkedDomesticIds.add(String(link.domestic_order_id));
+   }
+  }
+  const signature=(minute:string,amount:number,items:string[])=>JSON.stringify([
+   minute,amount,items.map(name=>name.normalize("NFKC").trim())
+  ]);
+  const candidates=new Map<string,string[]>();
+  for(const row of wiseDomestic){
+   if(linkedDomesticIds.has(String(row.order_id))||Number(row.order_count)!==1)continue;
+   const minute=domesticDateKey(row.first_order_date);
+   const summary=asText(row.item_summary);
+   const amount=Number(row.item_total_price);
+   if(!minute||!summary||!Number.isFinite(amount)||amount<=0)continue;
+   const k=signature(minute,amount,summary.split(/\\s*\\/\\s*/));
+   candidates.set(k,[...(candidates.get(k)??[]),String(row.order_id)]);
+  }
+  const wiseCandidates=new Map<string,typeof salesRows>();
+  for(const row of salesRows){
+   if(linkedWiseIds.has(row.wise_order_id)||!row.item_names.length||row.total_amount<=0)continue;
+   const minute=domesticDateKey(row.ordered_at);
+   if(!minute)continue;
+   const k=signature(minute,row.total_amount,row.item_names);
+   wiseCandidates.set(k,[...(wiseCandidates.get(k)??[]),row]);
+  }
+  let recoveredLinks=0;
+  for(const [signatureKey,wiseRows] of wiseCandidates){
+   const matchingOrders=candidates.get(signatureKey)??[];
+   if(wiseRows.length!==1||matchingOrders.length!==1)continue;
+   const wiseRow=wiseRows[0], domesticId=matchingOrders[0];
+   const {data:existing,error:checkError}=await db.from("domestic_wise_order_link")
+    .select("wise_order_id,domestic_order_id").or(
+     `wise_order_id.eq.${wiseRow.wise_order_id},domestic_order_id.eq.${domesticId}`
+    );
+   if(checkError)throw new Error("와이스 자동연결 충돌 조회 실패: "+checkError.message);
+   if(existing?.length)continue;
+   const {error:insertError}=await db.from("domestic_wise_order_link")
+    .insert({wise_order_id:wiseRow.wise_order_id,domestic_order_id:domesticId});
+   if(insertError)throw new Error("와이스 자동연결 저장 실패: "+insertError.message);
+   linkedWiseIds.add(wiseRow.wise_order_id);
+   linkedDomesticIds.add(domesticId);
+   recoveredLinks++;
+  }
   // Keep the displayed domestic nickname in sync for orders with explicit Wise ID links.
   // Shipping, item summaries, and historical order numbers remain unchanged.
   const importedIds=salesRows.map(x=>x.wise_order_id);
@@ -287,7 +350,7 @@ export async function POST(req:Request){
    const payload=chunk.map(({order:o,ordered_at,nickname})=>({wise_order_id:o.id,buyer_nickname:nickname,ordered_at,receiver_name:o.receiverName??null,receiver_phone:wisePhone(o)||null,postal_code:o.postNum??null,address:[o.addr1,o.addr2,o.addr3].filter(Boolean).join(" "),item_summary:(o.stocks??[]).map(s=>asText(s.name)).join(" / "),item_total_price:(o.stocks??[]).reduce((sum,s)=>sum+Number(s.price??0),0),item_count:o.stocks?.length??0}));
    const {error}=await db.from("domestic_wise_import_queue").upsert(payload,{onConflict:"wise_order_id",ignoreDuplicates:true});if(error)throw error;
   }
-  return NextResponse.json({ok:true,queued_new:fresh.length,sales_saved:salesRows.length,updated_snapshots:orders.length,updated_items:photoRows.length,excluded_count:parsed.length-orders.length,skipped_existing:rows.filter(x=>x.existingDomestic).length,skipped_queued:rows.filter(x=>x.alreadyQueued).length});
+  return NextResponse.json({ok:true,recovered_links:recoveredLinks,queued_new:fresh.length,sales_saved:salesRows.length,updated_snapshots:orders.length,updated_items:photoRows.length,excluded_count:parsed.length-orders.length,skipped_existing:rows.filter(x=>x.existingDomestic).length,skipped_queued:rows.filter(x=>x.alreadyQueued).length});
  }catch(e){
   console.error("Wise JSON import failed:",e);
   const err=e as {message?:string;details?:string;hint?:string;code?:string}|null;
