@@ -390,6 +390,8 @@ export default function DomesticOrdersPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [message, setMessage] = useState("");
   const [bulkRegistering, setBulkRegistering] = useState(false);
+  const [logenReceiptPending, setLogenReceiptPending] = useState<string[]>([]);
+  const [logenReceiptBusy, setLogenReceiptBusy] = useState(false);
   const registrationLock = useRef(false);
   const [loading, setLoading] = useState(false);
   const [savingRowId, setSavingRowId] = useState<string | null>(null);
@@ -425,6 +427,13 @@ export default function DomesticOrdersPage() {
   const [checkItems, setCheckItems] = useState<CheckItem[]>([]);
   const [checkInput, setCheckInput] = useState("");
   const [checkLoading, setCheckLoading] = useState(true);
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem("ddoga:logen-receipt-pending") || "[]");
+      if (Array.isArray(saved)) setLogenReceiptPending(saved.filter((id): id is string => typeof id === "string"));
+    } catch { /* No valid previous transfer */ }
+  }, []);
 
   async function load() {
     setLoading(true);
@@ -1706,7 +1715,38 @@ export default function DomesticOrdersPage() {
     bridge.value = JSON.stringify(payload);
     bridge.setAttribute("data-transfer-id", transferId);
     window.dispatchEvent(new CustomEvent("ddoga:logen:send", { detail: payload }));
-    setMessage("🚚 로젠 엑셀 " + data.length + "건 전달 요청됨 · 로젠에 직접 로그인해서 🚚 주문접수 버튼을 눌러줘.");
+    const ids = payload.selectedIds;
+    setLogenReceiptPending(ids);
+    sessionStorage.setItem("ddoga:logen-receipt-pending", JSON.stringify(ids));
+    setMessage("🚚 로젠 엑셀 " + data.length + "건 전달 요청됨 · 로젠에서 주문접수를 확인한 다음 아래 접수확인 버튼을 눌러줘. 송장은 아직 등록하지 않아.");
+  }
+
+  async function confirmLogenReceipt() {
+    if (logenReceiptBusy || !logenReceiptPending.length) return;
+    if (!confirm(`로젠에서 주문접수가 실제로 완료된 ${logenReceiptPending.length}건이 맞아? 확인된 주문만 엑셀 추출 단계로 변경해.`)) return;
+    setLogenReceiptBusy(true);
+    try {
+      const response = await fetch("/api/domestic/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "confirm_logen_receipt", order_ids: logenReceiptPending }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error([data.error, data.detail, Array.isArray(data.order_ids) ? `확인 필요: ${data.order_ids.join(", ")}` : ""].filter(Boolean).join(" / ") || "접수 상태 변경 실패");
+      const results: Array<{order_id: string;ok: boolean;error?: string}> = Array.isArray(data.results) ? data.results : [];
+      const failed = results.filter(result => !result.ok);
+      const successful = new Set(results.filter(result => result.ok).map(result => result.order_id));
+      const remaining = logenReceiptPending.filter(id => !successful.has(id));
+      setLogenReceiptPending(remaining);
+      if (remaining.length) sessionStorage.setItem("ddoga:logen-receipt-pending", JSON.stringify(remaining));
+      else sessionStorage.removeItem("ddoga:logen-receipt-pending");
+      await load();
+      setMessage(`로젠 접수 확인: 엑셀 추출 ${successful.size}건 / 미처리 ${remaining.length}건` + (failed.length ? ` · ${failed.map(item => `${item.order_id}: ${item.error || "상태 확인 필요"}`).join("; ")}` : ""));
+    } catch (error) {
+      setMessage("로젠 접수 확인 실패: " + (error instanceof Error ? error.message : String(error)));
+    } finally {
+      setLogenReceiptBusy(false);
+    }
   }
 
   async function exportHanjinExcel() {
@@ -2000,6 +2040,11 @@ export default function DomesticOrdersPage() {
             <button type="button" onClick={sendLogenExcel} style={blueButtonStyle}>
               🚚 로젠전송
             </button>
+            {logenReceiptPending.length > 0 && (
+              <button type="button" onClick={() => void confirmLogenReceipt()} disabled={logenReceiptBusy} style={blackButtonStyle}>
+                {logenReceiptBusy ? "로젠 접수 확인 중..." : `✅ 로젠 접수확인 → 엑셀 추출 (${logenReceiptPending.length}건)`}
+              </button>
+            )}
 
             <button type="button" onClick={() => void prepareSelectedWisePhones()} disabled={batchBusy || bulkRegistering || !selectedIds.length} style={blackButtonStyle}>
               📦 준비
