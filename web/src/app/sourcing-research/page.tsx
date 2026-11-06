@@ -80,7 +80,7 @@ export default function SourcingResearchPage() {
   }, [price, countText, mode, currency, settings]);
 
   const rate = currency === "JPY" ? settings.jpyRate : settings.cnyRate;
-  const appliedSettings = getEffectivePricingSettings(currency, calculation?.count ?? null, settings);
+  const appliedSettings = getEffectivePricingSettings(currency, calculation?.count ?? null, settings, calculation?.purchase);
   return (
     <main style={{ maxWidth: 1040, margin: "0 auto", padding: "28px 16px 60px", color: "#111827" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, marginBottom: 22 }}>
