@@ -202,7 +202,12 @@ export default function SaleInventoryPage(){
  }
 
  const seriesOptions=useMemo(()=>[...new Set([...seriesList,...items.flatMap(item=>(item.is_random_box ? item.series_tags||[] : [item.series_name]).map(seriesFilterLabel)).filter(Boolean)])],[items]);
- const filtered=useMemo(()=>items.filter(i=>{const text=[i.display_name,i.product_name,i.option_text,i.order_number,i.memo,i.public_comment,i.internal_sku].filter(Boolean).join(" ").toLowerCase();return(!q||text.includes(q.toLowerCase()))&&(series==="전체"||(i.is_random_box ? (i.series_tags||[]).some((tag:string)=>seriesFilterLabel(tag)===series) : seriesFilterLabel(i.series_name)===series))&&(type==="전체"||i.item_type===type)&&(stock==="전체"||i.view_status===(stock==="표시"?"display":stock==="숨김"?"hidden":"completed"));}),[items,q,series,type,stock]);
+ const filtered=useMemo(()=>items.filter(i=>{const text=[i.display_name,i.product_name,i.option_text,i.order_number,i.memo,i.public_comment,i.internal_sku].filter(Boolean).join(" ").toLowerCase();return(!q||text.includes(q.toLowerCase()))&&(series==="전체"||(i.is_random_box ? (i.series_tags||[]).some((tag:string)=>seriesFilterLabel(tag)===series) : seriesFilterLabel(i.series_name)===series))&&(type==="전체"||i.item_type===type)&&(stock==="전체"||i.view_status===(stock==="표시"?"display":stock==="숨김"?"hidden":"completed"));}).sort((a,b)=>{
+    // 구매일 최신순: 등록일이 아니라 실제 매입일, 랜덤박스는 구성품 최신 매입일.
+    const aDate=String(a.ordered_at||"");
+    const bDate=String(b.ordered_at||"");
+    return bDate.localeCompare(aDate)||String(b.order_number||"").localeCompare(String(a.order_number||""))||String(a.id||"").localeCompare(String(b.id||""));
+  }),[items,q,series,type,stock]);
  function edit(id:string,key:string,value:any){setItems(p=>p.map(i=>{if(i.id!==id)return i;const next={...i,[key]:value};if(key==="purchase_quantity"||key==="sold_quantity")next.remaining_quantity=Math.max(0,Number(next.purchase_quantity||0)-Number(next.sold_quantity||0));return next;}));}
  const[priceDrafts,setPriceDrafts]=useState<Record<string,string>>({}),[priceSaving,setPriceSaving]=useState<string|null>(null);
  const[priceMessages,setPriceMessages]=useState<Record<string,string>>({});
