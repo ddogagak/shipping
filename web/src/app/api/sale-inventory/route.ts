@@ -9,9 +9,20 @@ export const runtime = "nodejs";
 
 const HIDDEN_MARKER = "[[HIDDEN]]";
 
+// Read the first reliable, positive number of sellable pieces.
+// A missing or zero count means an individual item by default.
+function resolveComponentCount(...values: unknown[]): number {
+  for (const raw of values) {
+    if (raw === null || raw === undefined || raw === "") continue;
+    const value = Number(raw);
+    if (Number.isSafeInteger(value) && value > 0) return value;
+  }
+  return 1;
+}
+
 function pricingFromPurchase(unitPrice: number, currency: string, componentCountRaw: unknown) {
   const purchase = Math.max(0, Number(unitPrice || 0));
-  const componentCount = Math.max(0, Math.trunc(Number(componentCountRaw || 0)));
+  const componentCount = resolveComponentCount(componentCountRaw);
   const foreignPricing = currency !== "KRW" && purchase > 0
     ? calculatePricing(currency, purchase, componentCount)
     : null;
@@ -139,7 +150,7 @@ export async function GET() {
         const boxQuantity = ledger?.box_quantity_override == null ? originalBoxQuantity : Math.max(0,Number(ledger.box_quantity_override));
         const purchaseCurrency = String(order.currency || "CNY").toUpperCase();
         const actualPurchaseUnitPrice = ledger?.purchase_price_override == null ? Number(item.unit_price || 0) : Number(ledger.purchase_price_override);
-        const actualComponentCount = ledger?.component_count_override ?? item.component_count ?? domesticMeta?.component_count ?? sourcing?.component_count;
+        const actualComponentCount = resolveComponentCount(ledger?.component_count_override, item.component_count, domesticMeta?.component_count, sourcing?.component_count);
         const pricing = pricingFromPurchase(actualPurchaseUnitPrice,purchaseCurrency,actualComponentCount);
         // For a uniquely matched SKU, sourcing owns the canonical image.
         // Unmatched/duplicate SKU and no-SKU items keep their currently stored image.
@@ -286,7 +297,7 @@ export async function PATCH(req: Request) {
     const displayName = hasDisplayName ? (String(body.display_name || "").trim() || null) : undefined;
     const hasComponentCount = Object.prototype.hasOwnProperty.call(body, "component_count");
     const componentCount = hasComponentCount
-      ? Math.max(0, Math.trunc(Number(body.component_count || 0)))
+      ? resolveComponentCount(body.component_count)
       : undefined;
 
     const received = Math.max(0, Math.trunc(Number(body.purchase_quantity ?? 0)));
