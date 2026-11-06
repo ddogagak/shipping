@@ -18,6 +18,24 @@ export const DEFAULT_PRICING_SETTINGS: PricingSettings = {
   salesRetentionRate: 0.84,
 };
 
+// Applies only to JPY/CNY products containing exactly one sellable item per purchase unit.
+export const SINGLE_ITEM_FOREIGN_PRICING = {
+  fixedCost: 2000,
+  minimumProfit: 2000,
+  targetProfitRate: 0.15,
+} as const;
+
+export function getEffectivePricingSettings(
+  currency: string,
+  boxCount: number | null,
+  settings: PricingSettings = DEFAULT_PRICING_SETTINGS
+): PricingSettings {
+  const foreign = currency === "JPY" || currency === "CNY";
+  return foreign && Number(boxCount) === 1
+    ? { ...settings, ...SINGLE_ITEM_FOREIGN_PRICING }
+    : settings;
+}
+
 export const PRICING_SETTINGS_STORAGE_KEY = "ddoga-pricing-settings";
 
 export function loadPricingSettings(): PricingSettings {
@@ -48,16 +66,17 @@ export function calculatePricing(
     currency === "JPY" ? settings.jpyRate :
     settings.jpyRate;
 
+  const effectiveSettings = getEffectivePricingSettings(currency, boxCount, settings);
   const purchase = Number(purchasePrice) || 0;
   const packs = Number(boxCount) || 0;
 
   const costPrice = Math.round(
-    purchase * rate * settings.importCostMultiplier + settings.fixedCost
+    purchase * rate * effectiveSettings.importCostMultiplier + effectiveSettings.fixedCost
   );
 
   const targetProfit = Math.max(
-    settings.minimumProfit,
-    costPrice * settings.targetProfitRate
+    effectiveSettings.minimumProfit,
+    costPrice * effectiveSettings.targetProfitRate
   );
 
   const minimumMarginPrice = Math.ceil(
