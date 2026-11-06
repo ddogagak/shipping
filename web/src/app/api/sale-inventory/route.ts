@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
-import { calculatePricing } from "@/lib/pricing";
+import { calculatePricing, calculateDomesticSalePricing } from "@/lib/pricing";
 import { extractSourceProductId } from "@/lib/purchases/product-id";
 import { resolveInventorySku } from "@/lib/inventory/match-by-sku";
 import { buildInternalSku, getSeriesCode, getSourceProductKey, getSourceSiteCode } from "@/lib/inventory/internal-sku";
@@ -23,13 +23,13 @@ function resolveComponentCount(...values: unknown[]): number {
 function pricingFromPurchase(unitPrice: number, currency: string, componentCountRaw: unknown) {
   const purchase = Math.max(0, Number(unitPrice || 0));
   const componentCount = resolveComponentCount(componentCountRaw);
-  const foreignPricing = currency !== "KRW" && purchase > 0
-    ? calculatePricing(currency, purchase, componentCount)
+  const computed = purchase > 0
+    ? currency === "KRW"
+      ? calculateDomesticSalePricing(purchase, componentCount)
+      : calculatePricing(currency, purchase, componentCount)
     : null;
-  const boxCost = currency === "KRW" ? Math.round(purchase) : foreignPricing?.costPrice ?? 0;
-  const minimumMarginPrice = boxCost > 0
-    ? (currency === "KRW" ? Math.ceil(boxCost / 0.69) : foreignPricing!.minimumMarginPrice)
-    : 0;
+  const boxCost = computed?.costPrice ?? 0;
+  const minimumMarginPrice = computed?.minimumMarginPrice ?? 0;
   return {
     boxCost,
     componentCount,
