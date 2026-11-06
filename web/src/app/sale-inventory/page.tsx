@@ -72,6 +72,24 @@ async function buildRandomBoxImage(sourceItems:any[]):Promise<File>{
  } finally {images.forEach(image=>image.close());}
 }
 
+function randomBoxPurchaseUnitPrice(members:any[]):string{
+ const groups=new Map<string,number[]>();
+ for(const member of members){
+  const currency=String(member.currency||"").toUpperCase()||"KRW";
+  const boxPrice=Number(member.unit_purchase_price);
+  const packCount=Number(member.component_count);
+  if(!Number.isFinite(boxPrice)||boxPrice<0||!Number.isFinite(packCount)||packCount<=0)continue;
+  const unitPrice=boxPrice/packCount;
+  groups.set(currency,[...(groups.get(currency)||[]),unitPrice]);
+ }
+ if(groups.size===0)return "-";
+ const format=(value:number)=>value.toLocaleString("ko-KR",{maximumFractionDigits:2});
+ return [...groups.entries()].map(([currency,prices])=>{
+  const low=Math.min(...prices),high=Math.max(...prices);
+  return `${format(low)}${Math.abs(high-low)>0.001?"~"+format(high):""} ${currency}`;
+ }).join(" / ");
+}
+
 function RandomBoxCard({item,onEdit,onSave,saving}:{
  item:any;onEdit:(id:string,key:string,value:any)=>void;onSave:(item:any)=>void;saving:boolean
 }){
@@ -90,7 +108,7 @@ function RandomBoxCard({item,onEdit,onSave,saving}:{
    </div>
    <OverseasPricingGuide boxCost={cost} count={count} basicBoxPrice={basic}/>
    <div style={{...actualCost,display:"flex",alignItems:"center",justifyContent:"space-between",gap:6}}>
-    <span>합산 비용포함원가</span><b>{won(cost)}</b>
+    <span>개당 매입가</span><b>{randomBoxPurchaseUnitPrice(members)}</b>
    </div>
    <div style={profitBox}><Metric label="총 수익" value={profit===null?"-":won(profit)} strong compact/><Metric label="개당 수익" value={profit===null?"-":won(profit/count)} strong compact/></div>
    <div style={{...numbers,marginTop:8}}><label>입고 박스<input type="text" inputMode="numeric" value={item.purchase_quantity??1} onChange={e=>{if(/^\d*$/.test(e.target.value))onEdit(item.id,"purchase_quantity",Number(e.target.value))}} style={{...input,width:"100%"}}/></label><div>구성 <b>{count}종</b></div></div>
