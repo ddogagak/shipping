@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { DEFAULT_PRICING_SETTINGS } from "@/lib/pricing";
+import { calculatePricing, DEFAULT_PRICING_SETTINGS, getEffectivePricingSettings } from "@/lib/pricing";
 import { useEffect,useMemo,useState,type CSSProperties } from "react";
 const seriesList=["전체","헌터헌터","귀멸의칼날","나의히어로아카데미아","프리렌","진격의거인","치이카와","약사의혼잣말","나루토","기타"];
 const typeList=["전체","아크릴","지류","뱃지","피규어","키링","기타"];
@@ -10,7 +10,8 @@ function won(v:any){const n=Number(v||0);return Number.isFinite(n)&&n!==0?Math.r
 function pricing(item:any){
  const count=Math.max(0,Math.trunc(Number(item.component_count||0)));
  const boxCost=Number(item.box_cost_price||0);
- const targetProfit=boxCost>0?Math.max(DEFAULT_PRICING_SETTINGS.minimumProfit,boxCost*DEFAULT_PRICING_SETTINGS.targetProfitRate):0;
+ const effectiveSettings=getEffectivePricingSettings(String(item.actual_purchase_currency||""),count);
+ const targetProfit=boxCost>0?Math.max(effectiveSettings.minimumProfit,boxCost*effectiveSettings.targetProfitRate):0;
  // Domestic (KRW) retains its existing recommendation formula.
  const minimumMarginPrice=boxCost>0?(item.actual_purchase_currency==="KRW"?Math.ceil(boxCost/.69):Math.ceil((boxCost+targetProfit)/DEFAULT_PRICING_SETTINGS.salesRetentionRate)):0;
  return{count,unitCost:count>0?Math.ceil(boxCost/count):0,unitSale:count>0?Math.ceil(minimumMarginPrice/count):0,minimumMarginPrice,targetProfit};
@@ -107,7 +108,9 @@ export default function SaleInventoryPage(){
    const r=await fetch("/api/sale-inventory",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"fill_missing_purchase_price",purchase_item_id:item.id,unit_price:value})});
    const j=await r.json();if(!r.ok)throw new Error(j.message||"매입가 저장 실패");
    const saved=Number(j.unit_price),currency=item.actual_purchase_currency;
-   const cost=currency==="KRW"?Math.round(saved):Math.round(saved*({JPY:10,CNY:230,KRW:1}[currency as "JPY"|"CNY"|"KRW"]??230)*1.2+5000);
+   const cost=currency==="KRW"?Math.round(saved):["JPY","CNY"].includes(currency)
+    ?calculatePricing(currency,saved,Number(item.component_count||0)).costPrice
+    :Math.round(saved*230*1.2+5000);
    setItems(prev=>prev.map(i=>i.id===item.id?{...i,actual_purchase_unit_price:saved,can_fill_purchase_price:false,box_cost_price:cost}:i));
    setPriceDrafts(prev=>{const next={...prev};delete next[item.id];return next});setMsg("방송판매재고 원가 저장 완료. 매입관리 원본은 그대로야.");setPriceMessages(p=>({...p,[item.id]:`매입가 ${saved.toLocaleString("ko-KR")} ${currency} 저장 완료`}));return saved;
   }catch(e){const message="매입가 저장 실패: "+(e instanceof Error?e.message:"알 수 없는 오류");setMsg(message);setPriceMessages(p=>({...p,[item.id]:message}));return null;}finally{setPriceSaving(null)}
