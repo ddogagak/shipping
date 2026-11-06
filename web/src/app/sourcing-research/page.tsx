@@ -1,704 +1,173 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
-  useEffect,
-  useMemo,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-} from "react";
+  calculatePricing,
+  DEFAULT_PRICING_SETTINGS,
+  loadPricingSettings,
+  type PricingSettings,
+} from "@/lib/pricing";
 
-type SourcingItem = {
-  id: string;
-  created_at: string;
-  updated_at: string;
-  status: string;
-  product_url: string;
-  product_name: string;
-  source_site: string;
-  series_name: string;
-  item_type: string;
-  yen_price: number | string | null;
-  extra_cost_yen: number | string | null;
-  box_item_count: number | string | null;
-  exchange_multiplier: number | string | null;
-  expected_unit_price_krw: number | string | null;
-  memo: string;
-  image_url: string;
+type PriceMode = "unit" | "box";
+type Currency = "JPY" | "CNY";
+const won = (n: number) => `${Math.ceil(n).toLocaleString("ko-KR")}원`;
+const readNumber = (text: string) => {
+  const n = Number(text.replace(/,/g, "").trim());
+  return Number.isFinite(n) && n >= 0 ? n : NaN;
 };
-
-type DraftItem = Omit<SourcingItem, "id" | "created_at" | "updated_at">;
-
-const STATUS_OPTIONS = ["검토중", "보류", "구매예정", "구매완료", "패스"];
-const TYPE_OPTIONS = ["", "아크릴", "지류", "뱃지", "피규어", "인형", "키링", "기타"];
-
-const emptyDraft: DraftItem = {
-  status: "검토중",
-  product_url: "",
-  product_name: "",
-  source_site: "",
-  series_name: "",
-  item_type: "",
-  yen_price: "",
-  extra_cost_yen: "",
-  box_item_count: "1",
-  exchange_multiplier: "15",
-  expected_unit_price_krw: "",
-  memo: "",
-  image_url: "",
+const moneyInput: CSSProperties = {
+  width: "100%", boxSizing: "border-box", padding: "13px 14px",
+  borderRadius: 12, border: "1px solid #cbd5e1",
+  fontSize: 17, background: "#fff", color: "#111827",
 };
-
-const NUMBER_FIELDS = [
-  "yen_price",
-  "extra_cost_yen",
-  "box_item_count",
-  "exchange_multiplier",
-  "expected_unit_price_krw",
-];
-
-function isNumberField(field: string) {
-  return NUMBER_FIELDS.includes(field);
-}
-
-function num(value: unknown) {
-  if (value === "" || value === null || value === undefined) return 0;
-  const clean = String(value).replace(/,/g, "").trim();
-  const n = Number(clean);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function safeCount(value: unknown) {
-  const n = num(value);
-  return n > 0 ? n : 1;
-}
-
-function numberPayload<T extends Record<string, any>>(value: T) {
-  return {
-    ...value,
-    yen_price: num(value.yen_price),
-    extra_cost_yen: num(value.extra_cost_yen),
-    box_item_count: safeCount(value.box_item_count),
-    exchange_multiplier: num(value.exchange_multiplier) || 15,
-    expected_unit_price_krw: num(value.expected_unit_price_krw),
-  };
-}
-
-function inputValue(value: unknown) {
-  if (value === null || value === undefined) return "";
-  return String(value);
-}
-
-function won(value: number) {
-  return `${Math.round(value).toLocaleString("ko-KR")}원`;
-}
-
-function yen(value: number) {
-  return `¥${Math.round(value).toLocaleString("ja-JP")}`;
-}
-
-function calc(
-  item: Pick<
-    SourcingItem,
-    | "yen_price"
-    | "extra_cost_yen"
-    | "box_item_count"
-    | "exchange_multiplier"
-    | "expected_unit_price_krw"
-  >
-) {
-  const yenTotal = num(item.yen_price) + num(item.extra_cost_yen);
-  const multiplier = num(item.exchange_multiplier) || 15;
-  const boxCost = yenTotal * multiplier;
-  const count = safeCount(item.box_item_count);
-  const unitCost = boxCost / count;
-  const minimumUnitPrice = (boxCost + 10000) / count;
-  const expectedUnitPrice = num(item.expected_unit_price_krw);
-  const unitProfit = expectedUnitPrice ? expectedUnitPrice - unitCost : 0;
-  const boxProfit = expectedUnitPrice ? expectedUnitPrice * count - boxCost : 0;
-
-  return { yenTotal, multiplier, count, boxCost, unitCost, minimumUnitPrice, unitProfit, boxProfit };
-}
-
-export default function SourcingResearchPage() {
-  const [items, setItems] = useState<SourcingItem[]>([]);
-  const [draft, setDraft] = useState<DraftItem>(emptyDraft);
-  const [statusFilter, setStatusFilter] = useState("전체");
-  const [keyword, setKeyword] = useState("");
-  const [message, setMessage] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [savingId, setSavingId] = useState<string | null>(null);
-
-  async function load() {
-    setLoading(true);
-    setMessage("");
-
-    try {
-      const res = await fetch("/api/sourcing-research", { cache: "no-store" });
-      const json = await res.json();
-
-      if (!res.ok) {
-        setMessage(json.detail || json.error || "목록 조회 실패");
-        return;
-      }
-
-      setItems(json.items || []);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "알 수 없는 오류");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    void load();
-  }, []);
-
-  const filtered = useMemo(() => {
-    const q = keyword.trim().toLowerCase();
-
-    return items.filter((item) => {
-      if (statusFilter !== "전체" && item.status !== statusFilter) return false;
-      if (!q) return true;
-
-      const text = [
-        item.product_name,
-        item.product_url,
-        item.source_site,
-        item.series_name,
-        item.item_type,
-        item.memo,
-        item.status,
-      ]
-        .join(" ")
-        .toLowerCase();
-
-      return text.includes(q);
-    });
-  }, [items, statusFilter, keyword]);
-
-  function updateDraft(field: keyof DraftItem, value: string) {
-    setDraft((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-  }
-
-  function resetDraft() {
-    setDraft(emptyDraft);
-    setMessage("입력값 초기화 완료");
-  }
-
-  function updateItem(id: string, field: keyof SourcingItem, value: string) {
-    setItems((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              [field]: value,
-            }
-          : item
-      )
-    );
-  }
-
-  async function createItem() {
-    if (!draft.product_name.trim() && !draft.product_url.trim()) {
-      alert("상품명이나 링크 중 하나는 입력해줘.");
-      return;
-    }
-
-    const res = await fetch("/api/sourcing-research", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(numberPayload(draft)),
-    });
-
-    const json = await res.json();
-
-    if (!res.ok) {
-      alert(json.detail || json.error || "저장 실패");
-      return;
-    }
-
-    setDraft(emptyDraft);
-    setMessage("저장 완료");
-    await load();
-  }
-
-  async function saveItem(item: SourcingItem) {
-    setSavingId(item.id);
-
-    const res = await fetch(`/api/sourcing-research/${item.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(numberPayload(item)),
-    });
-
-    const json = await res.json();
-    setSavingId(null);
-
-    if (!res.ok) {
-      alert(json.detail || json.error || "수정 실패");
-      return;
-    }
-
-    setMessage("수정 완료");
-    await load();
-  }
-
-  async function deleteItem(item: SourcingItem) {
-    if (!confirm(`삭제할까?\n\n${item.product_name || item.product_url}`)) return;
-
-    const res = await fetch(`/api/sourcing-research/${item.id}`, {
-      method: "DELETE",
-    });
-
-    const json = await res.json();
-
-    if (!res.ok) {
-      alert(json.detail || json.error || "삭제 실패");
-      return;
-    }
-
-    setMessage("삭제 완료");
-    await load();
-  }
-
-  const draftCalc = calc(draft as SourcingItem);
-  const hasDraftExpectedPrice = num(draft.expected_unit_price_krw) > 0;
-
-  return (
-    <main style={{ maxWidth: 1400, margin: "0 auto", padding: 24 }}>
-      <section style={cardStyle}>
-        <div style={topRowStyle}>
-          <div>
-            <h1 style={{ marginTop: 0, marginBottom: 8 }}>calculator</h1>
-            <p style={{ color: "#6b7280", margin: 0 }}>
-              ----
-            </p>
-          </div>
-
-          <Link href="/" style={homeButtonStyle}>
-            메인으로
-          </Link>
-        </div>
-
-        {message ? (
-          <p style={{ color: message.includes("완료") ? "#059669" : "#b91c1c" }}>
-            {message}
-          </p>
-        ) : null}
-      </section>
-
-      <section style={{ ...cardStyle, marginTop: 16 }}>
-        <h2 style={{ marginTop: 0 }}>새 검토 추가</h2>
-
-        <div style={formGridStyle}>
-          <Field label="상품 링크">
-            <input
-              value={draft.product_url}
-              onChange={(e) => updateDraft("product_url", e.target.value)}
-              style={inputStyle}
-              placeholder="https://..."
-            />
-          </Field>
-
-          <Field label="상품명">
-            <input
-              value={draft.product_name}
-              onChange={(e) => updateDraft("product_name", e.target.value)}
-              style={inputStyle}
-              placeholder="상품명"
-            />
-          </Field>
-
-          <Field label="사이트">
-            <input
-              value={draft.source_site}
-              onChange={(e) => updateDraft("source_site", e.target.value)}
-              style={inputStyle}
-              placeholder="스루가야 / 메루카리..."
-            />
-          </Field>
-
-          <Field label="작품명">
-            <input
-              value={draft.series_name}
-              onChange={(e) => updateDraft("series_name", e.target.value)}
-              style={inputStyle}
-            />
-          </Field>
-
-          <Field label="타입">
-            <select
-              value={draft.item_type}
-              onChange={(e) => updateDraft("item_type", e.target.value)}
-              style={inputStyle}
-            >
-              {TYPE_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option || "선택안함"}
-                </option>
-              ))}
-            </select>
-          </Field>
-
-          <Field label="상태">
-            <select
-              value={draft.status}
-              onChange={(e) => updateDraft("status", e.target.value)}
-              style={inputStyle}
-            >
-              {STATUS_OPTIONS.map((option) => (
-                <option key={option}>{option}</option>
-              ))}
-            </select>
-          </Field>
-
-          <Field label="엔화원가">
-            <input
-              type="text"
-              inputMode="numeric"
-              value={inputValue(draft.yen_price)}
-              onChange={(e) => updateDraft("yen_price", e.target.value)}
-              style={inputStyle}
-              placeholder="예: 1000"
-            />
-          </Field>
-
-          <Field label="기타비용(엔)">
-            <input
-              type="text"
-              inputMode="numeric"
-              value={inputValue(draft.extra_cost_yen)}
-              onChange={(e) => updateDraft("extra_cost_yen", e.target.value)}
-              style={inputStyle}
-              placeholder="없으면 비워둠"
-            />
-          </Field>
-
-          <Field label="박스당 아이템수량">
-            <input
-              type="text"
-              inputMode="numeric"
-              value={inputValue(draft.box_item_count)}
-              onChange={(e) => updateDraft("box_item_count", e.target.value)}
-              style={inputStyle}
-              placeholder="예: 10"
-            />
-          </Field>
-
-          <Field label="환산배율">
-            <input
-              type="text"
-              inputMode="decimal"
-              value={inputValue(draft.exchange_multiplier)}
-              onChange={(e) => updateDraft("exchange_multiplier", e.target.value)}
-              style={inputStyle}
-              placeholder="기본 15"
-            />
-          </Field>
-
-          <Field label="예상 개당 판매가">
-            <input
-              type="text"
-              inputMode="numeric"
-              value={inputValue(draft.expected_unit_price_krw)}
-              onChange={(e) => updateDraft("expected_unit_price_krw", e.target.value)}
-              style={inputStyle}
-              placeholder="예: 2000"
-            />
-          </Field>
-
-          <Field label="이미지 URL">
-            <input
-              value={draft.image_url}
-              onChange={(e) => updateDraft("image_url", e.target.value)}
-              style={inputStyle}
-            />
-          </Field>
-        </div>
-
-        <Field label="메모">
-          <textarea
-            value={draft.memo}
-            onChange={(e) => updateDraft("memo", e.target.value)}
-            style={textareaStyle}
-          />
-        </Field>
-
-        <div style={calcGridStyle}>
-          <CalcCard
-            label="박스원가"
-            value={won(draftCalc.boxCost)}
-            sub={`${yen(draftCalc.yenTotal)} × ${draftCalc.multiplier}`}
-          />
-          <CalcCard label="개당원가" value={won(draftCalc.unitCost)} sub={`${draftCalc.count}개 기준`} />
-          <CalcCard label="최소 개당 추천단가" value={won(draftCalc.minimumUnitPrice)} sub="박스당 최소 10,000원 이윤" />
-          <CalcCard label="개당 이윤" value={hasDraftExpectedPrice ? won(draftCalc.unitProfit) : "-"} sub="예상 판매가 기준" />
-          <CalcCard label="박스 이윤" value={hasDraftExpectedPrice ? won(draftCalc.boxProfit) : "-"} sub="예상 판매가 기준" />
-        </div>
-
-        <div style={buttonRowStyle}>
-          <button type="button" onClick={resetDraft} style={outlineButtonStyle}>
-            초기화
-          </button>
-          <button type="button" onClick={createItem} style={blackButtonStyle}>
-            저장
-          </button>
-        </div>
-      </section>
-
-      <section style={{ ...cardStyle, marginTop: 16 }}>
-        <div style={topRowStyle}>
-          <h2 style={{ margin: 0 }}>검토 기록</h2>
-
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <input
-              value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
-              placeholder="검색"
-              style={searchStyle}
-            />
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              style={filterSelectStyle}
-            >
-              <option>전체</option>
-              {STATUS_OPTIONS.map((option) => (
-                <option key={option}>{option}</option>
-              ))}
-            </select>
-            <button type="button" onClick={() => void load()} style={blackButtonStyle}>
-              새로고침
-            </button>
-          </div>
-        </div>
-
-        {loading ? (
-          <p>불러오는 중...</p>
-        ) : filtered.length ? (
-          <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
-            {filtered.map((item) => (
-              <SourcingCard
-                key={item.id}
-                item={item}
-                updateItem={updateItem}
-                saveItem={saveItem}
-                deleteItem={deleteItem}
-                savingId={savingId}
-              />
-            ))}
-          </div>
-        ) : (
-          <p style={{ color: "#6b7280" }}>검토 기록이 없습니다.</p>
-        )}
-      </section>
-    </main>
-  );
-}
-
-function SourcingCard({
-  item,
-  updateItem,
-  saveItem,
-  deleteItem,
-  savingId,
-}: {
-  item: SourcingItem;
-  updateItem: (id: string, field: keyof SourcingItem, value: string) => void;
-  saveItem: (item: SourcingItem) => Promise<void>;
-  deleteItem: (item: SourcingItem) => Promise<void>;
-  savingId: string | null;
+const panel: CSSProperties = {
+  background: "#fff", border: "1px solid #e5e7eb", borderRadius: 20, padding: 22,
+};
+const textMuted: CSSProperties = { color: "#64748b", fontSize: 13, lineHeight: 1.6 };
+function PriceResult({ title, boxPrice, count, cost, retention, featured }: {
+  title: string; boxPrice: number; count: number; cost: number;
+  retention: number; featured?: boolean;
 }) {
-  const c = calc(item);
-  const hasExpectedPrice = num(item.expected_unit_price_krw) > 0;
-
+  const unit = Math.ceil(boxPrice / count);
+  const actualBox = unit * count;
+  const netProfit = actualBox * retention - cost;
+  const margin = actualBox > 0 ? (netProfit / actualBox) * 100 : 0;
   return (
-    <article style={itemCardStyle}>
-      <div style={imageBoxStyle}>
-        {item.image_url ? (
-          <img src={item.image_url} alt="" style={imageStyle} />
-        ) : (
-          <span style={{ color: "#9ca3af", fontWeight: 800 }}>IMG</span>
-        )}
+    <div style={{
+      padding: 18, borderRadius: 16,
+      border: featured ? "2px solid #2563eb" : "1px solid #e2e8f0",
+      background: featured ? "#eff6ff" : "#f8fafc",
+    }}>
+      <div style={{ fontSize: 14, fontWeight: 800, color: "#334155" }}>{title}</div>
+      <div style={{ marginTop: 10, fontSize: 28, fontWeight: 900, color: "#0f172a", fontVariantNumeric: "tabular-nums" }}>
+        {won(unit)} <span style={{ fontSize: 13, color: "#64748b", fontWeight: 500 }}>개당</span>
       </div>
-
-      <div style={{ minWidth: 0 }}>
-        <div style={itemHeaderStyle}>
-          <select
-            value={item.status || "검토중"}
-            onChange={(e) => updateItem(item.id, "status", e.target.value)}
-            style={smallSelectStyle}
-          >
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option}>{option}</option>
-            ))}
-          </select>
-          <input
-            value={item.product_name || ""}
-            onChange={(e) => updateItem(item.id, "product_name", e.target.value)}
-            style={titleInputStyle}
-            placeholder="상품명"
-          />
-        </div>
-
-        <div style={recordGridStyle}>
-          <Field label="링크">
-            <input
-              value={item.product_url || ""}
-              onChange={(e) => updateItem(item.id, "product_url", e.target.value)}
-              style={inputStyle}
-            />
-          </Field>
-          <Field label="사이트">
-            <input
-              value={item.source_site || ""}
-              onChange={(e) => updateItem(item.id, "source_site", e.target.value)}
-              style={inputStyle}
-            />
-          </Field>
-          <Field label="작품명">
-            <input
-              value={item.series_name || ""}
-              onChange={(e) => updateItem(item.id, "series_name", e.target.value)}
-              style={inputStyle}
-            />
-          </Field>
-          <Field label="타입">
-            <select
-              value={item.item_type || ""}
-              onChange={(e) => updateItem(item.id, "item_type", e.target.value)}
-              style={inputStyle}
-            >
-              {TYPE_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option || "선택안함"}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="엔화원가">
-            <input
-              type="text"
-              inputMode="numeric"
-              value={inputValue(item.yen_price)}
-              onChange={(e) => updateItem(item.id, "yen_price", e.target.value)}
-              style={inputStyle}
-            />
-          </Field>
-          <Field label="기타비용(엔)">
-            <input
-              type="text"
-              inputMode="numeric"
-              value={inputValue(item.extra_cost_yen)}
-              onChange={(e) => updateItem(item.id, "extra_cost_yen", e.target.value)}
-              style={inputStyle}
-            />
-          </Field>
-          <Field label="수량">
-            <input
-              type="text"
-              inputMode="numeric"
-              value={inputValue(item.box_item_count)}
-              onChange={(e) => updateItem(item.id, "box_item_count", e.target.value)}
-              style={inputStyle}
-            />
-          </Field>
-          <Field label="예상 개당 판매가">
-            <input
-              type="text"
-              inputMode="numeric"
-              value={inputValue(item.expected_unit_price_krw)}
-              onChange={(e) =>
-                updateItem(item.id, "expected_unit_price_krw", e.target.value)
-              }
-              style={inputStyle}
-            />
-          </Field>
-        </div>
-
-        <div style={miniCalcGridStyle}>
-          <CalcCard label="박스원가" value={won(c.boxCost)} sub={`${yen(c.yenTotal)} × ${c.multiplier}`} />
-          <CalcCard label="개당원가" value={won(c.unitCost)} sub={`${c.count}개 기준`} />
-          <CalcCard label="최소 추천가" value={won(c.minimumUnitPrice)} sub="+박스 1만원" />
-          <CalcCard label="개당 이윤" value={hasExpectedPrice ? won(c.unitProfit) : "-"} sub="예상 판매가 기준" />
-          <CalcCard label="박스 이윤" value={hasExpectedPrice ? won(c.boxProfit) : "-"} sub="예상 판매가 기준" />
-        </div>
-
-        <Field label="메모">
-          <textarea
-            value={item.memo || ""}
-            onChange={(e) => updateItem(item.id, "memo", e.target.value)}
-            style={textareaStyle}
-          />
-        </Field>
-
-        <div style={buttonRowStyle}>
-          {item.product_url ? (
-            <a href={item.product_url} target="_blank" rel="noreferrer" style={linkButtonStyle}>
-              링크 열기
-            </a>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => void saveItem(item)}
-            style={blackButtonStyle}
-            disabled={savingId === item.id}
-          >
-            {savingId === item.id ? "저장중" : "저장"}
-          </button>
-          <button type="button" onClick={() => void deleteItem(item)} style={redButtonStyle}>
-            삭제
-          </button>
-        </div>
+      <div style={{ fontSize: 16, fontWeight: 700, marginTop: 4 }}>박스 합계 {won(actualBox)}</div>
+      <div style={{ ...textMuted, marginTop: 8 }}>
+        예상 순이익 {won(netProfit)} · 실제 수익률 {margin.toFixed(1)}%
       </div>
-    </article>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label style={fieldStyle}>
-      <span>{label}</span>
-      {children}
-    </label>
-  );
-}
-
-function CalcCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div style={calcCardStyle}>
-      <div style={{ color: "#6b7280", fontSize: 12 }}>{label}</div>
-      <strong style={{ fontSize: 20 }}>{value}</strong>
-      {sub ? <div style={{ color: "#9ca3af", fontSize: 12 }}>{sub}</div> : null}
     </div>
   );
 }
 
-const cardStyle: CSSProperties = { border: "1px solid #e5e7eb", borderRadius: 16, padding: 20, background: "#fff" };
-const topRowStyle: CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" };
-const homeButtonStyle: CSSProperties = { border: "1px solid #d1d5db", borderRadius: 10, padding: "9px 12px", textDecoration: "none", color: "#111827", fontWeight: 800, background: "#fff" };
-const formGridStyle: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 };
-const recordGridStyle: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginTop: 10 };
-const fieldStyle: CSSProperties = { display: "grid", gap: 6, fontSize: 13, fontWeight: 800 };
-const inputStyle: CSSProperties = { width: "100%", boxSizing: "border-box", border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", minHeight: 38, background: "#fff" };
-const textareaStyle: CSSProperties = { width: "100%", boxSizing: "border-box", border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", minHeight: 70, marginTop: 10 };
-const calcGridStyle: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10, marginTop: 14 };
-const miniCalcGridStyle: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 8, marginTop: 10, marginBottom: 10 };
-const calcCardStyle: CSSProperties = { border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#f9fafb" };
-const blackButtonStyle: CSSProperties = { border: 0, borderRadius: 10, padding: "10px 14px", background: "#111827", color: "#fff", fontWeight: 800, cursor: "pointer" };
-const outlineButtonStyle: CSSProperties = { border: "1px solid #d1d5db", borderRadius: 10, padding: "10px 14px", background: "#fff", color: "#111827", fontWeight: 800, cursor: "pointer" };
-const redButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#dc2626" };
-const searchStyle: CSSProperties = { border: "1px solid #d1d5db", borderRadius: 10, padding: "9px 12px", minWidth: 220 };
-const filterSelectStyle: CSSProperties = { border: "1px solid #d1d5db", borderRadius: 10, padding: "9px 12px", background: "#fff" };
-const itemCardStyle: CSSProperties = { display: "grid", gridTemplateColumns: "120px 1fr", gap: 14, border: "1px solid #e5e7eb", borderRadius: 16, padding: 14, background: "#fff" };
-const imageBoxStyle: CSSProperties = { width: 120, height: 120, border: "1px solid #e5e7eb", borderRadius: 12, background: "#f9fafb", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" };
-const imageStyle: CSSProperties = { width: "100%", height: "100%", objectFit: "cover" };
-const itemHeaderStyle: CSSProperties = { display: "grid", gridTemplateColumns: "120px 1fr", gap: 8 };
-const smallSelectStyle: CSSProperties = { border: "1px solid #d1d5db", borderRadius: 8, padding: "8px 10px", background: "#fff", fontWeight: 800 };
-const titleInputStyle: CSSProperties = { ...inputStyle, fontWeight: 900 };
-const buttonRowStyle: CSSProperties = { display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap", marginTop: 10 };
-const linkButtonStyle: CSSProperties = { ...blackButtonStyle, background: "#2563eb", textDecoration: "none" };
+export default function SourcingResearchPage() {
+  const [mode, setMode] = useState<PriceMode>("unit");
+  const [currency, setCurrency] = useState<Currency>("JPY");
+  const [price, setPrice] = useState("");
+  const [countText, setCountText] = useState("10");
+  const [settings, setSettings] = useState<PricingSettings>(DEFAULT_PRICING_SETTINGS);
+  useEffect(() => { setSettings(loadPricingSettings()); }, []);
+
+  const calculation = useMemo(() => {
+    const amount = readNumber(price);
+    const count = readNumber(countText);
+    if (!price.trim() || !Number.isFinite(amount) || amount <= 0 ||
+        !Number.isSafeInteger(count) || count <= 0) return null;
+
+    const purchase = mode === "unit" ? amount * count : amount;
+    if (!Number.isFinite(purchase)) return null;
+    const pricing = calculatePricing(currency, purchase, count, settings);
+    const retention = settings.salesRetentionRate;
+    const fifteen = retention > 0.15
+      ? Math.ceil(pricing.costPrice / (retention - 0.15) / count) * count : null;
+    const twenty = retention > 0.2
+      ? Math.ceil(pricing.costPrice / (retention - 0.2) / count) * count : null;
+    return { purchase, count, pricing, retention, fifteen, twenty };
+  }, [price, countText, mode, currency, settings]);
+
+  const rate = currency === "JPY" ? settings.jpyRate : settings.cnyRate;
+  return (
+    <main style={{ maxWidth: 1040, margin: "0 auto", padding: "28px 16px 60px", color: "#111827" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, marginBottom: 22 }}>
+        <div>
+          <h1 style={{ fontSize: 29, margin: 0, fontWeight: 900 }}>또가 박스 판매가 계산기</h1>
+          <p style={{ ...textMuted, margin: "7px 0 0" }}>단가 또는 박스 가격으로 최소마진·15%·20% 판매가를 바로 비교해요.</p>
+        </div>
+        <Link href="/" style={{ textDecoration: "none", padding: "9px 13px", border: "1px solid #cbd5e1", borderRadius: 10, color: "#334155", whiteSpace: "nowrap" }}>메인으로</Link>
+      </div>
+
+      <section style={panel}>
+        <div style={{ fontWeight: 800, marginBottom: 12 }}>가격 입력 방식</div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 23, flexWrap: "wrap" }}>
+          {([{ id: "unit", label: "개당 매입 단가" }, { id: "box", label: "박스 총 매입가" }] as const).map(({ id, label }) => (
+            <button type="button" key={id} onClick={() => {
+              const oldAmount = readNumber(price);
+              const count = readNumber(countText);
+              if (mode !== id && Number.isFinite(oldAmount) && Number.isSafeInteger(count) && count > 0)
+                setPrice(String(id === "box" ? Math.round(oldAmount * count * 100) / 100 : Math.round(oldAmount / count * 100) / 100));
+              setMode(id);
+            }} style={{
+              border: mode === id ? "1px solid #2563eb" : "1px solid #d1d5db",
+              background: mode === id ? "#eff6ff" : "#fff", color: mode === id ? "#1d4ed8" : "#374151",
+              fontWeight: 800, borderRadius: 10, padding: "11px 15px", cursor: "pointer",
+            }}>{label}</button>
+          ))}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 16 }}>
+          <label style={{ display: "grid", gap: 8, fontWeight: 800, fontSize: 14 }}>
+            통화
+            <select value={currency} onChange={(e) => setCurrency(e.target.value as Currency)} style={moneyInput}>
+              <option value="JPY">JPY (엔)</option>
+              <option value="CNY">CNY (위안)</option>
+            </select>
+          </label>
+          <label style={{ display: "grid", gap: 8, fontWeight: 800, fontSize: 14 }}>
+            {mode === "unit" ? "개당 매입 단가" : "박스 총 매입가"} ({currency})
+            <input type="text" inputMode="decimal" placeholder={mode === "unit" ? "예: 594" : "예: 5940"}
+              value={price} onChange={(e) => setPrice(e.target.value)} style={moneyInput}/>
+          </label>
+          <label style={{ display: "grid", gap: 8, fontWeight: 800, fontSize: 14 }}>
+            박스당 구성품 수 (개)
+            <input type="text" inputMode="numeric" placeholder="예: 10" value={countText}
+              onChange={(e) => setCountText(e.target.value)} style={moneyInput}/>
+          </label>
+        </div>
+        <div style={{ ...textMuted, marginTop: 16 }}>
+          또가 설정: 1{currency} = {rate.toLocaleString("ko-KR")}원 · 수입원가 × {settings.importCostMultiplier} + {won(settings.fixedCost)} · 판매대금 {Math.round(settings.salesRetentionRate * 100)}% 반영
+        </div>
+      </section>
+
+      {calculation ? (
+        <>
+          <section style={{ ...panel, marginTop: 16 }}>
+            <h2 style={{ fontSize: 18, margin: "0 0 15px" }}>예상 판매가</h2>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: 12 }}>
+              <PriceResult title="또가 기본 최소마진" featured
+                boxPrice={calculation.pricing.minimumMarginPrice}
+                count={calculation.count} cost={calculation.pricing.costPrice} retention={calculation.retention}/>
+              {calculation.fifteen !== null &&
+                <PriceResult title="순수익률 15%" boxPrice={calculation.fifteen}
+                  count={calculation.count} cost={calculation.pricing.costPrice} retention={calculation.retention}/>}
+              {calculation.twenty !== null &&
+                <PriceResult title="순수익률 20%" boxPrice={calculation.twenty}
+                  count={calculation.count} cost={calculation.pricing.costPrice} retention={calculation.retention}/>}
+            </div>
+            <p style={{ ...textMuted, marginBottom: 0 }}>
+              개당 판매가를 원 단위 올림한 뒤 박스 총액과 실제 수익률을 다시 계산합니다.
+              수익률 = (판매총액 × {calculation.retention} − 추정 원가) ÷ 판매총액.
+            </p>
+          </section>
+          <section style={{ ...panel, marginTop: 16 }}>
+            <h2 style={{ fontSize: 18, margin: "0 0 12px" }}>계산 내역</h2>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
+              <div><div style={textMuted}>박스 매입가</div><strong>{calculation.purchase.toLocaleString("ko-KR")} {currency}</strong></div>
+              <div><div style={textMuted}>추정 박스 원가</div><strong>{won(calculation.pricing.costPrice)}</strong></div>
+              <div><div style={textMuted}>추정 개당 원가</div><strong>{won(calculation.pricing.costPrice / calculation.count)}</strong></div>
+              <div><div style={textMuted}>기본 목표이익</div><strong>{won(calculation.pricing.targetProfit)}</strong></div>
+            </div>
+          </section>
+        </>
+      ) : (
+        <section style={{ ...panel, marginTop: 16, textAlign: "center", color: "#64748b" }}>
+          매입 가격과 1 이상의 박스 구성품 수를 입력하면 결과가 표시돼요.
+        </section>
+      )}
+      <p style={{ ...textMuted, marginTop: 14 }}>
+        기존 소싱 검토 기록은 삭제하지 않았으며, 이 페이지는 저장 없는 계산기 화면으로 변경했습니다.
+        설정값은 또가 가격 설정을 불러오며 별도 변경하지 않아요.
+      </p>
+    </main>
+  );
+}
