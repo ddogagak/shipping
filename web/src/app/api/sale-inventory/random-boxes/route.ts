@@ -118,7 +118,8 @@ export async function POST(req: Request) {
       if (!order || order.order_status !== "입고완료" || ledger?.stock_status === "soldout")
         throw new Error("입고완료 상태의 판매 가능 상품만 선택할 수 있어.");
       const currency = String(order.currency || "JPY").toUpperCase();
-      const count = Number(ledger?.component_count_override ?? item.component_count ?? inventory?.component_count ?? fromUi?.component_count ?? 0);
+      const possibleCounts = [ledger?.component_count_override, item.component_count, inventory?.component_count, fromUi?.component_count];
+      const count = possibleCounts.map(value => Number(value)).find(value => Number.isSafeInteger(value) && value > 0) ?? 1;
       const qty = Number(ledger?.box_quantity_override ?? item.received_quantity ?? item.quantity ?? 0);
       const unitPrice = Number(ledger?.purchase_price_override ?? item.unit_price ?? 0);
       const url = String(fromUi?.image_url || ledger?.image_url_override || inventory?.image_url || item.image_url || "");
