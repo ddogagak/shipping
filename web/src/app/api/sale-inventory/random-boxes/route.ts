@@ -31,9 +31,9 @@ export async function GET() {
       sale_memo: row.sale_memo,
       public_comment: row.public_comment,
       component_count: row.component_count,
-      purchase_quantity: 1,
-      sold_quantity: row.view_status === "completed" ? 1 : 0,
-      remaining_quantity: row.view_status === "completed" ? 0 : 1,
+      purchase_quantity: Number(row.purchase_quantity || 1),
+      sold_quantity: row.view_status === "completed" ? Number(row.purchase_quantity || 1) : 0,
+      remaining_quantity: row.view_status === "completed" ? 0 : Number(row.purchase_quantity || 1),
       box_cost_price: Number(row.total_cost_krw),
       unit_cost_price: Math.ceil(Number(row.total_cost_krw) / Number(row.component_count)),
       actual_purchase_currency: "KRW",
@@ -147,6 +147,8 @@ export async function PATCH(req: Request) {
   try {
     const body = await req.json();
     if (!isUuid(body.id)) return NextResponse.json({ ok: false, message: "랜덤박스 ID 오류" }, { status: 400 });
+    const qty = Number(body.purchase_quantity);
+    if (!Number.isSafeInteger(qty) || qty < 1 || qty > 100000) return NextResponse.json({ok:false,message:"입고 박스는 1~100,000개 정수로 입력해줘."},{status:400});
     const sb = createServiceRoleClient();
     const { data, error } = await sb.rpc("update_sale_random_box", {
       p_id: body.id,
@@ -155,7 +157,8 @@ export async function PATCH(req: Request) {
       p_sale_memo: String(body.sale_memo || ""),
       p_public_comment: String(body.public_comment || "").slice(0, 100),
       p_sale_price: body.sale_price === "" || body.sale_price == null ? null : Number(body.sale_price),
-      p_view_status: body.view_status || "display"
+      p_view_status: body.view_status || "display",
+      p_purchase_quantity: qty
     });
     if (error) throw error;
     return NextResponse.json({ ok: true, id: data });
