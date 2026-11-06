@@ -83,7 +83,7 @@ export default function SourcingResearchPage() {
     <main style={{ maxWidth: 1040, margin: "0 auto", padding: "28px 16px 60px", color: "#111827" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, marginBottom: 22 }}>
         <div>
-          <h1 style={{ fontSize: 29, margin: 0, fontWeight: 900 }}>caculator</h1>
+          <h1 style={{ fontSize: 29, margin: 0, fontWeight: 900 }}>Calculator</h1>
           <p style={{ ...textMuted, margin: "7px 0 0" }}>단가 또는 박스 가격으로 0% 손익분기점·최소마진·15%·20% 판매가를 바로 비교해요.</p>
         </div>
         <Link href="/" style={{ textDecoration: "none", padding: "9px 13px", border: "1px solid #cbd5e1", borderRadius: 10, color: "#334155", whiteSpace: "nowrap" }}>메인으로</Link>
