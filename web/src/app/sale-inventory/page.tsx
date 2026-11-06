@@ -89,7 +89,7 @@ function RandomBoxCard({item,onEdit,onSave,saving}:{
     <span>합산 비용포함원가</span><b>{won(cost)}</b>
    </div>
    <div style={profitBox}><Metric label="총 수익" value={profit===null?"-":won(profit)} strong compact/><Metric label="개당 수익" value={profit===null?"-":won(profit/count)} strong compact/></div>
-   <div style={{...numbers,marginTop:8}}><div>입고 박스 <b>1</b></div><div>구성 <b>{count}종</b></div></div>
+   <div style={{...numbers,marginTop:8}}><label>입고 박스<input type="text" inputMode="numeric" value={item.purchase_quantity??1} onChange={e=>{if(/^\d*$/.test(e.target.value))onEdit(item.id,"purchase_quantity",Number(e.target.value))}} style={{...input,width:"100%"}}/></label><div>구성 <b>{count}종</b></div></div>
    <textarea value={item.sale_memo||""} onChange={e=>onEdit(item.id,"sale_memo",e.target.value)} placeholder="판매 메모" style={memo}/>
    <label style={{display:"block",marginTop:8,fontSize:11,fontWeight:700}}>빵.store 공개 댓글<input value={item.public_comment||""} onChange={e=>onEdit(item.id,"public_comment",e.target.value)} maxLength={100} style={{...input,width:"100%",marginTop:4}}/></label>
    <div style={{fontSize:10,color:"#64748b",marginTop:7}}>선택 구성품 {members.length}개 · 원본 상품과 별도 관리</div>
@@ -271,7 +271,7 @@ export default function SaleInventoryPage(){
    method:"PATCH",headers:{"Content-Type":"application/json"},
    body:JSON.stringify({id:item.id,title:item.display_name,image_url:item.image_url,
     sale_memo:item.sale_memo,public_comment:item.public_comment,sale_price:item.sale_price,
-    view_status:finalStatus})
+    purchase_quantity:item.purchase_quantity,view_status:finalStatus})
   });
   const json=await result.json();if(!result.ok)throw Error(json.message||"랜덤박스 저장 실패");
   await load();setMsg(finalStatus==="completed"?"랜덤박스 및 원본 구성품 완료 처리됨":"랜덤박스 저장 완료 · 원본 판매가격도 갱신됨");
