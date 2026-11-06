@@ -59,11 +59,11 @@ export async function POST(req: Request) {
       const form = await req.formData();
       if (form.get("action") !== "upload_image") return NextResponse.json({ ok: false, message: "잘못된 이미지 요청" }, { status: 400 });
       const file = form.get("image");
-      if (!(file instanceof File) || file.type !== "image/png" || file.size < 100 || file.size > 4 * 1024 * 1024)
-        return NextResponse.json({ ok: false, message: "4MB 이하의 합성 PNG 이미지가 필요해." }, { status: 400 });
-      const key = `random-boxes/${crypto.randomUUID()}.png`;
+      if (!(file instanceof File) || !["image/png","image/jpeg"].includes(file.type) || file.size < 100 || file.size > 4 * 1024 * 1024)
+        return NextResponse.json({ ok: false, message: "4MB 이하의 합성 JPG/PNG 이미지가 필요해." }, { status: 400 });
+      const key = `random-boxes/${crypto.randomUUID()}.${file.type === "image/jpeg" ? "jpg" : "png"}`;
       const { error } = await sb.storage.from("stock-images").upload(key, new Uint8Array(await file.arrayBuffer()), {
-        contentType: "image/png", upsert: false
+        contentType: file.type, upsert: false
       });
       if (error) throw error;
       return NextResponse.json({ ok: true, image_url: sb.storage.from("stock-images").getPublicUrl(key).data.publicUrl });
