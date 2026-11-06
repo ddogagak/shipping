@@ -58,6 +58,7 @@ export async function GET() {
       { data: orders, error },
       { data: sourcingRows, error: sourcingError },
       { data: ledgers, error: ledgerError },
+      { data: excluded, error: excludeError },
     ] = await Promise.all([
       sb.from("purchase_orders")
         .select("id,order_number,ordered_at,shop_name,currency,source_site,paid_amount,local_shipping,raw_data,purchase_items(*)")
@@ -66,11 +67,14 @@ export async function GET() {
       sb.from("inventory_items")
         .select("id,item_name,item_type,series_name,image_url,lineup_image_url,source_url,memo,currency,purchase_price,total_price,component_count,unit_sale_price,internal_sku,source_product_id,source_site_code,option_seq"),
       sb.from("purchase_sale_inventory").select("*"),
+      sb.from("sale_inventory_exclusions").select("purchase_item_id"),
     ]);
 
     if (error) throw error;
     if (sourcingError) throw sourcingError;
     if (ledgerError) throw ledgerError;
+    if (excludeError) throw excludeError;
+    const excludedIds = new Set((excluded ?? []).map((row: any) => String(row.purchase_item_id)));
 
     const sourcingBySku = new Map<string, any[]>();
     for (const row of sourcingRows ?? []) {
@@ -94,7 +98,7 @@ export async function GET() {
     const completedRepairs: PromiseLike<any>[] = [];
 
     const items = (orders ?? []).flatMap((order: any) =>
-      (order.purchase_items ?? []).map((item: any) => {
+      (order.purchase_items ?? []).filter((item: any) => !excludedIds.has(String(item.id))).map((item: any) => {
         const productId = String(item.source_product_id || "").trim() || extractSourceProductId(item.product_url) || "";
         const fixedSku = String(item.internal_sku || "").trim();
         // A stored SKU always wins. Never silently fall back to an unrelated source.
@@ -363,5 +367,48 @@ export async function PATCH(req: Request) {
       { ok: false, message: errorMessage(e, "판매재고 저장 실패") },
       { status: 500 },
     );
+  }
+}
+
+
+export async function DELETE(req: Request) {
+  try {
+    const body = await req.json();
+    const id = String(body.purchase_item_id || "").trim();
+    if (!/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(id)) {
+      return NextResponse.json({ ok: false, message: "상품 ID가 올바르지 않아." }, { status: 400 });
+    }
+    const sb = createServiceRoleClient();
+    // Permanent removal from *sale inventory display only*. Purchase history
+    // and purchase_sale_inventory ledger values are never deleted or overwritten.
+    const [{ data: purchase, error: purchaseError }, { data: ledger, error: ledgerError }, { data: linked, error: linkedError }, { data: excluded, error: excludedError }] = await Promise.all([
+      sb.from("purchase_items").select("id,purchase_order_id,image_url").eq("id", id).maybeSingle(),
+      sb.from("purchase_sale_inventory").select("stock_status,sale_memo,image_url_override").eq("purchase_item_id", id).maybeSingle(),
+      sb.from("sale_random_box_members").select("purchase_item_id").eq("purchase_item_id", id).limit(1),
+      sb.from("sale_inventory_exclusions").select("purchase_item_id").eq("purchase_item_id", id).maybeSingle(),
+    ]);
+    if (purchaseError) throw purchaseError;
+    if (ledgerError) throw ledgerError;
+    if (linkedError) throw linkedError;
+    if (excludedError) throw excludedError;
+    if (!purchase) return NextResponse.json({ ok: false, message: "해당 상품을 찾지 못했어." }, { status: 404 });
+    if (excluded) return NextResponse.json({ ok: true, already_removed: true });
+    if (linked?.length) return NextResponse.json({ ok: false, message: "랜덤박스에 연결된 상품은 삭제할 수 없어." }, { status: 409 });
+    if (ledger?.stock_status === "soldout") return NextResponse.json({ ok: false, message: "완료된 상품은 삭제할 수 없어." }, { status: 409 });
+    const { data: order, error: orderError } = await sb.from("purchase_orders")
+      .select("id,order_status").eq("id", purchase.purchase_order_id).maybeSingle();
+    if (orderError) throw orderError;
+    if (order?.order_status !== "입고완료") return NextResponse.json({ ok: false, message: "입고완료 상품이 아니야." }, { status: 409 });
+    // For an item without a ledger, the sale-inventory GET hides it if it has no image.
+    const isHidden = ledger
+      ? String(ledger.sale_memo || "").startsWith(HIDDEN_MARKER)
+      : !(ledger?.image_url_override || purchase.image_url);
+    if (!isHidden) return NextResponse.json({ ok: false, message: "숨김 상태인 상품만 삭제할 수 있어. 먼저 숨김으로 저장해줘." }, { status: 409 });
+    const { error: insertError } = await sb.from("sale_inventory_exclusions")
+      .insert({ purchase_item_id: id, reason: "manual_hidden_remove" });
+    if (insertError) throw insertError;
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    return NextResponse.json({ ok: false, message: errorMessage(e, "판매재고 삭제 실패") }, { status: 500 });
   }
 }
