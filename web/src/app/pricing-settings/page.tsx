@@ -60,6 +60,11 @@ export default function PricingSettingsPage() {
         <div style={{ marginTop: 8 }}>원가 = 구매가 × 환율 × {settings.importCostMultiplier} + {settings.fixedCost.toLocaleString()}원</div>
         <div>목표이익 = MAX({settings.minimumProfit.toLocaleString()}원, 원가 × {(settings.targetProfitRate * 100).toFixed(1)}%)</div>
         <div>최소마진가격 = (원가 + 목표이익) ÷ {settings.salesRetentionRate}</div>
+        <div style={{marginTop:12,paddingTop:10,borderTop:"1px solid #e2e8f0"}}>
+          <strong>일본·중국 단품 (박스당 구성품 수 1개) 별도 규칙</strong>
+          <div>고정비 2,000원 · 최소 목표이익 2,000원 · 목표이익률 원가의 15%</div>
+          <div>환율·원가 가산 배수·판매대금 잔존율은 위 설정을 그대로 사용합니다. 국내 KRW 및 2개입 이상 박스에는 적용되지 않습니다.</div>
+        </div>
       </div>
 
       <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
