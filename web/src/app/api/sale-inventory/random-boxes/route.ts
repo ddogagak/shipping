@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
-import { calculatePricing } from "@/lib/pricing";
+import { calculatePricing, calculateDomesticSalePricing } from "@/lib/pricing";
 
 export const runtime = "nodejs";
 
@@ -9,7 +9,7 @@ const isUuid = (value: unknown) => /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}
 const message = (e: unknown) => e instanceof Error ? e.message : String(e || "처리 실패");
 
 function priceFor(unitPrice: number, currency: string, count: number) {
-  if (currency === "KRW") return Math.ceil(unitPrice / count);
+  if (currency === "KRW") return Math.ceil(calculateDomesticSalePricing(unitPrice, count).costPrice / count);
   return Math.ceil(calculatePricing(currency, unitPrice, count).costPrice / count);
 }
 
