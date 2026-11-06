@@ -1,23 +1,24 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
+import { calculatePricing } from "@/lib/pricing";
 import { extractSourceProductId } from "@/lib/purchases/product-id";
 import { resolveInventorySku } from "@/lib/inventory/match-by-sku";
 import { buildInternalSku, getSeriesCode, getSourceProductKey, getSourceSiteCode } from "@/lib/inventory/internal-sku";
 
 export const runtime = "nodejs";
 
-const EXCHANGE_RATE: Record<string, number> = { JPY: 10, CNY: 230, KRW: 1 };
 const HIDDEN_MARKER = "[[HIDDEN]]";
 
 function pricingFromPurchase(unitPrice: number, currency: string, componentCountRaw: unknown) {
   const purchase = Math.max(0, Number(unitPrice || 0));
   const componentCount = Math.max(0, Math.trunc(Number(componentCountRaw || 0)));
-  const boxCost = currency === "KRW"
-    ? Math.round(purchase)
-    : purchase > 0
-      ? Math.round(purchase * (EXCHANGE_RATE[currency] ?? EXCHANGE_RATE.CNY) * 1.2 + 5000)
-      : 0;
-  const minimumMarginPrice = boxCost > 0 ? (currency === "KRW" ? Math.ceil(boxCost / 0.69) : Math.round(boxCost * 1.1 * 1.07 + 10000)) : 0;
+  const foreignPricing = currency !== "KRW" && purchase > 0
+    ? calculatePricing(currency, purchase, componentCount)
+    : null;
+  const boxCost = currency === "KRW" ? Math.round(purchase) : foreignPricing?.costPrice ?? 0;
+  const minimumMarginPrice = boxCost > 0
+    ? (currency === "KRW" ? Math.ceil(boxCost / 0.69) : foreignPricing!.minimumMarginPrice)
+    : 0;
   return {
     boxCost,
     componentCount,
