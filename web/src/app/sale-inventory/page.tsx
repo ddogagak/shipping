@@ -101,7 +101,10 @@ function RandomBoxCard({item,onEdit,onSave,saving}:{
  return <article style={{...card,border:"1px solid #eab308",opacity:item.view_status==="completed"?.7:1}}>
   <div style={imageWrap}>{item.image_url?<img src={item.image_url} alt="" style={image}/>:<div style={noImage}>NO IMAGE</div>}<span style={{...badge,background:"#854d0e"}}>랜덤박스 · {count}종</span></div>
   <div style={body}>
-   <div style={{...tag,display:"inline-flex",background:"#fef9c3",color:"#854d0e"}}>독립 랜덤박스</div>
+   <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
+    <span style={{...tag,display:"inline-flex",background:"#fef9c3",color:"#854d0e"}}>독립 랜덤박스</span>
+    {(item.series_tags||[]).map((seriesName:string)=><span key={seriesName} style={tag}>{seriesName}</span>)}
+   </div>
    <label style={fieldLabel}>제목<input value={item.display_name||""} onChange={e=>onEdit(item.id,"display_name",e.target.value)} style={{...input,width:"100%",fontWeight:800}}/></label>
    <div style={{...profitBox,marginTop:10}}>
     <div style={metric}><small style={metricLabel}>박스당 구성품 수</small><b>{count}개</b></div>
@@ -190,7 +193,7 @@ export default function SaleInventoryPage(){
    const imageResult=await uploaded.json();if(!uploaded.ok)throw Error(imageResult.message||"합성 이미지 업로드 실패");
    const response=await fetch("/api/sale-inventory/random-boxes",{
     method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({action:"create",title:randomDraft.trim(),image_url:imageResult.image_url,member_ids:chosen.map(i=>i.id),members:chosen.map(i=>({id:i.id,image_url:i.image_url,component_count:i.component_count}))})
+    body:JSON.stringify({action:"create",title:randomDraft.trim(),image_url:imageResult.image_url,member_ids:chosen.map(i=>i.id),members:chosen.map(i=>({id:i.id,image_url:i.image_url,component_count:i.component_count,series_name:i.series_name}))})
    });
    const data=await response.json();if(!response.ok)throw Error(data.message||"랜덤박스 생성 실패");
    setRandomDraft(null);setSelectedIds([]);await load();setMsg("랜덤박스 생성 완료 · 구성품은 숨김으로 이동했어.");
@@ -198,8 +201,8 @@ export default function SaleInventoryPage(){
   finally{setCreatingRandom(false);}
  }
 
- const seriesOptions=useMemo(()=>[...new Set([...seriesList,...items.map(item=>seriesFilterLabel(item.series_name)).filter(Boolean)])],[items]);
- const filtered=useMemo(()=>items.filter(i=>{const text=[i.display_name,i.product_name,i.option_text,i.order_number,i.memo,i.public_comment,i.internal_sku].filter(Boolean).join(" ").toLowerCase();return(!q||text.includes(q.toLowerCase()))&&(series==="전체"||seriesFilterLabel(i.series_name)===series)&&(type==="전체"||i.item_type===type)&&(stock==="전체"||i.view_status===(stock==="표시"?"display":stock==="숨김"?"hidden":"completed"));}),[items,q,series,type,stock]);
+ const seriesOptions=useMemo(()=>[...new Set([...seriesList,...items.flatMap(item=>(item.is_random_box ? item.series_tags||[] : [item.series_name]).map(seriesFilterLabel)).filter(Boolean)])],[items]);
+ const filtered=useMemo(()=>items.filter(i=>{const text=[i.display_name,i.product_name,i.option_text,i.order_number,i.memo,i.public_comment,i.internal_sku].filter(Boolean).join(" ").toLowerCase();return(!q||text.includes(q.toLowerCase()))&&(series==="전체"||(i.is_random_box ? (i.series_tags||[]).some((tag:string)=>seriesFilterLabel(tag)===series) : seriesFilterLabel(i.series_name)===series))&&(type==="전체"||i.item_type===type)&&(stock==="전체"||i.view_status===(stock==="표시"?"display":stock==="숨김"?"hidden":"completed"));}),[items,q,series,type,stock]);
  function edit(id:string,key:string,value:any){setItems(p=>p.map(i=>{if(i.id!==id)return i;const next={...i,[key]:value};if(key==="purchase_quantity"||key==="sold_quantity")next.remaining_quantity=Math.max(0,Number(next.purchase_quantity||0)-Number(next.sold_quantity||0));return next;}));}
  const[priceDrafts,setPriceDrafts]=useState<Record<string,string>>({}),[priceSaving,setPriceSaving]=useState<string|null>(null);
  const[priceMessages,setPriceMessages]=useState<Record<string,string>>({});
