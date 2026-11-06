@@ -25,9 +25,9 @@ const panel: CSSProperties = {
   background: "#fff", border: "1px solid #e5e7eb", borderRadius: 20, padding: 22,
 };
 const textMuted: CSSProperties = { color: "#64748b", fontSize: 13, lineHeight: 1.6 };
-function PriceResult({ title, boxPrice, count, cost, retention, featured }: {
+function PriceResult({ title, boxPrice, count, cost, retention, featured, boxLabel }: {
   title: string; boxPrice: number; count: number; cost: number;
-  retention: number; featured?: boolean;
+  retention: number; featured?: boolean; boxLabel?: string;
 }) {
   const unit = Math.ceil(boxPrice / count);
   const actualBox = unit * count;
@@ -43,7 +43,7 @@ function PriceResult({ title, boxPrice, count, cost, retention, featured }: {
       <div style={{ marginTop: 10, fontSize: 28, fontWeight: 900, color: "#0f172a", fontVariantNumeric: "tabular-nums" }}>
         {won(unit)} <span style={{ fontSize: 13, color: "#64748b", fontWeight: 500 }}>개당</span>
       </div>
-      <div style={{ fontSize: 16, fontWeight: 700, marginTop: 4 }}>박스 합계 {won(actualBox)}</div>
+      <div style={{ fontSize: 16, fontWeight: 700, marginTop: 4 }}>{boxLabel ?? "박스 합계"} {won(actualBox)}</div>
       <div style={{ ...textMuted, marginTop: 8 }}>
         예상 순이익 {won(netProfit)} · 실제 수익률 {margin.toFixed(1)}%
       </div>
@@ -92,7 +92,7 @@ export default function SourcingResearchPage() {
       <section style={panel}>
         <div style={{ fontWeight: 800, marginBottom: 12 }}>가격 입력 방식</div>
         <div style={{ display: "flex", gap: 8, marginBottom: 23, flexWrap: "wrap" }}>
-          {([{ id: "unit", label: "개당 매입 단가" }, { id: "box", label: "박스 총 매입가" }] as const).map(({ id, label }) => (
+          {([{ id: "unit", label: "개당 매입 단가" }, { id: "box", label: "박스 매입가" }] as const).map(({ id, label }) => (
             <button type="button" key={id} onClick={() => {
               const oldAmount = readNumber(price);
               const count = readNumber(countText);
@@ -116,7 +116,7 @@ export default function SourcingResearchPage() {
             </select>
           </label>
           <label style={{ display: "grid", gap: 8, fontWeight: 800, fontSize: 14 }}>
-            {mode === "unit" ? "개당 매입 단가" : "박스 총 매입가"} ({currency})
+            {mode === "unit" ? "개당 매입 단가" : "박스 매입가"} ({currency})
             <input type="text" inputMode="decimal" placeholder={mode === "unit" ? "예: 594" : "예: 5940"}
               value={price} onChange={(e) => setPrice(e.target.value)} style={moneyInput}/>
           </label>
@@ -139,7 +139,7 @@ export default function SourcingResearchPage() {
               {calculation.breakEven !== null &&
                 <PriceResult title="0% 마진 (손익분기점)" boxPrice={calculation.breakEven}
                   count={calculation.count} cost={calculation.pricing.costPrice} retention={calculation.retention}/>}
-              <PriceResult title="또가 기본 최소마진" featured
+              <PriceResult title="기본권장 판매가" boxLabel="기본권장 박스가격" featured
                 boxPrice={calculation.pricing.minimumMarginPrice}
                 count={calculation.count} cost={calculation.pricing.costPrice} retention={calculation.retention}/>
               {calculation.fifteen !== null &&
@@ -159,9 +159,9 @@ export default function SourcingResearchPage() {
             <h2 style={{ fontSize: 18, margin: "0 0 12px" }}>계산 내역</h2>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
               <div><div style={textMuted}>박스 매입가</div><strong>{calculation.purchase.toLocaleString("ko-KR")} {currency}</strong></div>
-              <div><div style={textMuted}>추정 박스 원가</div><strong>{won(calculation.pricing.costPrice)}</strong></div>
-              <div><div style={textMuted}>추정 개당 원가</div><strong>{won(calculation.pricing.costPrice / calculation.count)}</strong></div>
-              <div><div style={textMuted}>기본 목표이익</div><strong>{won(calculation.pricing.targetProfit)}</strong></div>
+              <div><div style={textMuted}>비용포함원가</div><strong>{won(calculation.pricing.costPrice)}</strong></div>
+              <div><div style={textMuted}>비용포함개당원가</div><strong>{won(calculation.pricing.costPrice / calculation.count)}</strong></div>
+              <div><div style={textMuted}>최소마진</div><strong>{won(calculation.pricing.targetProfit)}</strong></div>
             </div>
           </section>
         </>
