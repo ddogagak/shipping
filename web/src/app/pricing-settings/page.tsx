@@ -62,7 +62,9 @@ export default function PricingSettingsPage() {
         <div>최소마진가격 = (원가 + 목표이익) ÷ {settings.salesRetentionRate}</div>
         <div style={{marginTop:12,paddingTop:10,borderTop:"1px solid #e2e8f0"}}>
           <strong>일본·중국 단품 (박스당 구성품 수 1개) 별도 규칙</strong>
-          <div>고정비 2,000원 · 최소 목표이익 2,000원 · 목표이익률 원가의 15%</div>
+          <div>일본 JPY 고정비: 500엔 미만 1,000원 / 500~999엔 2,000원 / 1,000~1,999엔 3,000원 / 2,000엔 이상 5,000원</div>
+          <div>중국 CNY 고정비: 기존 2,000원 유지</div>
+          <div>단품 공통: 최소 목표이익 2,000원 · 목표이익률 원가의 15%</div>
           <div>환율·원가 가산 배수·판매대금 잔존율은 위 설정을 그대로 사용합니다. 국내 KRW 및 2개입 이상 박스에는 적용되지 않습니다.</div>
         </div>
       </div>
