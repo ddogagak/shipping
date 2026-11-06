@@ -54,7 +54,9 @@ async function purchaseTotals() {
     const won = baseWon + estimatedShipping;
     cumulative += won + secondWon;
     includedOrders++;
-    const day = kstDate(order.ordered_at);
+    // 매출관리의 매입 집계는 등록일(created_at)이 아닌 실제 매입일(ordered_at) 기준이다.
+    // 과거 명세서를 오늘 등록하더라도 해당 과거 월/분기에만 반영한다.
+    const day = purchaseDateKey(order.ordered_at);
     if (!day) continue;
     const month = day.slice(0, 7);
     const quarter = day.slice(0, 4) + "-Q" + (Math.floor((Number(day.slice(5, 7)) - 1) / 3) + 1);
@@ -81,6 +83,16 @@ function kstDate(value: unknown) {
   const date = new Date(String(value || ""));
   if (Number.isNaN(date.getTime())) return "";
   return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+}
+// 매입일이 YYYY-MM-DD 형태면 시간대 변환 없이 해당 날짜를 유지한다.
+function purchaseDateKey(value: unknown) {
+  const raw = String(value || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const parsed = new Date(raw + "T00:00:00.000Z");
+    if (!Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === raw) return raw;
+    return "";
+  }
+  return kstDate(value);
 }
 function money(value: unknown) {
   const n = Number(value);
