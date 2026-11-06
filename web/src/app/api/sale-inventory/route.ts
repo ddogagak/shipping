@@ -402,7 +402,7 @@ export async function DELETE(req: Request) {
     // For an item without a ledger, the sale-inventory GET hides it if it has no image.
     const isHidden = ledger
       ? String(ledger.sale_memo || "").startsWith(HIDDEN_MARKER)
-      : !(ledger?.image_url_override || purchase.image_url);
+      : !purchase.image_url;
     if (!isHidden) return NextResponse.json({ ok: false, message: "숨김 상태인 상품만 삭제할 수 있어. 먼저 숨김으로 저장해줘." }, { status: 409 });
     const { error: insertError } = await sb.from("sale_inventory_exclusions")
       .insert({ purchase_item_id: id, reason: "manual_hidden_remove" });
