@@ -20,7 +20,33 @@ export async function GET() {
       .select("*,sale_random_box_members(*)")
       .order("created_at", { ascending: false });
     if (error) throw error;
+    // 랜덤박스에는 독립적인 매입일이 없으므로 구성품의 실제 매입일 중 최신 날짜를 사용한다.
+    const purchaseItemIds = [...new Set((data || []).flatMap((box: any) =>
+      (box.sale_random_box_members || []).map((member: any) => String(member.purchase_item_id || "")).filter(Boolean),
+    ))];
+    const purchaseDateByItemId = new Map<string, string>();
+    if (purchaseItemIds.length) {
+      const { data: purchaseItems, error: itemError } = await sb.from("purchase_items")
+        .select("id,purchase_order_id").in("id", purchaseItemIds);
+      if (itemError) throw itemError;
+      const orderIds = [...new Set((purchaseItems || []).map((item: any) => String(item.purchase_order_id || "")).filter(Boolean))];
+      const purchaseDateByOrderId = new Map<string, string>();
+      if (orderIds.length) {
+        const { data: purchaseOrders, error: orderError } = await sb.from("purchase_orders")
+          .select("id,ordered_at").in("id", orderIds);
+        if (orderError) throw orderError;
+        for (const order of purchaseOrders || []) {
+          purchaseDateByOrderId.set(String(order.id), String(order.ordered_at || ""));
+        }
+      }
+      for (const item of purchaseItems || []) {
+        purchaseDateByItemId.set(String(item.id), purchaseDateByOrderId.get(String(item.purchase_order_id)) || "");
+      }
+    }
     const items = (data || []).map((row: any) => ({
+      ordered_at: (row.sale_random_box_members || []).map((member: any) =>
+        purchaseDateByItemId.get(String(member.purchase_item_id)) || "",
+      ).filter(Boolean).sort().at(-1) || null,
       id: row.id,
       is_random_box: true,
       display_name: row.title,
