@@ -4,7 +4,7 @@ import { calculatePricing, calculateDomesticSalePricing } from "@/lib/pricing";
 
 export const runtime = "nodejs";
 
-type MemberInput = { id: string; image_url?: string; item_name?: string; component_count?: number; unit_cost_price?: number };
+type MemberInput = { id: string; image_url?: string; item_name?: string; series_name?: string; component_count?: number; unit_cost_price?: number };
 const isUuid = (value: unknown) => /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(String(value || ""));
 const message = (e: unknown) => e instanceof Error ? e.message : String(e || "처리 실패");
 
@@ -41,7 +41,8 @@ export async function GET() {
       sale_price: row.sale_price,
       view_status: row.view_status,
       stock_status: row.view_status === "completed" ? "soldout" : "active",
-      series_name: "랜덤박스",
+      series_name: (row.series_tags || [])[0] || "랜덤박스",
+      series_tags: row.series_tags || [],
       item_type: "기타",
       members: row.sale_random_box_members || [],
     }));
@@ -85,7 +86,7 @@ export async function POST(req: Request) {
     if (existingMembers?.length) return NextResponse.json({ ok: false, message: "이미 다른 랜덤박스에 포함된 상품이 있어." }, { status: 409 });
 
     const { data: purchaseItems, error: itemError } = await sb.from("purchase_items")
-      .select("id,purchase_order_id,product_name,unit_price,quantity,received_quantity,component_count,sourcing_inventory_id,image_url")
+      .select("id,purchase_order_id,product_name,unit_price,quantity,received_quantity,component_count,sourcing_inventory_id,image_url,series_name")
       .in("id", ids);
     if (itemError) throw itemError;
     if (purchaseItems?.length !== ids.length) return NextResponse.json({ ok: false, message: "선택 상품을 찾지 못했어." }, { status: 404 });
@@ -102,7 +103,7 @@ export async function POST(req: Request) {
     const ledgerMap = new Map((ledgers || []).map((l: any) => [l.purchase_item_id, l]));
     const inventoryIds = purchaseItems.map((i: any) => i.sourcing_inventory_id).filter(Boolean);
     const { data: inventories, error: inventoryError } = inventoryIds.length
-      ? await sb.from("inventory_items").select("id,component_count,item_name,image_url").in("id", inventoryIds)
+      ? await sb.from("inventory_items").select("id,component_count,item_name,image_url,series_name").in("id", inventoryIds)
       : { data: [], error: null };
     if (inventoryError) throw inventoryError;
     const inventoryMap = new Map((inventories || []).map((i: any) => [i.id, i]));
@@ -130,7 +131,8 @@ export async function POST(req: Request) {
       return {
         purchase_item_id: id, item_name: String(ledger?.display_name || inventory?.item_name || item.product_name),
         original_box_quantity: qty, component_count: count, unit_purchase_price: unitPrice,
-        currency, unit_cost_krw: unitCost, image_url: url
+        currency, unit_cost_krw: unitCost, image_url: url,
+        series_name: String(fromUi?.series_name || inventory?.series_name || item.series_name || "").trim().slice(0,100)
       };
     });
     const { data: created, error: createError } = await sb.rpc("create_sale_random_box", {
