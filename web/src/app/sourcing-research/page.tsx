@@ -69,11 +69,13 @@ export default function SourcingResearchPage() {
     if (!Number.isFinite(purchase)) return null;
     const pricing = calculatePricing(currency, purchase, count, settings);
     const retention = settings.salesRetentionRate;
+    const breakEven = retention > 0
+      ? Math.ceil(pricing.costPrice / retention / count) * count : null;
     const fifteen = retention > 0.15
       ? Math.ceil(pricing.costPrice / (retention - 0.15) / count) * count : null;
     const twenty = retention > 0.2
       ? Math.ceil(pricing.costPrice / (retention - 0.2) / count) * count : null;
-    return { purchase, count, pricing, retention, fifteen, twenty };
+    return { purchase, count, pricing, retention, breakEven, fifteen, twenty };
   }, [price, countText, mode, currency, settings]);
 
   const rate = currency === "JPY" ? settings.jpyRate : settings.cnyRate;
@@ -82,7 +84,7 @@ export default function SourcingResearchPage() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, marginBottom: 22 }}>
         <div>
           <h1 style={{ fontSize: 29, margin: 0, fontWeight: 900 }}>또가 박스 판매가 계산기</h1>
-          <p style={{ ...textMuted, margin: "7px 0 0" }}>단가 또는 박스 가격으로 최소마진·15%·20% 판매가를 바로 비교해요.</p>
+          <p style={{ ...textMuted, margin: "7px 0 0" }}>단가 또는 박스 가격으로 0% 손익분기점·최소마진·15%·20% 판매가를 바로 비교해요.</p>
         </div>
         <Link href="/" style={{ textDecoration: "none", padding: "9px 13px", border: "1px solid #cbd5e1", borderRadius: 10, color: "#334155", whiteSpace: "nowrap" }}>메인으로</Link>
       </div>
@@ -134,6 +136,9 @@ export default function SourcingResearchPage() {
           <section style={{ ...panel, marginTop: 16 }}>
             <h2 style={{ fontSize: 18, margin: "0 0 15px" }}>예상 판매가</h2>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: 12 }}>
+              {calculation.breakEven !== null &&
+                <PriceResult title="0% 마진 (손익분기점)" boxPrice={calculation.breakEven}
+                  count={calculation.count} cost={calculation.pricing.costPrice} retention={calculation.retention}/>}
               <PriceResult title="또가 기본 최소마진" featured
                 boxPrice={calculation.pricing.minimumMarginPrice}
                 count={calculation.count} cost={calculation.pricing.costPrice} retention={calculation.retention}/>
@@ -145,7 +150,8 @@ export default function SourcingResearchPage() {
                   count={calculation.count} cost={calculation.pricing.costPrice} retention={calculation.retention}/>}
             </div>
             <p style={{ ...textMuted, marginBottom: 0 }}>
-              개당 판매가를 원 단위 올림한 뒤 박스 총액과 실제 수익률을 다시 계산합니다.
+              0% 마진은 판매수수료·부가세 차감 후 원가만 회수하는 최소 판매가입니다.
+              개당 판매가를 원 단위 올림하므로 소액의 이익이 남을 수 있습니다.
               수익률 = (판매총액 × {calculation.retention} − 추정 원가) ÷ 판매총액.
             </p>
           </section>
