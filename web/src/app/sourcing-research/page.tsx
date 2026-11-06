@@ -6,6 +6,7 @@ import {
   calculatePricing,
   DEFAULT_PRICING_SETTINGS,
   loadPricingSettings,
+  getEffectivePricingSettings,
   type PricingSettings,
 } from "@/lib/pricing";
 
@@ -79,6 +80,7 @@ export default function SourcingResearchPage() {
   }, [price, countText, mode, currency, settings]);
 
   const rate = currency === "JPY" ? settings.jpyRate : settings.cnyRate;
+  const appliedSettings = getEffectivePricingSettings(currency, calculation?.count ?? null, settings);
   return (
     <main style={{ maxWidth: 1040, margin: "0 auto", padding: "28px 16px 60px", color: "#111827" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, marginBottom: 22 }}>
@@ -127,7 +129,8 @@ export default function SourcingResearchPage() {
           </label>
         </div>
         <div style={{ ...textMuted, marginTop: 16 }}>
-          또가 설정: 1{currency} = {rate.toLocaleString("ko-KR")}원 · 수입원가 × {settings.importCostMultiplier} + {won(settings.fixedCost)} · 판매대금 {Math.round(settings.salesRetentionRate * 100)}% 반영
+          또가 설정: 1{currency} = {rate.toLocaleString("ko-KR")}원 · 수입원가 × {appliedSettings.importCostMultiplier} + {won(appliedSettings.fixedCost)} · 판매대금 {Math.round(settings.salesRetentionRate * 100)}% 반영
+          {calculation?.count === 1 && <div>1개입 전용 최소마진: {won(appliedSettings.minimumProfit)} 또는 비용포함원가의 {Math.round(appliedSettings.targetProfitRate * 100)}% 중 큰 값</div>}
         </div>
       </section>
 
