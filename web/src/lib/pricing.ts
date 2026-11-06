@@ -35,6 +35,38 @@ export function singleItemJpyFixedCost(purchasePriceJpy: number): number {
   return 1000;
 }
 
+// Domestic single-item goods: purchase cost plus the KRW price-tier fee.
+// Do not apply the 20% import uplift to local purchases.
+export function singleItemKrwFixedCost(purchasePriceKrw: number): number {
+  const won = Number(purchasePriceKrw);
+  if (won >= 20000) return 5000;
+  if (won >= 10000) return 3000;
+  if (won >= 5000) return 2000;
+  return 1000;
+}
+
+export function calculateDomesticSalePricing(purchasePrice: number, boxCount: number) {
+  const purchase = Math.max(0, Number(purchasePrice) || 0);
+  const count = Math.max(1, Math.trunc(Number(boxCount) || 1));
+  const isSingle = count === 1;
+  const costPrice = Math.round(purchase + (isSingle ? singleItemKrwFixedCost(purchase) : 0));
+  const targetProfit = isSingle
+    ? Math.max(2000, costPrice * 0.15)
+    : 0;
+  // Keep the existing multi-piece Korean formula unchanged.
+  const minimumMarginPrice = costPrice > 0
+    ? isSingle
+      ? Math.ceil((costPrice + targetProfit) / DEFAULT_PRICING_SETTINGS.salesRetentionRate)
+      : Math.ceil(costPrice / 0.69)
+    : 0;
+  return {
+    costPrice,
+    targetProfit: Math.ceil(targetProfit),
+    minimumMarginPrice,
+    unitSalePrice: Math.ceil(minimumMarginPrice / count)
+  };
+}
+
 export function getEffectivePricingSettings(
   currency: string,
   boxCount: number | null,
