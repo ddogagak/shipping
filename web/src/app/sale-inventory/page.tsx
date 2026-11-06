@@ -104,6 +104,36 @@ function RandomBoxCard({item,onEdit,onSave,saving}:{
  </article>;
 }
 
+
+function generateRandomBoxTitle(chosen:any[]):string{
+ const names=chosen.map(item=>String(item.display_name||item.product_name||"")
+  .replace(/\s*[（(]\s*\d+\s*(?:개|個|입|팩|pcs?)\s*[）)]\s*$/iu,"")
+  .replace(/\s+\d+\s*(?:개|個|입|팩|종|pcs?)\s*$/iu,"")
+  .replace(/\s+/g," ").trim());
+ const tokens=names.map(name=>name.split(" ").filter(Boolean));
+ const first=tokens[0]||[];
+ let length=0;
+ while(length<first.length&&tokens.every(row=>row[length]?.toLocaleLowerCase()===first[length].toLocaleLowerCase()))length++;
+ // Prefer a shared beginning such as "치이카와 KiraCoro 오하지키".
+ // If names differ at the beginning, recover a multiword shared phrase.
+ let shared=first.slice(0,length);
+ if(shared.length<2&&first.length>=2){
+  for(let size=first.length;size>=2;size--){
+   let found=false;
+   for(let start=0;start+size<=first.length;start++){
+    const phrase=first.slice(start,start+size).map(word=>word.toLocaleLowerCase()).join("\u0001");
+    if(tokens.every(row=>row.some((_,index)=>index+size<=row.length&&row.slice(index,index+size).map(word=>word.toLocaleLowerCase()).join("\u0001")===phrase))){
+     shared=first.slice(start,start+size);found=true;break;
+    }
+   }
+   if(found)break;
+  }
+ }
+ const series=[...new Set(chosen.map(item=>String(item.series_name||"").trim()).filter(Boolean))];
+ const base=shared.join(" ")||(series.length===1?series[0]:"믹스");
+ return `${base} 랜덤박스 ${chosen.length}종`.slice(0,200);
+}
+
 export default function SaleInventoryPage(){
  const[items,setItems]=useState<any[]>([]),[selectedIds,setSelectedIds]=useState<string[]>([]),[randomDraft,setRandomDraft]=useState<string|null>(null),[creatingRandom,setCreatingRandom]=useState(false),[q,setQ]=useState(""),[series,setSeries]=useState("전체"),[type,setType]=useState("전체"),[stock,setStock]=useState("전체"),[lineup,setLineup]=useState<string|null>(null),[memoPopup,setMemoPopup]=useState<{title:string;content:string}|null>(null),[msg,setMsg]=useState(""),[saving,setSaving]=useState<string|null>(null);
  async function load(){
@@ -123,8 +153,7 @@ export default function SaleInventoryPage(){
   if(chosen.some(i=>!i.image_url||Number(i.component_count||0)<1||Number(i.purchase_quantity||0)<1||Number(i.actual_purchase_unit_price||0)<=0)){
    setMsg("선택 상품의 대표이미지·매입가·입고수량·구성품 수를 확인해줘.");return;
   }
-  const series=[...new Set(chosen.map(i=>i.series_name).filter(Boolean))];
-  setRandomDraft((series.length===1?series[0]:"믹스")+" 랜덤박스 "+chosen.length+"종");
+  setRandomDraft(generateRandomBoxTitle(chosen));
  }
  async function createRandomBox(){
   if(!randomDraft?.trim()||creatingRandom)return;
