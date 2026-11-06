@@ -49,15 +49,18 @@ export function calculateDomesticSalePricing(purchasePrice: number, boxCount: nu
   const purchase = Math.max(0, Number(purchasePrice) || 0);
   const count = Math.max(1, Math.trunc(Number(boxCount) || 1));
   const isSingle = count === 1;
-  const costPrice = Math.round(purchase + (isSingle ? singleItemKrwFixedCost(purchase) : 0));
-  const targetProfit = isSingle
-    ? Math.max(2000, costPrice * 0.15)
+  const costPrice = purchase > 0
+    ? Math.round(purchase + (isSingle ? singleItemKrwFixedCost(purchase) : DEFAULT_PRICING_SETTINGS.fixedCost))
     : 0;
-  // Keep the existing multi-piece Korean formula unchanged.
+  const targetProfit = costPrice > 0
+    ? (isSingle
+      ? Math.max(2000, costPrice * 0.15)
+      : Math.max(DEFAULT_PRICING_SETTINGS.minimumProfit, costPrice * DEFAULT_PRICING_SETTINGS.targetProfitRate))
+    : 0;
+  // Domestic multi-piece boxes use the same fixed fee, target profit, and
+  // 16% sales deduction as overseas multi-piece boxes, without import uplift.
   const minimumMarginPrice = costPrice > 0
-    ? isSingle
-      ? Math.ceil((costPrice + targetProfit) / DEFAULT_PRICING_SETTINGS.salesRetentionRate)
-      : Math.ceil(costPrice / 0.69)
+    ? Math.ceil((costPrice + targetProfit) / DEFAULT_PRICING_SETTINGS.salesRetentionRate)
     : 0;
   return {
     costPrice,
