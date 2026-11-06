@@ -25,13 +25,30 @@ export const SINGLE_ITEM_FOREIGN_PRICING = {
   targetProfitRate: 0.15,
 } as const;
 
+// Applied to Japanese products with exactly one sellable item per box.
+// Thresholds are based on the original JPY purchase price, not converted KRW.
+export function singleItemJpyFixedCost(purchasePriceJpy: number): number {
+  const yen = Number(purchasePriceJpy);
+  if (yen >= 2000) return 5000;
+  if (yen >= 1000) return 3000;
+  if (yen >= 500) return 2000;
+  return 1000;
+}
+
 export function getEffectivePricingSettings(
   currency: string,
   boxCount: number | null,
-  settings: PricingSettings = DEFAULT_PRICING_SETTINGS
+  settings: PricingSettings = DEFAULT_PRICING_SETTINGS,
+  purchasePrice?: number
 ): PricingSettings {
-  const foreign = currency === "JPY" || currency === "CNY";
-  return foreign && Number(boxCount) === 1
+  const isSingle = Number(boxCount) === 1;
+  if (isSingle && currency === "JPY") {
+    return { ...settings, ...SINGLE_ITEM_FOREIGN_PRICING,
+      fixedCost: purchasePrice === undefined
+        ? SINGLE_ITEM_FOREIGN_PRICING.fixedCost
+        : singleItemJpyFixedCost(purchasePrice) };
+  }
+  return isSingle && currency === "CNY"
     ? { ...settings, ...SINGLE_ITEM_FOREIGN_PRICING }
     : settings;
 }
@@ -66,7 +83,7 @@ export function calculatePricing(
     currency === "JPY" ? settings.jpyRate :
     settings.jpyRate;
 
-  const effectiveSettings = getEffectivePricingSettings(currency, boxCount, settings);
+  const effectiveSettings = getEffectivePricingSettings(currency, boxCount, settings, purchasePrice);
   const purchase = Number(purchasePrice) || 0;
   const packs = Number(boxCount) || 0;
 
