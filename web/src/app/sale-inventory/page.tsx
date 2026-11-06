@@ -93,8 +93,11 @@ function RandomBoxCard({item,onEdit,onSave,saving}:{
    <textarea value={item.sale_memo||""} onChange={e=>onEdit(item.id,"sale_memo",e.target.value)} placeholder="판매 메모" style={memo}/>
    <label style={{display:"block",marginTop:8,fontSize:11,fontWeight:700}}>빵.store 공개 댓글<input value={item.public_comment||""} onChange={e=>onEdit(item.id,"public_comment",e.target.value)} maxLength={100} style={{...input,width:"100%",marginTop:4}}/></label>
    <div style={{fontSize:10,color:"#64748b",marginTop:7}}>선택 구성품 {members.length}개 · 원본 상품과 별도 관리</div>
-   <div style={actionRow}>
-    <div style={visibilityButtons}>{[["hidden","숨김"],["display","표시"],["completed","완료"]].map(([value,label])=><button type="button" key={value} style={{...visibilityButton,...((item.pending_view_status??item.view_status)===value?activeVisibilityButton:{})}} disabled={item.view_status==="completed"} onClick={()=>onEdit(item.id,"pending_view_status",value)}>{label}</button>)}</div>
+   <div style={{...actionRow,flexWrap:"wrap"}}>
+    <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
+     <a href={item.image_url} target="_blank" rel="noreferrer" style={button}>라인업</a>
+     <div style={visibilityButtons}>{[["hidden","숨김"],["display","표시"],["completed","완료"]].map(([value,label])=><button type="button" key={value} style={{...visibilityButton,...((item.pending_view_status??item.view_status)===value?activeVisibilityButton:{})}} disabled={item.view_status==="completed"} onClick={()=>onEdit(item.id,"pending_view_status",value)}>{label}</button>)}</div>
+    </div>
     <button type="button" style={button} onClick={()=>onSave(item)} disabled={saving}>{saving?"저장 중…":"저장"}</button>
    </div>
   </div>
