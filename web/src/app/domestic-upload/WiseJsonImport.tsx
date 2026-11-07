@@ -67,7 +67,11 @@ export default function WiseJsonImport(){
    if(!Array.isArray(orders)||stocks.length===0||soldCount!==stocks.length)throw new Error(`판매시각 누락 JSON 저장 차단: 판매시각 ${soldCount}/${stocks.length}건. 방송 ID ${videoCount}건은 선택 항목이야.`);
    setMessage("와이스 주문 매출자료 저장 중…");
    const form=new FormData();form.append("file",file);form.append("mode","sales_sync");
-   const res=await fetch("/api/domestic/wise-json-import",{method:"POST",body:form});
+   const controller=new AbortController();
+   const timeout=setTimeout(()=>controller.abort(),45000);
+   let res:Response;
+   try{res=await fetch("/api/domestic/wise-json-import",{method:"POST",body:form,signal:controller.signal});}
+   finally{clearTimeout(timeout)}
    const data=await res.json();if(!res.ok)throw new Error(data.error||"매출자료 저장 실패");
    setMessage("매출자료 저장 완료: "+Number(data.sales_saved_orders||0).toLocaleString("ko-KR")+"건 · 아이템별 판매시각 "+Number(data.sold_at_count||0).toLocaleString("ko-KR")+"건 / 전체 아이템 "+Number(data.sales_saved_items||0).toLocaleString("ko-KR")+"건"+(Number(data.missing_sold_at_count||0)>0?" (판매시각 미수집 "+Number(data.missing_sold_at_count).toLocaleString("ko-KR")+"건: 와이스 목록/상세 API 확인 필요)":""));
   }catch(e){setMessage("매출자료 저장 실패: "+(e instanceof Error?e.message:"알 수 없는 오류"))}
@@ -85,7 +89,7 @@ export default function WiseJsonImport(){
    if(!res.ok)throw new Error(data.error||"업로드 실패");
    if(mode==="preview"){setPreview(data);setSelectedNew([...data.new_orders,...(data.queued_orders??[]).filter((x:Candidate)=>!x.existingDomestic)].map((x:Candidate)=>x.wise_order_id));setSelectedUpdates([]);setMessage("미리보기 완료. 기존 주문 변경 목록은 미완료·미배송완료 주문 중 닉네임이 일치하고 DDOGA 전화번호가 빈 건만 표시합니다.");}
    else{setMessage(`선택 ${selectedNew.length}건 DDOGA 등록 중…`);const response=await fetch("/api/domestic/wise-json-queue",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"approve_bulk",wise_order_ids:selectedNew})});const result=await response.json();if(!response.ok)throw new Error(result.error||"일괄 등록 실패");setPreview(null);setSelectedNew([]);setMessage(`등록 성공 ${result.saved}건 / 실패 ${result.failed}건`+(result.failed?" : "+result.results.filter((x:{ok:boolean})=>!x.ok).map((x:{wise_order_id:number;error:string})=>x.wise_order_id+" "+x.error).join(", "):""));}
-  }catch(e){setMessage("처리 실패: "+(e instanceof Error?e.message:"알 수 없는 오류"))}finally{setLoading(false);setActivity("")}
+  }catch(e){setMessage(e instanceof Error&&e.name==="AbortError"?"미리보기 요청이 45초를 초과해 중단됐어. 서버 응답 지연을 확인해줘.":"처리 실패: "+(e instanceof Error?e.message:"알 수 없는 오류"))}finally{setLoading(false);setActivity("")}
  }
  useEffect(()=>{if(file&&autoPreviewRef.current){autoPreviewRef.current=false;void run("preview");}},[file]);
  async function applyUpdates(){
