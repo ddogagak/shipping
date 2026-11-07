@@ -82,6 +82,12 @@ export async function POST(req:Request){
   }
   const domesticKeys=new Map<string,string[]>();
   const wiseDomestic=domestic.filter(d=>d.platform==="wise");
+  const domesticByWiseId=new Map<number,string[]>();
+  for(const d of wiseDomestic){
+   const id=String(d.order_id).match(/^WJSON_(\d+)$/);
+   const wiseId=id?Number(id[1]):Number(d.customer_order_no);
+   if(Number.isSafeInteger(wiseId)&&wiseId>0)domesticByWiseId.set(wiseId,[...(domesticByWiseId.get(wiseId)??[]),String(d.order_id)]);
+  }
   const domesticById=new Map(wiseDomestic.map(d=>[String(d.order_id),d]));
   const domesticByOrderNo=new Map<string,string[]>();
   for(const d of wiseDomestic){
@@ -109,7 +115,7 @@ export async function POST(req:Request){
    const mmdd=formatted.slice(5,7)+formatted.slice(8,10);
    const ddogaOrderNo="W"+key(nickname)+"_"+mmdd;
    const dateDigits=formatted.replace(/\D/g,"");
-   const exactIds=wiseDomestic.filter(d=>String(d.order_id)==="WJSON_"+o.id || orderNumberKey(d.order_id)===orderNumberKey(ddogaOrderNo+"__"+dateDigits) || asText(d.customer_order_no)===String(o.id)).map(d=>String(d.order_id));
+   const exactIds=[...new Set([...(domesticByWiseId.get(o.id)??[]),...(domesticByOrderNo.get(orderNumberKey(ddogaOrderNo+"__"+dateDigits))??[])])];
    const byDate=domesticKeys.get(key(nickname)+"|"+formatted)??[];
    const byOrderNo=(domesticByOrderNo.get(orderNumberKey(ddogaOrderNo))??[]).filter(id=>{
     const d=domesticById.get(id);
