@@ -83,7 +83,7 @@ export default function WiseJsonImport(){
   if(mode==="preview")setPreview(null);
   setLoading(true);setActivity(mode);setMessage(mode==="preview"?"미리보기 가져오는 중 — DDOGA 기존 주문과 비교하고 있습니다.":`선택 ${selectedNew.length}건 DDOGA 등록 준비 중…`);
   try{
-   const form=new FormData();form.append("file",file);form.append("mode",mode);if(mode==="save")form.append("selected_ids",JSON.stringify(selectedNew));
+   const form=new FormData();form.append("file",file);form.append("mode",mode==="save"?"queue_selected":mode);if(mode==="save")form.append("selected_ids",JSON.stringify(selectedNew));
    const res=await fetch("/api/domestic/wise-json-import",{method:"POST",body:form});
    const data=await res.json();
    if(!res.ok)throw new Error(data.error||"업로드 실패");
