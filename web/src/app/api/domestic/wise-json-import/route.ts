@@ -65,6 +65,26 @@ export async function POST(req:Request){
    await upsertWisePhotosPreservingTimes(db,salesRows,"와이스 매출 자료 저장 실패");
    return NextResponse.json({ok:true,sales_saved_orders:salesOrders.length,sales_saved_items:salesRows.length,sold_at_count:salesRows.filter(row=>row.sold_at).length,missing_sold_at_count:salesRows.filter(row=>!row.sold_at).length,imported_at:importedAt});
   }
+  // Queue only selected orders for approval. Do not run the expensive full-history
+  // sales snapshot, nickname reconciliation, or all-domestic-order scan.
+  if(mode==="queue_selected"){
+   const chosen:unknown=JSON.parse(asText(form.get("selected_ids"))||"[]");
+   if(!Array.isArray(chosen)||chosen.length===0||chosen.length>40||!chosen.every(Number.isSafeInteger)||new Set(chosen).size!==chosen.length)
+    return NextResponse.json({error:"1~40개 중복 없는 주문 ID가 필요합니다."},{status:400});
+   const chosenIds=new Set<number>(chosen);
+   const selected=orders.filter(o=>chosenIds.has(o.id)&&validDate(o.createdAt));
+   if(selected.length!==chosenIds.size)return NextResponse.json({error:"선택 주문을 원본 JSON에서 모두 찾지 못했습니다."},{status:409});
+   const payload=selected.map(o=>({
+    wise_order_id:o.id,buyer_nickname:asText(o.user?.nickname),ordered_at:validDate(o.createdAt)!,
+    receiver_name:o.receiverName??null,receiver_phone:wisePhone(o)||null,postal_code:o.postNum??null,
+    address:[o.addr1,o.addr2,o.addr3].filter(Boolean).join(" "),
+    item_summary:(o.stocks??[]).map(s=>asText(s.name)).join(" / "),
+    item_total_price:(o.stocks??[]).reduce((sum,s)=>sum+Number(s.price??0),0),item_count:o.stocks?.length??0
+   }));
+   const {error}=await db.from("domestic_wise_import_queue").upsert(payload,{onConflict:"wise_order_id",ignoreDuplicates:true});
+   if(error)throw new Error("선택 주문 대기열 저장 실패: "+error.message);
+   return NextResponse.json({ok:true,queued:payload.length});
+  }
   // Page through all orders; otherwise Supabase's default row cap hides older phone-only changes.
   const domestic:Array<{order_id:string;customer_order_no:string|null;nickname:string|null;platform:string|null;order_status:string|null;phone:string|null;first_order_date:string|null;source_order_dates:string[]|null;item_total_price:number|null;item_summary:string|null;order_count:number|null}>=[];
   for(let offset=0;;offset+=500){
