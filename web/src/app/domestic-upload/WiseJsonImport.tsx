@@ -88,7 +88,21 @@ export default function WiseJsonImport(){
    const data=await res.json();
    if(!res.ok)throw new Error(data.error||"업로드 실패");
    if(mode==="preview"){setPreview(data);setSelectedNew([...data.new_orders,...(data.queued_orders??[]).filter((x:Candidate)=>!x.existingDomestic)].map((x:Candidate)=>x.wise_order_id));setSelectedUpdates([]);setMessage("미리보기 완료. 기존 주문 변경 목록은 미완료·미배송완료 주문 중 닉네임이 일치하고 DDOGA 전화번호가 빈 건만 표시합니다.");}
-   else{setMessage(`선택 ${selectedNew.length}건 DDOGA 등록 중…`);const response=await fetch("/api/domestic/wise-json-queue",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"approve_bulk",wise_order_ids:selectedNew})});const result=await response.json();if(!response.ok)throw new Error(result.error||"일괄 등록 실패");setPreview(null);setSelectedNew([]);setMessage(`등록 성공 ${result.saved}건 / 실패 ${result.failed}건`+(result.failed?" : "+result.results.filter((x:{ok:boolean})=>!x.ok).map((x:{wise_order_id:number;error:string})=>x.wise_order_id+" "+x.error).join(", "):""));}
+   else{
+    const ids=[...selectedNew];let saved=0,failed=0;const errors:string[]=[];
+    for(let i=0;i<ids.length;i+=3){
+     const batch=ids.slice(i,i+3);
+     setMessage(`DDOGA 등록 진행 중: ${i}/${ids.length}건 처리 · 성공 ${saved}건 / 실패 ${failed}건`);
+     let response:Response;
+     try{response=await fetch("/api/domestic/wise-json-queue",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"approve_bulk",wise_order_ids:batch})});}
+     catch(e){throw new Error(`네트워크 연결 중단 (${i+1}~${i+batch.length}번째 주문). 앞서 성공한 ${saved}건은 저장됐을 수 있어. 미리보기를 다시 실행해 미등록 주문을 확인해줘. 원인: ${e instanceof Error?e.message:String(e)}`);}
+     const result=await response.json();
+     if(!response.ok)throw new Error(result.error||"일괄 등록 실패");
+     saved+=Number(result.saved||0);failed+=Number(result.failed||0);
+     errors.push(...(result.results??[]).filter((x:{ok:boolean})=>!x.ok).map((x:{wise_order_id:number;error:string})=>x.wise_order_id+" "+x.error));
+    }
+    setPreview(null);setSelectedNew([]);setMessage(`등록 성공 ${saved}건 / 실패 ${failed}건`+(errors.length?" : "+errors.join(", "):""));
+   }
   }catch(e){setMessage(e instanceof Error&&e.name==="AbortError"?"미리보기 요청이 45초를 초과해 중단됐어. 서버 응답 지연을 확인해줘.":"처리 실패: "+(e instanceof Error?e.message:"알 수 없는 오류"))}finally{setLoading(false);setActivity("")}
  }
  useEffect(()=>{if(file&&autoPreviewRef.current){autoPreviewRef.current=false;void run("preview");}},[file]);
