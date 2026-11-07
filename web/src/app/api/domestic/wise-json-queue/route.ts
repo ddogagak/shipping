@@ -7,7 +7,8 @@ export async function GET() {
  return error ? NextResponse.json({error:error.message},{status:500}) : NextResponse.json({orders:data??[]});
 }
 
-async function processOne(wise_order_id: number, action: "approve"|"ignore") {
+type WiseExistingOrder={order_id:string;nickname:string|null;platform:string|null;first_order_date:string|null;source_order_dates:unknown};
+async function processOne(wise_order_id: number, action: "approve"|"ignore", cachedOrders?:WiseExistingOrder[]) {
  try {
   if(!Number.isSafeInteger(wise_order_id)||!["approve","ignore"].includes(action))return NextResponse.json({error:"잘못된 요청"},{status:400});
   const db=createServiceRoleClient();
@@ -27,8 +28,12 @@ async function processOne(wise_order_id: number, action: "approve"|"ignore") {
   const {data:existing,error:ee}=await db.from("domestic_order").select("order_id").eq("order_id",id).maybeSingle();
   if(ee)throw ee;
   if(existing)return NextResponse.json({error:"이미 등록된 주문"},{status:409});
-  const {data:orders,error:oe}=await db.from("domestic_order").select("order_id,nickname,platform,first_order_date,source_order_dates").eq("platform","wise");
-  if(oe)throw oe;
+  let orders=cachedOrders;
+  if(!orders){
+   const result=await db.from("domestic_order").select("order_id,nickname,platform,first_order_date,source_order_dates").eq("platform","wise");
+   if(result.error)throw result.error;
+   orders=(result.data??[]) as WiseExistingOrder[];
+  }
   const norm=(v:unknown)=>String(v??"").normalize("NFKC").replace(/\s+/g,"").toLowerCase();
   const dateKey=(v:unknown)=>{const s=String(v??"");const m=s.match(/(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})[ T/]+(\d{1,2}):(\d{1,2})/);return m?[m[1],m[2].padStart(2,"0"),m[3].padStart(2,"0")].join("-")+" "+m[4].padStart(2,"0")+":"+m[5]:""};
   const duplicate=(orders??[]).find(o=>norm(o.nickname)===norm(q.buyer_nickname)&&[o.first_order_date,...(Array.isArray(o.source_order_dates)?o.source_order_dates:[])].some(d=>dateKey(d)===dateKey(date)));
@@ -47,6 +52,7 @@ async function processOne(wise_order_id: number, action: "approve"|"ignore") {
   if(linkError)throw new Error("주문 등록됨, 와이스 ID 연결 실패: "+linkError.message);
   const {error:re}=await db.from("domestic_wise_import_queue").update({review_status:"reviewed"}).eq("wise_order_id",wise_order_id);
   if(re)throw new Error("주문 등록됨, 대기열 상태 저장 실패: "+re.message);
+  if(cachedOrders)cachedOrders.push({order_id:id,nickname,platform:"wise",first_order_date:date,source_order_dates:[date]});
   return NextResponse.json({ok:true,order_id:id});
  }catch(e){return NextResponse.json({error:e instanceof Error?e.message:"저장 실패"},{status:500})}
 }
@@ -58,9 +64,13 @@ export async function POST(req: Request) {
    const ids=body.wise_order_ids;
    if(!Array.isArray(ids)||ids.length>40||ids.length===0||!ids.every(Number.isSafeInteger)||new Set(ids).size!==ids.length)
     return NextResponse.json({error:"1~40개 중복 없는 주문 ID가 필요합니다."},{status:400});
+   const db=createServiceRoleClient();
+   const {data:existingOrders,error:existingError}=await db.from("domestic_order").select("order_id,nickname,platform,first_order_date,source_order_dates").eq("platform","wise");
+   if(existingError)throw existingError;
+   const cachedOrders=(existingOrders??[]) as WiseExistingOrder[];
    const results=[];
    for(const id of ids){
-    const response=await processOne(id,"approve");
+    const response=await processOne(id,"approve",cachedOrders);
     const data=await response.json();
     results.push({wise_order_id:id,ok:response.ok,order_id:data.order_id??null,error:data.error??null});
    }
