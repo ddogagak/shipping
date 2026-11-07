@@ -34,14 +34,14 @@ export default function WiseJsonImport(){
    const allStocks=data.orders.flatMap((o:{stocks?:Array<{soldAt?:string|null;videoId?:string|null}>})=>o.stocks??[]);
    const soldCount=allStocks.filter((s:{soldAt?:string|null})=>s.soldAt).length;
    const videoCount=allStocks.filter((s:{videoId?:string|null})=>s.videoId).length;
-   if(!allStocks.length||soldCount!==allStocks.length){setMessage(`매출자료 수신 차단: 판매시각 ${soldCount}/${allStocks.length}건, 방송 ID ${videoCount}/${allStocks.length}건 · 전송 버전 ${String(data.scriptVersion||"미표기")}. 실제 데이터가 누락되어 저장하지 않았어.`);return;}
+   const listOnly=!allStocks.length||soldCount!==allStocks.length;
    const json=JSON.stringify(data.orders);
    if(json.length>15000000){setMessage("전송된 JSON이 15MB를 초과합니다.");return;}
    autoPreviewRef.current=true;
    setFile(new File([json],"wyyyes-orders.json",{type:"application/json"}));
    setPreview(null);
    setSelectedUpdates([]);
-   setMessage("와이스 주문 "+data.orders.length+"건 · 판매시각 "+soldCount+"건 · 방송 ID "+videoCount+"건 수신 (전송 버전 "+String(data.scriptVersion||"미표기")+"). 자동 미리보기 중이며 DB는 아직 변경하지 않았어.");
+   setMessage(listOnly?`주문목록 ${data.orders.length}건 수신 · 판매시각 ${soldCount}/${allStocks.length}건, 방송 ID ${videoCount}/${allStocks.length}건 (전송 버전 ${String(data.scriptVersion||"미표기")}). 주문 미리보기만 허용하며 매출자료 저장은 차단해. 기존 매출자료는 변경하지 않아.`:"와이스 주문 "+data.orders.length+"건 · 판매시각 "+soldCount+"건 · 방송 ID "+videoCount+"건 수신 (전송 버전 "+String(data.scriptVersion||"미표기")+"). 자동 미리보기 중이며 DB는 아직 변경하지 않았어.");
    (event.source as Window).postMessage({type:"DDOGA_WISE_RECEIVED",count:data.orders.length},allowedOrigin);
   }
   window.addEventListener("message",onMessage);
