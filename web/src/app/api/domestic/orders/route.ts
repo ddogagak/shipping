@@ -756,6 +756,37 @@ export async function PATCH(req: Request) {
       );
     }
 
+    // Never delete a merged source order while reviewed Wise orders belonging to it
+    // are missing their durable ID links. A missing link would otherwise erase
+    // the only reliable path to its item photos after the merge.
+    const mergeOrderIds = activeOrders.map((order: any) => order.order_id);
+    const mergeNicknames = [...new Set(activeOrders.map((order: any) => String(order.nickname || "").trim()).filter(Boolean))];
+    const { data: reviewedWise, error: reviewedWiseError } = await supabase
+      .from("domestic_wise_import_queue")
+      .select("wise_order_id,buyer_nickname,ordered_at")
+      .eq("review_status", "reviewed")
+      .in("buyer_nickname", mergeNicknames);
+    if (reviewedWiseError) return NextResponse.json({ error: "합배송 전 와이스 주문 검증 실패", detail: reviewedWiseError.message }, { status: 500 });
+    const { data: mergeWiseLinks, error: mergeWiseLinksError } = await supabase
+      .from("domestic_wise_order_link").select("wise_order_id,domestic_order_id")
+      .in("domestic_order_id", mergeOrderIds);
+    if (mergeWiseLinksError) return NextResponse.json({ error: "합배송 전 와이스 ID 검증 실패", detail: mergeWiseLinksError.message }, { status: 500 });
+    const linkedWiseIds = new Set((mergeWiseLinks || []).map((link: any) => Number(link.wise_order_id)));
+    const sourceDates = new Set(activeOrders.flatMap((order: any) =>
+      Array.isArray(order.source_order_dates) && order.source_order_dates.length
+        ? order.source_order_dates.map((date: unknown) => String(date).trim())
+        : [String(order.first_order_date || "").trim()]
+    ));
+    const missingWiseIds = (reviewedWise || []).filter((wise: any) => {
+      const orderedDate = new Date(wise.ordered_at).toLocaleString("sv-SE", { timeZone: "Asia/Seoul", hour12: false })
+        .replace(/-/g, ".").slice(0, 16);
+      return sourceDates.has(orderedDate) && !linkedWiseIds.has(Number(wise.wise_order_id));
+    }).map((wise: any) => wise.wise_order_id);
+    if (missingWiseIds.length) return NextResponse.json({
+      error: "와이스 ID 연결이 누락된 원본 주문이 있어 합배송을 중단했어.",
+      detail: "먼저 원본 주문 연결을 복구해야 상품 사진이 유실되지 않아. 와이스 ID: " + missingWiseIds.join(", "),
+    }, { status: 409 });
+
     const sorted = [...activeOrders].sort((a: any, b: any) =>
       String(a.first_order_date || a.created_at || "").localeCompare(
         String(b.first_order_date || b.created_at || "")
