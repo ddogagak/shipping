@@ -993,6 +993,28 @@ export async function PATCH(req: Request) {
         if(moveLinkError)return NextResponse.json({error:"와이스 주문 ID 합배송 연결 실패",detail:moveLinkError.message},{status:500});
       }
     }
+    // Move item rows to the surviving order BEFORE deleting merged source orders.
+    // Otherwise FK cascade may silently remove the individual items while the
+    // combined item_summary and Wise links continue to reference them.
+    if (mergeTargetIds.length) {
+      const { data: sourceItems, error: sourceItemsError } = await supabase
+        .from("domestic_order_item")
+        .select("id")
+        .in("order_id", mergeTargetIds);
+      if (sourceItemsError) return NextResponse.json({ error: "합배송 상품 조회 실패", detail: sourceItemsError.message }, { status: 500 });
+      if ((sourceItems || []).length) {
+        const { error: moveItemsError } = await supabase
+          .from("domestic_order_item")
+          .update({ order_id: base.order_id })
+          .in("order_id", mergeTargetIds);
+        if (moveItemsError) return NextResponse.json({ error: "합배송 상품 이동 실패: 원본 주문 삭제 중단", detail: moveItemsError.message }, { status: 500 });
+        const { count: remainingItems, error: verifyItemsError } = await supabase
+          .from("domestic_order_item")
+          .select("id", { count: "exact", head: true })
+          .in("order_id", mergeTargetIds);
+        if (verifyItemsError || remainingItems !== 0) return NextResponse.json({ error: "합배송 상품 이동 검증 실패: 원본 주문 삭제 중단", detail: verifyItemsError?.message || "이동되지 않은 상품이 남아 있어." }, { status: 500 });
+      }
+    }
     if (mergeTargetIds.length) {
       const { error: shippingDeleteError } = await supabase
         .from("domestic_shipping")
