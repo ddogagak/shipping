@@ -1274,7 +1274,12 @@
                   match.tracking_number,
 
                 delivery_id:
-                  match.delivery_id
+                  match.delivery_id,
+
+                wise_user_id:
+                  match.user_id ||
+                  match.wise_user_id ||
+                  null
               }
             }
           );
