@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DDOGA Wise shipping bridge
 // @namespace    https://www.ddoga.lol/
-// @version      2.4.13
+// @version      2.4.14
 // @updateURL    https://www.ddoga.lol/ddoga-wise-shipping.user.js
 // @downloadURL  https://www.ddoga.lol/ddoga-wise-shipping.user.js
 // @match        https://wyyyes.com/*
@@ -27,8 +27,8 @@
 
   // raw(page) 컨텍스트: Firefox 모바일의 cross-realm fetch/XHR 충돌 방지.
   const page = window;
-  if (page.__DDOGA_WISE_SHIP_V2413__) return;
-  page.__DDOGA_WISE_SHIP_V2413__ = true;
+  if (page.__DDOGA_WISE_SHIP_V2414__) return;
+  page.__DDOGA_WISE_SHIP_V2414__ = true;
 
   const hasOpener = () => {
     try { return Boolean(window.opener && !window.opener.closed); }
@@ -139,7 +139,7 @@
 
   function diagnostic() {
     return (
-      "DDOGA 2.4.13 · " + phase + "\n" +
+      "DDOGA 2.4.14 · " + phase + "\n" +
       "요청 감지 " + apiSeen +
       " · 인증 " +
       (
@@ -327,7 +327,11 @@
   installHooks();
 
   const send = (type, extra = {}) => {
-    if (type === "DDOGA_WISE_SHIP_PROGRESS" || type === "DDOGA_WISE_PREP_PROGRESS") {
+    if (
+      type === "DDOGA_WISE_SHIP_PROGRESS" ||
+      type === "DDOGA_WISE_PREP_PROGRESS" ||
+      type === "DDOGA_WISE_SNAPSHOT_PROGRESS"
+    ) {
       phase = String(extra.message || phase);
     }
 
@@ -384,7 +388,7 @@
     paint();
 
     throw Error(
-      "[2.4.13] 인증 미감지 · 페이지 요청 " +
+      "[2.4.14] 인증 미감지 · 페이지 요청 " +
       apiSeen +
       "건" +
       (hookError ? " · Firefox 페이지 연결 실패" : "") +
@@ -1564,66 +1568,128 @@
     }
 
     try {
-      const list = await request(
-        "/r0.app/sellers/myMarket/buyers/undeliveredUsers"
-      );
+      send("DDOGA_WISE_SNAPSHOT_PROGRESS", {
+        message: resuming
+          ? "배송기한 인증 복구 완료 · 구매자 목록 다시 조회 중..."
+          : "배송기한 구매자 목록 조회 중..."
+      });
+
+      const list = await request(BUYER_LIST_PATH);
 
       const users = Array.isArray(list.result)
         ? list.result
         : [];
 
-      const records = [];
+      const records = new Array(users.length);
+      let nextIndex = 0;
+      let doneCount = 0;
+      const startedAt = Date.now();
 
-      for (const user of users) {
-        const userId = user._id || user.userId;
+      send("DDOGA_WISE_SNAPSHOT_PROGRESS", {
+        message: "배송기한 조회 시작 · " + users.length + "명"
+      });
 
-        const nickname =
-          user.nickname ||
-          user.user?.nickname ||
-          "";
+      async function worker() {
+        while (nextIndex < users.length) {
+          if (snapshotReconnectRequested) return;
+          if (Date.now() - startedAt > 90000) {
+            throw Error("배송기한 전체 조회 90초 초과");
+          }
 
-        if (!userId) continue;
+          const index = nextIndex++;
+          const user = users[index];
+          const userId = wiseUserIdOf(user);
+          const nickname = wiseNicknameOf(user);
 
-        try {
-          const response = await request(
-            "/r0.app/sellers/myMarket/orderChains?userId=" +
-            encodeURIComponent(userId)
-          );
+          if (!userId) {
+            records[index] = {
+              userId: "",
+              nickname,
+              orders: [],
+              error: "와이스 구매자 ID 없음"
+            };
+            doneCount++;
+            continue;
+          }
 
-          const chains =
-            Array.isArray(response.result)
+          try {
+            const response = await request(
+              "/r0.app/sellers/myMarket/orderChains?userId=" +
+              encodeURIComponent(userId)
+            );
+
+            const chains = Array.isArray(response.result)
               ? response.result
               : [];
 
-          records.push({
-            userId,
-            nickname,
-            orders: chains.map(order => ({
-              id: order.id,
-              status: order.status,
-              createdAt: order.createdAt,
-              updatedAt: order.updatedAt,
-              deliveryCompany: order.deliveryCompany,
-              deliveryCode: order.deliveryCode,
-              delivery_id: order.delivery_id,
-              firstOrderGroupId: order.firstOrderGroupId
-            }))
-          });
-        } catch (error) {
-          records.push({
-            userId,
-            nickname,
-            orders: [],
-            error: String(error.message || error)
-          });
+            records[index] = {
+              userId,
+              nickname,
+              orders: chains.map(order => ({
+                id: order.id,
+                status: order.status,
+                createdAt: order.createdAt,
+                updatedAt: order.updatedAt,
+                deliveryCompany: order.deliveryCompany,
+                deliveryCode: order.deliveryCode,
+                delivery_id: order.delivery_id,
+                firstOrderGroupId: order.firstOrderGroupId
+              }))
+            };
+          } catch (error) {
+            if (error?.ddogaSnapshotReconnect) throw error;
+
+            records[index] = {
+              userId,
+              nickname,
+              orders: [],
+              error: String(error?.message || error)
+            };
+          } finally {
+            doneCount++;
+
+            if (!snapshotReconnectRequested) {
+              send("DDOGA_WISE_SNAPSHOT_PROGRESS", {
+                message:
+                  "배송기한 조회 " +
+                  doneCount +
+                  "/" +
+                  users.length +
+                  "명" +
+                  (nickname ? " · " + nickname : "")
+              });
+            }
+          }
         }
       }
+
+      await Promise.all(
+        Array.from(
+          {length: Math.min(4, Math.max(1, users.length))},
+          () => worker()
+        )
+      );
+
+      if (snapshotReconnectRequested) {
+        return;
+      }
+
+      const completed = records.filter(Boolean);
 
       clearSnapshotResume();
       snapshotReconnectRequested = false;
 
+      send("DDOGA_WISE_SNAPSHOT_PROGRESS", {
+        message:
+          "배송기한 조회 완료 · " +
+          completed.length +
+          "/" +
+          users.length +
+          "명"
+      });
+
       send("DDOGA_WISE_SNAPSHOT_RESULT", {
-        records
+        records: completed
       });
     } catch (error) {
       if (error?.ddogaSnapshotReconnect) {
@@ -1635,13 +1701,12 @@
 
       send("DDOGA_WISE_SNAPSHOT_RESULT", {
         records: [],
-        error: String(error.message || error)
+        error: String(error?.message || error)
       });
     } finally {
       activeSnapshotRequest = false;
     }
   }
-
 
   // ── 📦 준비: 확인된 와이스 virtualNumbers API ──
   // POST: /r0.app/sellers/myMarket/virtualNumbers
@@ -2039,7 +2104,7 @@
     }
 
     if (event.data?.type === "DDOGA_WISE_PREP_PING") {
-      send("DDOGA_WISE_PREP_READY", {token:event.data.token, version:"2.4.13", instance:pageInstance});
+      send("DDOGA_WISE_PREP_READY", {token:event.data.token, version:"2.4.14", instance:pageInstance});
     }
 
     // 2.4.5 전용 명령: 구버전 스크립트가 같이 켜져 있어도 중복 발급을 요청받지 않는다.
@@ -2088,7 +2153,7 @@
 
   const ready = () =>
     send("DDOGA_WISE_SHIP_READY", {
-      version: "2.4.13"
+      version: "2.4.14"
     });
 
   window.addEventListener("load", () => {
