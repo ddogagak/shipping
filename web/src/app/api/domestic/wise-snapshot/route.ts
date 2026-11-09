@@ -6,6 +6,7 @@ export const runtime = "nodejs";
 const SNAPSHOT_ID = "latest";
 type Row = {
   nickname: string;
+  wise_user_id?: string | null;
   order_id: string;
   days: number;
   status: "unshipped" | "pending" | "confirmed" | "urgent";
@@ -46,6 +47,7 @@ export async function POST(request: Request) {
     }
     rows.push({
       nickname: row.nickname.slice(0, 120),
+      wise_user_id: typeof row.wise_user_id === "string" && row.wise_user_id.trim() ? row.wise_user_id.trim().slice(0, 200) : null,
       order_id: row.order_id.slice(0, 100),
       days: row.days,
       status: row.status as Row["status"],
@@ -87,10 +89,14 @@ export async function PATCH(request: Request) {
  if (!selected) return NextResponse.json({error:"처리할 추정 주문이 없어"},{status:409});
  if (action==="register") {
   const normalize=(s:string)=>s.normalize("NFKC").replace(/\s+/g,"").toLowerCase();
-  const {data:orders,error:ordersError}=await db.from("domestic_order").select("order_id,nickname,platform,order_status,domestic_shipping(tracking_registered,shipping_status)");
+  const {data:orders,error:ordersError}=await db.from("domestic_order").select("order_id,nickname,wise_user_id,platform,order_status,domestic_shipping(tracking_registered,shipping_status)");
   if(ordersError)return NextResponse.json({error:ordersError.message},{status:500});
   const found=(orders||[]).filter((o:any)=>{
-   if(o.platform!=="wise"||normalize(String(o.nickname||""))!==normalize(selected.nickname))return false;
+   if(o.platform!=="wise")return false;
+   const sameBuyer=selected.wise_user_id
+     ? String(o.wise_user_id||"")===String(selected.wise_user_id)
+     : normalize(String(o.nickname||""))===normalize(selected.nickname);
+   if(!sameBuyer)return false;
    const shipping=Array.isArray(o.domestic_shipping)?o.domestic_shipping[0]:o.domestic_shipping;
    return shipping?.tracking_registered===false &&
      !["kept","done"].includes(String(o.order_status||"")) &&
