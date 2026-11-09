@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 export const runtime="nodejs";
-type RawOrder={id:number;status?:number;deliveryCompany?:string|null;deliveryCode?:string|null;startAt?:string|null;updatedAt?:string|null;createdAt?:string|null;receiverName?:string|null;receiverPhoneNum?:string|null;receiverphonenum?:string|null;virtualPhoneNum?:string|null;virtualphonenum?:string|null;postNum?:string|null;addr1?:string|null;addr2?:string|null;addr3?:string|null;user?:{nickname?:string|null};stocks?:Array<{id:number;name?:string;price?:number;thumbnail?:string|null;soldAt?:string|null;videoId?:string|null}>};
+type RawOrder={id:number;status?:number;deliveryCompany?:string|null;deliveryCode?:string|null;startAt?:string|null;updatedAt?:string|null;createdAt?:string|null;receiverName?:string|null;receiverPhoneNum?:string|null;receiverphonenum?:string|null;virtualPhoneNum?:string|null;virtualphonenum?:string|null;postNum?:string|null;addr1?:string|null;addr2?:string|null;addr3?:string|null;userId?:string|null;user?:{id?:number;_id?:string|null;nickname?:string|null};stocks?:Array<{id:number;name?:string;price?:number;thumbnail?:string|null;soldAt?:string|null;videoId?:string|null}>};
 function asText(v:unknown){return String(v??"").trim()}
 function validDate(v:unknown){const s=asText(v);return s&&!Number.isNaN(Date.parse(s))?s:null}
 function kst(v:string){return new Date(v).toLocaleString("sv-SE",{timeZone:"Asia/Seoul"}).slice(0,16)}
@@ -20,6 +20,7 @@ function wisePhone(o:RawOrder){
  const sources=[o.receiverPhoneNum,o.receiverphonenum,o.virtualPhoneNum,o.virtualphonenum];
  return asText(sources.find(validPhone));
 }
+function wiseUserId(o:RawOrder){return asText(o.userId||o.user?._id)||null}
 function orderNumberKey(v:unknown){return key(asText(v).replace(/-C\d+$/i,""))}
 function batches<T>(a:T[],n=200){const out:T[][]=[];for(let i=0;i<a.length;i+=n)out.push(a.slice(i,i+n));return out}
 // A list-only Wise JSON omits soldAt/videoId. Never erase already-synced item metadata.
@@ -53,6 +54,7 @@ export async function POST(req:Request){
    const salesRows=salesOrders.flatMap(o=>(o.stocks??[]).filter(s=>Number.isSafeInteger(s.id)).map(s=>({
     wise_stock_id:s.id,
     wise_order_id:o.id,
+     wise_user_id:wiseUserId(o),
     buyer_nickname:asText(o.user?.nickname),
     ordered_at:validDate(o.createdAt)!,
     sold_at:validDate(s.soldAt),
@@ -75,7 +77,7 @@ export async function POST(req:Request){
    const selected=orders.filter(o=>chosenIds.has(o.id)&&validDate(o.createdAt));
    if(selected.length!==chosenIds.size)return NextResponse.json({error:"선택 주문을 원본 JSON에서 모두 찾지 못했습니다."},{status:409});
    const payload=selected.map(o=>({
-    wise_order_id:o.id,buyer_nickname:asText(o.user?.nickname),ordered_at:validDate(o.createdAt)!,
+    wise_order_id:o.id,wise_user_id:wiseUserId(o),buyer_nickname:asText(o.user?.nickname),ordered_at:validDate(o.createdAt)!,
     receiver_name:o.receiverName??null,receiver_phone:wisePhone(o)||null,postal_code:o.postNum??null,
     address:[o.addr1,o.addr2,o.addr3].filter(Boolean).join(" "),
     item_summary:(o.stocks??[]).map(s=>asText(s.name)).join(" / "),
@@ -86,9 +88,9 @@ export async function POST(req:Request){
    return NextResponse.json({ok:true,queued:payload.length});
   }
   // Page through all orders; otherwise Supabase's default row cap hides older phone-only changes.
-  const domestic:Array<{order_id:string;customer_order_no:string|null;nickname:string|null;platform:string|null;order_status:string|null;phone:string|null;first_order_date:string|null;source_order_dates:string[]|null;item_total_price:number|null;item_summary:string|null;order_count:number|null}>=[];
+  const domestic:Array<{order_id:string;customer_order_no:string|null;nickname:string|null;wise_user_id:string|null;platform:string|null;order_status:string|null;phone:string|null;first_order_date:string|null;source_order_dates:string[]|null;item_total_price:number|null;item_summary:string|null;order_count:number|null}>=[];
   for(let offset=0;;offset+=500){
-   const {data,error}=await db.from("domestic_order").select("order_id,customer_order_no,nickname,platform,order_status,phone,first_order_date,source_order_dates,item_total_price,item_summary,order_count").order("order_id").range(offset,offset+499);
+   const {data,error}=await db.from("domestic_order").select("order_id,customer_order_no,nickname,wise_user_id,platform,order_status,phone,first_order_date,source_order_dates,item_total_price,item_summary,order_count").order("order_id").range(offset,offset+499);
    if(error)return NextResponse.json({error:"기존 주문 조회 실패",detail:error.message},{status:500});
    domestic.push(...(data??[]));
    if((data??[]).length<500)break;
@@ -258,8 +260,9 @@ export async function POST(req:Request){
   // Keep a financial snapshot for every order in the Wise export, including completed statuses.
   const importedAt=new Date().toISOString();
   const salesRows=(parsed as RawOrder[]).filter(o=>validDate(o.createdAt)).map(o=>({
-   wise_order_id:o.id,
-   buyer_nickname:asText(o.user?.nickname),
+    wise_order_id:o.id,
+    wise_user_id:wiseUserId(o),
+    buyer_nickname:asText(o.user?.nickname),
    ordered_at:validDate(o.createdAt)!,
    wise_status:Number.isSafeInteger(o.status)?o.status:null,
    item_names:(o.stocks??[]).map(s=>asText(s.name)).filter(Boolean),
@@ -360,11 +363,11 @@ export async function POST(req:Request){
   }
   // Refresh WYYYES-only shipping snapshots and item metadata without changing shipping state.
   for(const chunk of batches(orders)){
-   const snapshots=chunk.map(o=>({wise_order_id:o.id,wise_status:o.status??null,wise_delivery_company:o.deliveryCompany??null,wise_delivery_code:o.deliveryCode??null,wise_start_at:validDate(o.startAt),wise_updated_at:validDate(o.updatedAt),snapshot_imported_at:new Date().toISOString()}));
+   const snapshots=chunk.map(o=>({wise_order_id:o.id,wise_user_id:wiseUserId(o),wise_status:o.status??null,wise_delivery_company:o.deliveryCompany??null,wise_delivery_code:o.deliveryCode??null,wise_start_at:validDate(o.startAt),wise_updated_at:validDate(o.updatedAt),snapshot_imported_at:new Date().toISOString()}));
    const {error}=await db.from("domestic_wise_order_snapshot").upsert(snapshots,{onConflict:"wise_order_id"});
    if(error)throw new Error("와이스 배송 스냅샷 저장 실패: "+error.message);
   }
-  const photoRows=orders.flatMap(o=>(o.stocks??[]).filter(s=>Number.isSafeInteger(s.id)).map(s=>({wise_stock_id:s.id,wise_order_id:o.id,buyer_nickname:asText(o.user?.nickname),ordered_at:validDate(o.createdAt)??new Date().toISOString(),sold_at:validDate(s.soldAt),video_id:asText(s.videoId)||null,item_name:asText(s.name),item_price:Number(s.price??0),image_url:s.thumbnail??null})));
+  const photoRows=orders.flatMap(o=>(o.stocks??[]).filter(s=>Number.isSafeInteger(s.id)).map(s=>({wise_stock_id:s.id,wise_order_id:o.id,wise_user_id:wiseUserId(o),buyer_nickname:asText(o.user?.nickname),ordered_at:validDate(o.createdAt)??new Date().toISOString(),sold_at:validDate(s.soldAt),video_id:asText(s.videoId)||null,item_name:asText(s.name),item_price:Number(s.price??0),image_url:s.thumbnail??null})));
   await upsertWisePhotosPreservingTimes(db,photoRows,"와이스 상품정보 저장 실패");
   const selectedRaw=asText(form.get("selected_ids"));
   const selectedIds=selectedRaw?JSON.parse(selectedRaw):null;
@@ -373,7 +376,7 @@ export async function POST(req:Request){
   const allowedIds=selectedIds===null?null:new Set<number>(selectedIds);
   const fresh=rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued&&(allowedIds===null||allowedIds.has(x.wise_order_id)));
   for(const chunk of batches(fresh)){
-   const payload=chunk.map(({order:o,ordered_at,nickname})=>({wise_order_id:o.id,buyer_nickname:nickname,ordered_at,receiver_name:o.receiverName??null,receiver_phone:wisePhone(o)||null,postal_code:o.postNum??null,address:[o.addr1,o.addr2,o.addr3].filter(Boolean).join(" "),item_summary:(o.stocks??[]).map(s=>asText(s.name)).join(" / "),item_total_price:(o.stocks??[]).reduce((sum,s)=>sum+Number(s.price??0),0),item_count:o.stocks?.length??0}));
+   const payload=chunk.map(({order:o,ordered_at,nickname})=>({wise_order_id:o.id,wise_user_id:wiseUserId(o),buyer_nickname:nickname,ordered_at,receiver_name:o.receiverName??null,receiver_phone:wisePhone(o)||null,postal_code:o.postNum??null,address:[o.addr1,o.addr2,o.addr3].filter(Boolean).join(" "),item_summary:(o.stocks??[]).map(s=>asText(s.name)).join(" / "),item_total_price:(o.stocks??[]).reduce((sum,s)=>sum+Number(s.price??0),0),item_count:o.stocks?.length??0}));
    const {error}=await db.from("domestic_wise_import_queue").upsert(payload,{onConflict:"wise_order_id",ignoreDuplicates:true});if(error)throw error;
   }
   return NextResponse.json({ok:true,recovered_links:recoveredLinks,queued_new:fresh.length,sales_saved:salesRows.length,updated_snapshots:orders.length,updated_items:photoRows.length,excluded_count:parsed.length-orders.length,skipped_existing:rows.filter(x=>x.existingDomestic).length,skipped_queued:rows.filter(x=>x.alreadyQueued).length});
