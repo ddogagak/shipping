@@ -1,10 +1,10 @@
 "use client";
 import {useMemo,useState,useEffect,useRef} from "react";
 
-type Order={order_id:string;nickname:string;platform:string;first_order_date:string|null;order_status:string|null;request_status:string|null;tracking_registered:boolean};
+type Order={order_id:string;nickname:string;wise_user_id?:string|null;platform:string;first_order_date:string|null;order_status:string|null;request_status:string|null;tracking_registered:boolean};
 type Snapshot={userId:string;nickname:string;orders:{id:number;status:number;createdAt:string;deliveryCompany?:string;deliveryCode?:string}[]};
 const CACHE_KEY="ddoga:wise-deadline-snapshot:v1";
-type WiseRow={nickname:string;order_id:string;days:number;status:"unshipped"|"pending"|"confirmed"|"urgent";source:"ddoga"|"wise"};
+type WiseRow={nickname:string;wise_user_id?:string|null;order_id:string;days:number;status:"unshipped"|"pending"|"confirmed"|"urgent";source:"ddoga"|"wise"};
 function daysSince(date:string|null){
  if(!date)return -1;
  const m=date.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
@@ -68,7 +68,7 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
      const days=daysSince(order.createdAt);
      const pending=Number(order.status)===16&&order.deliveryCompany==="DIRECT";
      if(Number(order.status)===25)continue; // 발송완료는 긴급/미발송 집계에서 제외
-     next.push({nickname:buyer.nickname,order_id:String(order.id),days,status:pending?"pending":days>=13?"urgent":"unshipped",source:"wise"});
+     next.push({nickname:buyer.nickname,wise_user_id:buyer.userId||null,order_id:String(order.id),days,status:pending?"pending":days>=13?"urgent":"unshipped",source:"wise"});
     }
     const time=new Date().toISOString();
     try{localStorage.setItem(CACHE_KEY,JSON.stringify({rows:next,updatedAt:time}));}
@@ -86,10 +86,11 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
   return()=>window.removeEventListener("message",onMessage);
  },[]);
  const rows=useMemo(()=>wiseRows||[],[wiseRows]);
- const unique=(a:WiseRow[])=>Array.from(new Map(a.filter(x=>x.nickname).sort((a,b)=>b.days-a.days).map(r=>[r.nickname.trim().toLowerCase(),r])).values());
+ const buyerKey=(x:{wise_user_id?:string|null;nickname:string})=>String(x.wise_user_id||"").trim()||("nick:"+x.nickname.trim().toLowerCase());
+ const unique=(a:WiseRow[])=>Array.from(new Map(a.filter(x=>x.nickname).sort((a,b)=>b.days-a.days).map(r=>[buyerKey(r),r])).values());
  const unshipped=unique(rows.filter(r=>r.status==="unshipped"||r.status==="urgent"));
  const candidates=unique(rows.filter(r=>(r.status==="unshipped"||r.status==="urgent")&&r.days>=10&&r.days<13));
- const immediateNicknames=new Set(orders.filter(order=>order.request_status==="immediate"&&order.order_status!=="done").map(order=>order.nickname.trim().toLowerCase()));
+ const immediateBuyers=new Set(orders.filter(order=>order.request_status==="immediate"&&order.order_status!=="done").map(order=>buyerKey(order)));
  const pending=unique(rows.filter(r=>r.status==="pending"));
  const confirmed=unique(rows.filter(r=>r.status==="confirmed"));
  const urgent=unique(rows.filter(r=>(r.status==="urgent"||r.status==="unshipped")&&r.days>=13));
@@ -153,7 +154,7 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
      <div style={{fontSize:24,fontWeight:800,marginTop:4}}>{candidates.length}명 <span style={{fontSize:14}}>{open?"▲":"▼"}</span></div>
      <div style={{fontSize:11,color:"#6b7280",marginTop:4}}>10일 이상 · 13일 미만</div>
     </button>
-    {open&&<div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:10}}>{candidates.length?candidates.map(x=><span key={x.order_id} style={{...nicknameStyle,background:immediateNicknames.has(x.nickname.trim().toLowerCase())?"#e5e7eb":"#fff"}}>{x.nickname} <span style={{fontSize:11,fontWeight:600}}>({x.days}일)</span><button type="button" onClick={()=>{const url="https://wyyyes.com/shipping-waiting-user-list";const popup=window.open(url,"ddoga_wise_keep__"+encodeURIComponent(x.nickname));if(!popup){setNotice("와이스 팝업 차단을 해제해줘.");return;}popup.focus();setNotice(x.nickname+"님의 주문을 와이스에서 확인해줘. 실제 전달 완료 전에는 DIRECT 발송완료 처리하지 마.");}} style={{background:"#111827",color:"#fff",border:0,borderRadius:6,padding:"4px 8px",cursor:"pointer"}}>직킵</button></span>):<span style={{fontSize:12}}>대상 없음</span>}</div>}
+    {open&&<div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:10}}>{candidates.length?candidates.map(x=><span key={x.order_id} style={{...nicknameStyle,background:immediateBuyers.has(buyerKey(x))?"#e5e7eb":"#fff"}}>{x.nickname} <span style={{fontSize:11,fontWeight:600}}>({x.days}일)</span><button type="button" onClick={()=>{const url="https://wyyyes.com/shipping-waiting-user-list";const popup=window.open(url,"ddoga_wise_keep__"+encodeURIComponent(x.nickname));if(!popup){setNotice("와이스 팝업 차단을 해제해줘.");return;}popup.focus();setNotice(x.nickname+"님의 주문을 와이스에서 확인해줘. 실제 전달 완료 전에는 DIRECT 발송완료 처리하지 마.");}} style={{background:"#111827",color:"#fff",border:0,borderRadius:6,padding:"4px 8px",cursor:"pointer"}}>직킵</button></span>):<span style={{fontSize:12}}>대상 없음</span>}</div>}
    </div>
    <div style={{border:"1px solid #111827",borderRadius:12,padding:14,background:"#fefce8"}}>
     <div style={{fontSize:13,fontWeight:700}}>수령확인 대기</div>
