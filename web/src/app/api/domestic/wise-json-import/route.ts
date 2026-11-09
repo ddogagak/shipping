@@ -160,43 +160,79 @@ export async function POST(req:Request){
     }
   }
   const byNickname=new Map<string,typeof wiseDomestic>();
+  const byWiseUserId=new Map<string,typeof wiseDomestic>();
   for(const d of wiseDomestic){
     if(asText(d.order_status)==="done"||completedShipping.has(String(d.order_id)))continue;
+    const uid=asText(d.wise_user_id);
+    if(uid)byWiseUserId.set(uid,[...(byWiseUserId.get(uid)??[]),d]);
     const k=key(asText(d.nickname));if(!k)continue;
     byNickname.set(k,[...(byNickname.get(k)??[]),d]);
   }
-  // One selectable phone update per nickname, not one per Wise order (combined orders
-  // otherwise create duplicate update selections for the same DDOGA order).
-  const wiseByNickname=new Map<string,RawOrder>();
+
+  // Stable Wise user ID first. Nickname is only a legacy fallback when no ID exists.
   const sourceSortTime=(o:RawOrder)=>Date.parse(asText(o.updatedAt))||Date.parse(asText(o.createdAt))||0;
+  const latestByWiseUserId=new Map<string,RawOrder>();
+  const latestLegacyByNickname=new Map<string,RawOrder>();
   for(const order of parsed as RawOrder[]){
+    if(!wisePhone(order))continue;
+    const uid=wiseUserId(order);
+    if(uid){
+      const previous=latestByWiseUserId.get(uid);
+      if(!previous||sourceSortTime(order)>sourceSortTime(previous)||
+        (sourceSortTime(order)===sourceSortTime(previous)&&order.id>previous.id)){
+        latestByWiseUserId.set(uid,order);
+      }
+      continue;
+    }
     const nicknameKey=key(asText(order.user?.nickname));
-    if(!nicknameKey||!wisePhone(order))continue;
-    const previous=wiseByNickname.get(nicknameKey);
+    if(!nicknameKey)continue;
+    const previous=latestLegacyByNickname.get(nicknameKey);
     if(!previous||sourceSortTime(order)>sourceSortTime(previous)||
       (sourceSortTime(order)===sourceSortTime(previous)&&order.id>previous.id)){
-      wiseByNickname.set(nicknameKey,order);
+      latestLegacyByNickname.set(nicknameKey,order);
     }
   }
-  const uniqueUpdates=[...wiseByNickname].flatMap(([nicknameKey,order])=>{
-    const targets=(byNickname.get(nicknameKey)??[]).filter(d=>!phoneDigits(d.phone));
-    if(!targets.length)return [];
-    const sourcePhone=wisePhone(order);
-    return [{
-      candidate_id:"nickname:"+nicknameKey,
-      wise_order_id:order.id,
-      order_id:String(targets[0].order_id),
-      order_ids:targets.map(d=>String(d.order_id)),
-      target_count:targets.length,
-      nickname:asText(targets[0].nickname),
-      ordered_at:order.createdAt??null,
-      wise_status:Number(order.status),
-      delivery_company:order.deliveryCompany??null,
-      tracking_number:null,
-      current:{tracking_registered:null,shipping_status:null,order_status:targets[0].order_status??null,phone:targets[0].phone??null},
-      changes:{phone:sourcePhone}
-    }];
-  });
+
+  const uniqueUpdates=[
+    ...[...latestByWiseUserId].flatMap(([uid,order])=>{
+      const targets=(byWiseUserId.get(uid)??[]).filter(d=>!phoneDigits(d.phone));
+      if(!targets.length)return [];
+      return [{
+        candidate_id:"user:"+uid,
+        wise_order_id:order.id,
+        wise_user_id:uid,
+        order_id:String(targets[0].order_id),
+        order_ids:targets.map(d=>String(d.order_id)),
+        target_count:targets.length,
+        nickname:asText(order.user?.nickname)||asText(targets[0].nickname),
+        ordered_at:order.createdAt??null,
+        wise_status:Number(order.status),
+        delivery_company:order.deliveryCompany??null,
+        tracking_number:null,
+        current:{tracking_registered:null,shipping_status:null,order_status:targets[0].order_status??null,phone:targets[0].phone??null},
+        changes:{phone:wisePhone(order)}
+      }];
+    }),
+    ...[...latestLegacyByNickname].flatMap(([nicknameKey,order])=>{
+      const targets=(byNickname.get(nicknameKey)??[]).filter(d=>!asText(d.wise_user_id)&&!phoneDigits(d.phone));
+      if(!targets.length)return [];
+      return [{
+        candidate_id:"nickname:"+nicknameKey,
+        wise_order_id:order.id,
+        wise_user_id:null,
+        order_id:String(targets[0].order_id),
+        order_ids:targets.map(d=>String(d.order_id)),
+        target_count:targets.length,
+        nickname:asText(targets[0].nickname),
+        ordered_at:order.createdAt??null,
+        wise_status:Number(order.status),
+        delivery_company:order.deliveryCompany??null,
+        tracking_number:null,
+        current:{tracking_registered:null,shipping_status:null,order_status:targets[0].order_status??null,phone:targets[0].phone??null},
+        changes:{phone:wisePhone(order)}
+      }];
+    })
+  ];
   if(mode==="apply_updates"){
     const chosen:unknown=JSON.parse(asText(form.get("selected_ids"))||"[]");
     if(!Array.isArray(chosen)||chosen.length>200||!chosen.every(x=>typeof x==="string")||new Set(chosen).size!==chosen.length)
@@ -209,12 +245,13 @@ export async function POST(req:Request){
       const expected=phoneDigits(c.changes.phone);
       const ids=c.order_ids;
       const {data:current,error:lookupError}=await db.from("domestic_order")
-        .select("order_id,nickname,platform,order_status,phone")
+        .select("order_id,nickname,wise_user_id,platform,order_status,phone")
         .in("order_id",ids);
       if(lookupError)error="주문 재조회 실패: "+lookupError.message;
       else if(!current||current.length!==ids.length||
-        current.some(d=>d.platform!=="wise"||key(asText(d.nickname))!==key(c.nickname)))
-        error="닉네임이 일치하는 기존 DDOGA 주문을 정확히 찾지 못했어.";
+        current.some(d=>d.platform!=="wise"||
+          (c.wise_user_id?asText(d.wise_user_id)!==asText(c.wise_user_id):key(asText(d.nickname))!==key(c.nickname))))
+        error=c.wise_user_id?"Wise 사용자 ID가 일치하는 기존 DDOGA 주문을 정확히 찾지 못했어.":"닉네임이 일치하는 기존 DDOGA 주문을 정확히 찾지 못했어.";
       else if(current.some(d=>asText(d.order_status)==="done"||Boolean(phoneDigits(d.phone))))
         error="선택한 주문 중 완료 상태이거나 이미 전화번호가 있는 주문이 있어. 미리보기를 다시 실행해 줘.";
       if(!error){
@@ -255,7 +292,7 @@ export async function POST(req:Request){
       failed:results.filter(x=>!x.ok).length
     });
   }
-  if(mode==="preview")return NextResponse.json({ok:true,total:rows.length,excluded_count:parsed.length-orders.length,new_orders:rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued).map(({order,...x})=>x),possible_existing:rows.filter(x=>x.existingDomestic).map(({order,...x})=>x),already_queued:rows.filter(x=>x.alreadyQueued).length,update_candidates:uniqueUpdates,queued_orders:rows.filter(x=>x.alreadyQueued).map(({order,...x})=>x),notice:"닉네임별 전화번호 추가 후보만 한 번씩 표시합니다. 선택하면 해당 닉네임의 미완료 DDOGA 주문 중 번호가 빈 주문에만 저장합니다."});
+  if(mode==="preview")return NextResponse.json({ok:true,total:rows.length,excluded_count:parsed.length-orders.length,new_orders:rows.filter(x=>!x.existingDomestic&&!x.alreadyQueued).map(({order,...x})=>x),possible_existing:rows.filter(x=>x.existingDomestic).map(({order,...x})=>x),already_queued:rows.filter(x=>x.alreadyQueued).length,update_candidates:uniqueUpdates,queued_orders:rows.filter(x=>x.alreadyQueued).map(({order,...x})=>x),notice:"Wise 사용자 ID 기준으로 전화번호 후보를 묶고, ID가 없는 과거 주문만 닉네임으로 보조 매칭합니다."});
   if(mode!=="save")return NextResponse.json({error:"Invalid mode"},{status:400});
   // Keep a financial snapshot for every order in the Wise export, including completed statuses.
   const importedAt=new Date().toISOString();
@@ -332,7 +369,7 @@ export async function POST(req:Request){
    if(checkError)throw new Error("와이스 자동연결 충돌 조회 실패: "+checkError.message);
    if(existing?.length)continue;
    const {error:insertError}=await db.from("domestic_wise_order_link")
-    .insert({wise_order_id:wiseRow.wise_order_id,domestic_order_id:domesticId});
+    .insert({wise_order_id:wiseRow.wise_order_id,domestic_order_id:domesticId,wise_user_id:wiseRow.wise_user_id??null});
    if(insertError)throw new Error("와이스 자동연결 저장 실패: "+insertError.message);
    linkedWiseIds.add(wiseRow.wise_order_id);
    linkedDomesticIds.add(domesticId);
@@ -353,12 +390,21 @@ export async function POST(req:Request){
    const linkedIds=(links||[]).map(x=>x.wise_order_id);
    if(!linkedIds.length)continue;
    const {data:latest,error:latestError}=await db.from("domestic_wise_sales_order")
-    .select("buyer_nickname,ordered_at").in("wise_order_id",linkedIds).order("ordered_at",{ascending:false}).limit(1);
+    .select("buyer_nickname,wise_user_id,ordered_at").in("wise_order_id",linkedIds).order("ordered_at",{ascending:false}).limit(1);
    if(latestError)throw new Error("최신 와이스 닉네임 조회 실패: "+latestError.message);
    const currentNickname=asText(latest?.[0]?.buyer_nickname);
-   if(currentNickname){
-    const {error:nickError}=await db.from("domestic_order").update({nickname:currentNickname}).eq("order_id",domesticId).eq("platform","wise");
-    if(nickError)throw new Error("와이스 닉네임 동기화 실패: "+nickError.message);
+   const currentWiseUserId=asText(latest?.[0]?.wise_user_id);
+   if(currentNickname||currentWiseUserId){
+    const {error:nickError}=await db.from("domestic_order").update({
+     ...(currentNickname?{nickname:currentNickname}:{}),
+     ...(currentWiseUserId?{wise_user_id:currentWiseUserId}:{})
+    }).eq("order_id",domesticId).eq("platform","wise");
+    if(nickError)throw new Error("와이스 사용자 정보 동기화 실패: "+nickError.message);
+    if(currentWiseUserId){
+     const {error:linkUidError}=await db.from("domestic_wise_order_link")
+      .update({wise_user_id:currentWiseUserId}).eq("domestic_order_id",domesticId).is("wise_user_id",null);
+     if(linkUidError)throw new Error("와이스 사용자 ID 링크 저장 실패: "+linkUidError.message);
+    }
    }
   }
   // Refresh WYYYES-only shipping snapshots and item metadata without changing shipping state.
