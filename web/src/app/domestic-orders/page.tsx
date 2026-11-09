@@ -23,6 +23,7 @@ type DomesticOrder = {
   source_order_dates: string[] | null;
   first_order_date: string | null;
   nickname: string | null;
+  wise_user_id: string | null;
   recipient_name: string | null;
   phone: string | null;
   postal_code: string | null;
@@ -1218,7 +1219,7 @@ export default function DomesticOrdersPage() {
         if (data?.type === "DDOGA_WISE_SHIP_READY" && stage === "ready") {
           stage = "preview";
           popup.postMessage({type:"DDOGA_WISE_SHIP_PREVIEW_REQUEST",orders:[{
-            order_id:row.order_id,nickname:row.nickname,tracking_number:trackingNumber
+            order_id:row.order_id,nickname:row.nickname,wise_user_id:row.wise_user_id,tracking_number:trackingNumber
           }]},"https://wyyyes.com");
         } else if (data?.type === "DDOGA_WISE_SHIP_PREVIEW" && stage === "preview") {
           const match = (data.matches || []).find((x:{order_id:string}) => x.order_id === row.order_id);
@@ -1307,7 +1308,7 @@ export default function DomesticOrdersPage() {
           type: "DDOGA_WISE_PREP_REQUEST_V245",
           token,
           instance: wiseInstance,
-          orders: waiting.map(row => ({order_id:row.order_id,nickname:row.nickname}))
+          orders: waiting.map(row => ({order_id:row.order_id,nickname:row.nickname,wise_user_id:row.wise_user_id}))
         }, "https://wyyyes.com");
       } else if (msg.type === "DDOGA_WISE_PREP_RECONNECT" && phase === "processing") {
         if (msg.instance !== wiseInstance) return;
@@ -1441,8 +1442,8 @@ export default function DomesticOrdersPage() {
               setMessage("전체 Y등록: 연결됨 · 와이스 주문 조회 중...");
               resetTimeout();
               popup.postMessage({type:"DDOGA_WISE_SHIP_PREVIEW_REQUEST",orders:wiseRows.map(row => ({
-                order_id:row.order_id, nickname:row.nickname,
-                tracking_number:String(shipping(row)?.tracking_number || "").trim()
+                order_id:row.order_id, nickname:row.nickname, wise_user_id:row.wise_user_id,
+                 tracking_number:String(shipping(row)?.tracking_number || "").trim()
               }))}, "https://wyyyes.com");
             } else if (data?.type === "DDOGA_WISE_SHIP_PROGRESS") {
               resetTimeout();
@@ -1859,7 +1860,7 @@ export default function DomesticOrdersPage() {
           </div>
         </div>
 
-        <WiseDeadlineBoard orders={rows.map(row => ({order_id:row.order_id,nickname:row.nickname || "",platform:row.platform,first_order_date:row.first_order_date,order_status:row.order_status,request_status:row.request_status,tracking_registered:Boolean(shipping(row)?.tracking_registered)}))} />
+        <WiseDeadlineBoard orders={rows.map(row => ({order_id:row.order_id,nickname:row.nickname || "",wise_user_id:row.wise_user_id,platform:row.platform,first_order_date:row.first_order_date,order_status:row.order_status,request_status:row.request_status,tracking_registered:Boolean(shipping(row)?.tracking_registered)}))} />
       </section>
 
       <section style={checkBoardStyle}>
