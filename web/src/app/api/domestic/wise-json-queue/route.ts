@@ -43,7 +43,7 @@ async function processOne(wise_order_id: number, action: "approve"|"ignore", cac
     return sameBuyer&&[o.first_order_date,...(Array.isArray(o.source_order_dates)?o.source_order_dates:[])].some(d=>dateKey(d)===dateKey(date));
    });
   if(duplicate)return NextResponse.json({error:"기존 주문 중복 가능: "+duplicate.order_id},{status:409});
-  const {error:ie}=await db.from("domestic_order").insert({order_id:id,customer_order_no:customerNo,platform:"wise",wise_user_id:q.wise_user_id??null,source_order_dates:[date],first_order_date:date,nickname:recipient_name:q.receiver_name,phone:/\d/.test(q.receiver_phone??"")?q.receiver_phone:null,postal_code:q.postal_code,address:q.address,order_count:1,item_summary:q.item_summary,item_total_price:q.item_total_price,order_status:"accepted"});
+  const {error:ie}=await db.from("domestic_order").insert({order_id:id,customer_order_no:customerNo,platform:"wise",wise_user_id:q.wise_user_id??null,source_order_dates:[date],first_order_date:date,nickname,recipient_name:q.receiver_name,phone:/\d/.test(q.receiver_phone??"")?q.receiver_phone:null,postal_code:q.postal_code,address:q.address,order_count:1,item_summary:q.item_summary,item_total_price:q.item_total_price,order_status:"accepted"});
   if(ie)throw ie;
   const {error:se}=await db.from("domestic_shipping").insert({order_id:id,carrier:"우체국택배",shipping_type:"일반택배",tracking_number:null,shipping_status:"start"});
   if(se)throw new Error("주문 등록됨, 배송정보 저장 실패: "+se.message);
