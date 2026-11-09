@@ -76,6 +76,7 @@ export async function GET(req: Request) {
       source_order_dates,
       first_order_date,
       nickname,
+      wise_user_id,
       recipient_name,
       phone,
       postal_code,
@@ -709,6 +710,7 @@ export async function PATCH(req: Request) {
         source_order_dates,
         first_order_date,
         nickname,
+        wise_user_id,
         recipient_name,
         phone,
         postal_code,
@@ -761,11 +763,20 @@ export async function PATCH(req: Request) {
     // the only reliable path to its item photos after the merge.
     const mergeOrderIds = activeOrders.map((order: any) => order.order_id);
     const mergeNicknames = [...new Set(activeOrders.map((order: any) => String(order.nickname || "").trim()).filter(Boolean))];
-    const { data: reviewedWise, error: reviewedWiseError } = await supabase
+    const mergeWiseUserIds = [...new Set(activeOrders.map((order: any) => String(order.wise_user_id || "").trim()).filter(Boolean))];
+    if (mergeWiseUserIds.length > 1) {
+      return NextResponse.json({
+        error: "서로 다른 Wise 사용자 ID의 주문은 합배송할 수 없어.",
+        detail: mergeWiseUserIds.join(", "),
+      }, { status: 409 });
+    }
+    const reviewedWiseBase = supabase
       .from("domestic_wise_import_queue")
-      .select("wise_order_id,buyer_nickname,ordered_at")
-      .eq("review_status", "reviewed")
-      .in("buyer_nickname", mergeNicknames);
+      .select("wise_order_id,buyer_nickname,wise_user_id,ordered_at")
+      .eq("review_status", "reviewed");
+    const { data: reviewedWise, error: reviewedWiseError } = mergeWiseUserIds.length === 1
+      ? await reviewedWiseBase.eq("wise_user_id", mergeWiseUserIds[0])
+      : await reviewedWiseBase.in("buyer_nickname", mergeNicknames);
     if (reviewedWiseError) return NextResponse.json({ error: "합배송 전 와이스 주문 검증 실패", detail: reviewedWiseError.message }, { status: 500 });
     const { data: mergeWiseLinks, error: mergeWiseLinksError } = await supabase
       .from("domestic_wise_order_link").select("wise_order_id,domestic_order_id")
@@ -846,12 +857,14 @@ export async function PATCH(req: Request) {
     if(linkedWiseError)return NextResponse.json({error:"와이스 주문 연결 조회 실패",detail:linkedWiseError.message},{status:500});
     const wiseIds=(linkedWiseOrders||[]).map((link:any)=>Number(link.wise_order_id));
     let currentWiseNickname=String(latest.nickname||"").trim();
+    let currentWiseUserId=mergeWiseUserIds[0] || String(latest.wise_user_id||base.wise_user_id||"").trim();
     if(wiseIds.length){
       const {data:wiseSales,error:wiseSalesError}=await supabase
-        .from("domestic_wise_sales_order").select("wise_order_id,buyer_nickname,ordered_at")
+        .from("domestic_wise_sales_order").select("wise_order_id,buyer_nickname,wise_user_id,ordered_at")
         .in("wise_order_id",wiseIds).order("ordered_at",{ascending:false}).limit(1);
-      if(wiseSalesError)return NextResponse.json({error:"와이스 최신 닉네임 조회 실패",detail:wiseSalesError.message},{status:500});
+      if(wiseSalesError)return NextResponse.json({error:"와이스 최신 사용자 정보 조회 실패",detail:wiseSalesError.message},{status:500});
       currentWiseNickname=String(wiseSales?.[0]?.buyer_nickname||currentWiseNickname).trim();
+      currentWiseUserId=String(wiseSales?.[0]?.wise_user_id||currentWiseUserId).trim();
     }
 
     const orderNos = sorted.map((order: any) =>
@@ -928,6 +941,7 @@ export async function PATCH(req: Request) {
       .update({
         customer_order_no: finalCustomerOrderNo,
         nickname: currentWiseNickname || base.nickname,
+        wise_user_id: currentWiseUserId || null,
       
         // 합배송 배송정보:
         // 주소/수령인은 최신 주문 기준,
