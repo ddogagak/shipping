@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DDOGA Wise shipping bridge
 // @namespace    https://www.ddoga.lol/
-// @version      2.4.12
+// @version      2.4.13
 // @updateURL    https://www.ddoga.lol/ddoga-wise-shipping.user.js
 // @downloadURL  https://www.ddoga.lol/ddoga-wise-shipping.user.js
 // @match        https://wyyyes.com/*
@@ -27,8 +27,8 @@
 
   // raw(page) 컨텍스트: Firefox 모바일의 cross-realm fetch/XHR 충돌 방지.
   const page = window;
-  if (page.__DDOGA_WISE_SHIP_V2412__) return;
-  page.__DDOGA_WISE_SHIP_V2412__ = true;
+  if (page.__DDOGA_WISE_SHIP_V2413__) return;
+  page.__DDOGA_WISE_SHIP_V2413__ = true;
 
   const hasOpener = () => {
     try { return Boolean(window.opener && !window.opener.closed); }
@@ -49,6 +49,25 @@
   let activePrepToken = '';
   let prepPostedVirtualNumber = false;
   let prepReconnectRequested = false;
+
+  // 배송기한 스냅샷 인증 만료 자동복구
+  let activeSnapshotRequest = false;
+  let snapshotReconnectRequested = false;
+  let snapshotResumeBusy = false;
+  const SNAPSHOT_RESUME_KEY = "ddoga:wise:snapshot-resume:v1";
+
+  const markSnapshotResume = () => {
+    try { sessionStorage.setItem(SNAPSHOT_RESUME_KEY, "1"); } catch (_) {}
+  };
+
+  const clearSnapshotResume = () => {
+    try { sessionStorage.removeItem(SNAPSHOT_RESUME_KEY); } catch (_) {}
+  };
+
+  const hasSnapshotResume = () => {
+    try { return sessionStorage.getItem(SNAPSHOT_RESUME_KEY) === "1"; }
+    catch (_) { return false; }
+  };
   // 와이스 앱에서 이미 받은 정상 미발송 목록을 재사용한다.
   // 앱 응답을 변경하지 않으며, 오래된 캐시는 사용하지 않는다.
   let buyerListCache = null;
@@ -120,7 +139,7 @@
 
   function diagnostic() {
     return (
-      "DDOGA 2.4.12 · " + phase + "\n" +
+      "DDOGA 2.4.13 · " + phase + "\n" +
       "요청 감지 " + apiSeen +
       " · 인증 " +
       (
@@ -203,6 +222,7 @@
     if (value && String(value) !== authHeader) {
       authHeader = String(value);
       authVersion++;
+      maybeResumeSnapshot();
     }
     paint();
   }
@@ -210,7 +230,11 @@
   // 와이스 앱이 첫 API를 호출하기 전(document-start)에 감지 설치.
   // 2.4.0의 load+1000ms 설치는 초기 Authorization 요청을 놓치는 원인이었음.
   // 일반 와이스 탭에서는 fetch / XMLHttpRequest를 변경하지 않음.
+  let hooksInstalled = false;
+
   function installHooks() {
+    if (hooksInstalled) return;
+
     if (!hasOpener()) {
       phase = "일반 와이스 탭 · 연결 대기";
       hookMode = "사용 안 함";
@@ -288,6 +312,7 @@
         return Reflect.apply(originalSetHeader, this, arguments);
       };
 
+      hooksInstalled = true;
       hookMode = "활성";
       phase = "와이스 연결 준비";
     } catch (error) {
@@ -320,6 +345,25 @@
     } catch (_) {}
   };
 
+  function maybeResumeSnapshot() {
+    if (
+      !hasSnapshotResume() ||
+      snapshotResumeBusy ||
+      !hasOpener() ||
+      !authHeader
+    ) {
+      return;
+    }
+
+    snapshotResumeBusy = true;
+
+    setTimeout(() => {
+      void snapshot(true).finally(() => {
+        snapshotResumeBusy = false;
+      });
+    }, 350);
+  }
+
   async function waitForAuth(previousVersion, timeout = 45000) {
     send("DDOGA_WISE_SHIP_PROGRESS", {
       message:
@@ -340,7 +384,7 @@
     paint();
 
     throw Error(
-      "[2.4.12] 인증 미감지 · 페이지 요청 " +
+      "[2.4.13] 인증 미감지 · 페이지 요청 " +
       apiSeen +
       "건" +
       (hookError ? " · Firefox 페이지 연결 실패" : "") +
@@ -432,6 +476,33 @@
       if (authHeader && authVersion > version) {
         result = await attempt();
       }
+      if (result.response.status === 401 && activeSnapshotRequest) {
+        const method = String(options.method || "GET").toUpperCase();
+
+        if (method === "GET") {
+          if (!snapshotReconnectRequested) {
+            snapshotReconnectRequested = true;
+            markSnapshotResume();
+            phase = "배송기한 인증 갱신 중 · 와이스 자동 새로고침";
+
+            send("DDOGA_WISE_SHIP_PROGRESS", {
+              message: "배송기한 인증이 만료돼 와이스를 자동 새로고침하고 다시 조회할게."
+            });
+
+            setTimeout(() => {
+              try { window.location.reload(); }
+              catch (error) {
+                console.warn("[DDOGA WISE] 배송기한 인증 새로고침 실패:", error);
+              }
+            }, 180);
+          }
+
+          const error = new Error("배송기한 인증 자동 갱신 중");
+          error.ddogaSnapshotReconnect = true;
+          throw error;
+        }
+      }
+
       if (result.response.status === 401 && activePrepToken) {
         const method = String(options.method || "GET").toUpperCase();
         if (method === "GET" && !prepPostedVirtualNumber) {
@@ -1484,7 +1555,14 @@
   }
 
   // 구매자 및 주문 상태 조회
-  async function snapshot() {
+  async function snapshot(resuming = false) {
+    activeSnapshotRequest = true;
+
+    if (!resuming) {
+      snapshotReconnectRequested = false;
+      clearSnapshotResume();
+    }
+
     try {
       const list = await request(
         "/r0.app/sellers/myMarket/buyers/undeliveredUsers"
@@ -1541,14 +1619,26 @@
         }
       }
 
+      clearSnapshotResume();
+      snapshotReconnectRequested = false;
+
       send("DDOGA_WISE_SNAPSHOT_RESULT", {
         records
       });
     } catch (error) {
+      if (error?.ddogaSnapshotReconnect) {
+        return;
+      }
+
+      clearSnapshotResume();
+      snapshotReconnectRequested = false;
+
       send("DDOGA_WISE_SNAPSHOT_RESULT", {
         records: [],
         error: String(error.message || error)
       });
+    } finally {
+      activeSnapshotRequest = false;
     }
   }
 
@@ -1949,7 +2039,7 @@
     }
 
     if (event.data?.type === "DDOGA_WISE_PREP_PING") {
-      send("DDOGA_WISE_PREP_READY", {token:event.data.token, version:"2.4.12", instance:pageInstance});
+      send("DDOGA_WISE_PREP_READY", {token:event.data.token, version:"2.4.13", instance:pageInstance});
     }
 
     // 2.4.5 전용 명령: 구버전 스크립트가 같이 켜져 있어도 중복 발급을 요청받지 않는다.
@@ -1962,7 +2052,12 @@
       event.data?.type ===
       "DDOGA_WISE_SHIP_PING"
     ) {
+      if (!hooksInstalled && hasOpener()) {
+        installHooks();
+      }
+
       ready();
+      maybeResumeSnapshot();
     }
 
     if (
@@ -1983,17 +2078,28 @@
       event.data?.type ===
       "DDOGA_WISE_SNAPSHOT_REQUEST"
     ) {
-      void snapshot();
+      if (!hooksInstalled && hasOpener()) {
+        installHooks();
+      }
+
+      void snapshot(false);
     }
   });
 
   const ready = () =>
     send("DDOGA_WISE_SHIP_READY", {
-      version: "2.4.12"
+      version: "2.4.13"
     });
 
-  window.addEventListener("load", ready);
-  window.addEventListener("pageshow", ready);
+  window.addEventListener("load", () => {
+    ready();
+    maybeResumeSnapshot();
+  });
+
+  window.addEventListener("pageshow", () => {
+    ready();
+    maybeResumeSnapshot();
+  });
 
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
