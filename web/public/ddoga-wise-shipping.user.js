@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DDOGA Wise shipping bridge
 // @namespace    https://www.ddoga.lol/
-// @version      2.4.14
+// @version      2.4.15
 // @updateURL    https://www.ddoga.lol/ddoga-wise-shipping.user.js
 // @downloadURL  https://www.ddoga.lol/ddoga-wise-shipping.user.js
 // @match        https://wyyyes.com/*
@@ -27,8 +27,8 @@
 
   // raw(page) 컨텍스트: Firefox 모바일의 cross-realm fetch/XHR 충돌 방지.
   const page = window;
-  if (page.__DDOGA_WISE_SHIP_V2414__) return;
-  page.__DDOGA_WISE_SHIP_V2414__ = true;
+  if (page.__DDOGA_WISE_SHIP_V2415__) return;
+  page.__DDOGA_WISE_SHIP_V2415__ = true;
 
   const hasOpener = () => {
     try { return Boolean(window.opener && !window.opener.closed); }
@@ -139,7 +139,7 @@
 
   function diagnostic() {
     return (
-      "DDOGA 2.4.14 · " + phase + "\n" +
+      "DDOGA 2.4.15 · " + phase + "\n" +
       "요청 감지 " + apiSeen +
       " · 인증 " +
       (
@@ -368,6 +368,42 @@
     }, 350);
   }
 
+  async function waitForSnapshotBootstrap(timeout = 12000) {
+    const cached = freshBuyerList();
+    if (cached) {
+      return {users: cached, source: "cache"};
+    }
+
+    if (authHeader) {
+      return {users: null, source: "auth"};
+    }
+
+    const until = Date.now() + timeout;
+
+    send("DDOGA_WISE_SNAPSHOT_PROGRESS", {
+      message: "새 와이스 페이지 준비 중 · 인증/구매자 목록 대기..."
+    });
+
+    while (Date.now() < until) {
+      const current = freshBuyerList();
+
+      if (current) {
+        return {users: current, source: "cache"};
+      }
+
+      if (authHeader) {
+        return {users: null, source: "auth"};
+      }
+
+      await wait(200);
+    }
+
+    throw Error(
+      "새 와이스 페이지에서 12초 동안 인증 또는 구매자 목록이 준비되지 않았어. " +
+      "와이스 화면이 완전히 뜬 뒤 다시 새로고침해줘."
+    );
+  }
+
   async function waitForAuth(previousVersion, timeout = 45000) {
     send("DDOGA_WISE_SHIP_PROGRESS", {
       message:
@@ -388,7 +424,7 @@
     paint();
 
     throw Error(
-      "[2.4.14] 인증 미감지 · 페이지 요청 " +
+      "[2.4.15] 인증 미감지 · 페이지 요청 " +
       apiSeen +
       "건" +
       (hookError ? " · Firefox 페이지 연결 실패" : "") +
@@ -1571,14 +1607,31 @@
       send("DDOGA_WISE_SNAPSHOT_PROGRESS", {
         message: resuming
           ? "배송기한 인증 복구 완료 · 구매자 목록 다시 조회 중..."
-          : "배송기한 구매자 목록 조회 중..."
+          : "배송기한 구매자 목록 준비 중..."
       });
 
-      const list = await request(BUYER_LIST_PATH);
+      const bootstrap = await waitForSnapshotBootstrap();
 
-      const users = Array.isArray(list.result)
-        ? list.result
-        : [];
+      let users = bootstrap.users;
+
+      if (!users) {
+        send("DDOGA_WISE_SNAPSHOT_PROGRESS", {
+          message: "인증 확인 완료 · 배송기한 구매자 목록 조회 중..."
+        });
+
+        const list = await request(BUYER_LIST_PATH);
+
+        users = Array.isArray(list.result)
+          ? list.result
+          : [];
+      } else {
+        send("DDOGA_WISE_SNAPSHOT_PROGRESS", {
+          message:
+            "와이스 화면 구매자 목록 " +
+            users.length +
+            "명 재사용 · API 중복 조회 생략"
+        });
+      }
 
       const records = new Array(users.length);
       let nextIndex = 0;
@@ -2104,7 +2157,7 @@
     }
 
     if (event.data?.type === "DDOGA_WISE_PREP_PING") {
-      send("DDOGA_WISE_PREP_READY", {token:event.data.token, version:"2.4.14", instance:pageInstance});
+      send("DDOGA_WISE_PREP_READY", {token:event.data.token, version:"2.4.15", instance:pageInstance});
     }
 
     // 2.4.5 전용 명령: 구버전 스크립트가 같이 켜져 있어도 중복 발급을 요청받지 않는다.
@@ -2153,7 +2206,7 @@
 
   const ready = () =>
     send("DDOGA_WISE_SHIP_READY", {
-      version: "2.4.14"
+      version: "2.4.15"
     });
 
   window.addEventListener("load", () => {
