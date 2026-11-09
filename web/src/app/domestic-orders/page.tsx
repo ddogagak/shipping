@@ -1380,7 +1380,11 @@ export default function DomesticOrdersPage() {
 
   async function registerSelectedTracking() {
     if (registrationLock.current || savingRowId) return;
-    const pending = selectedRows.filter(row => !shipping(row)?.tracking_registered);
+    const pending = selectedRows.filter(row =>
+      !shipping(row)?.tracking_registered &&
+      String(row.order_status || "") !== "done" &&
+      String(shipping(row)?.shipping_status || "") !== "done"
+    );
     const targets = pending.filter(row => String(shipping(row)?.tracking_number || "").trim());
     if (!targets.length) {
       setMessage("체크한 주문 중 송장번호가 있는 등록 N 주문이 없어.");
