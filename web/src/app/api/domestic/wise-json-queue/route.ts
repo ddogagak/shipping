@@ -7,7 +7,7 @@ export async function GET() {
  return error ? NextResponse.json({error:error.message},{status:500}) : NextResponse.json({orders:data??[]});
 }
 
-type WiseExistingOrder={order_id:string;nickname:string|null;platform:string|null;first_order_date:string|null;source_order_dates:unknown};
+type WiseExistingOrder={order_id:string;nickname:string|null;wise_user_id:string|null;platform:string|null;first_order_date:string|null;source_order_dates:unknown};
 async function processOne(wise_order_id: number, action: "approve"|"ignore", cachedOrders?:WiseExistingOrder[]) {
  try {
   if(!Number.isSafeInteger(wise_order_id)||!["approve","ignore"].includes(action))return NextResponse.json({error:"잘못된 요청"},{status:400});
@@ -30,15 +30,20 @@ async function processOne(wise_order_id: number, action: "approve"|"ignore", cac
   if(existing)return NextResponse.json({error:"이미 등록된 주문"},{status:409});
   let orders=cachedOrders;
   if(!orders){
-   const result=await db.from("domestic_order").select("order_id,nickname,platform,first_order_date,source_order_dates").eq("platform","wise");
+   const result=await db.from("domestic_order").select("order_id,nickname,wise_user_id,platform,first_order_date,source_order_dates").eq("platform","wise");
    if(result.error)throw result.error;
    orders=(result.data??[]) as WiseExistingOrder[];
   }
   const norm=(v:unknown)=>String(v??"").normalize("NFKC").replace(/\s+/g,"").toLowerCase();
   const dateKey=(v:unknown)=>{const s=String(v??"");const m=s.match(/(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})[ T/]+(\d{1,2}):(\d{1,2})/);return m?[m[1],m[2].padStart(2,"0"),m[3].padStart(2,"0")].join("-")+" "+m[4].padStart(2,"0")+":"+m[5]:""};
-  const duplicate=(orders??[]).find(o=>norm(o.nickname)===norm(q.buyer_nickname)&&[o.first_order_date,...(Array.isArray(o.source_order_dates)?o.source_order_dates:[])].some(d=>dateKey(d)===dateKey(date)));
+  const duplicate=(orders??[]).find(o=>{
+    const sameBuyer=q.wise_user_id
+      ? String(o.wise_user_id||"")===String(q.wise_user_id)
+      : norm(o.nickname)===norm(q.buyer_nickname);
+    return sameBuyer&&[o.first_order_date,...(Array.isArray(o.source_order_dates)?o.source_order_dates:[])].some(d=>dateKey(d)===dateKey(date));
+   });
   if(duplicate)return NextResponse.json({error:"기존 주문 중복 가능: "+duplicate.order_id},{status:409});
-  const {error:ie}=await db.from("domestic_order").insert({order_id:id,customer_order_no:customerNo,platform:"wise",source_order_dates:[date],first_order_date:date,nickname,recipient_name:q.receiver_name,phone:/\d/.test(q.receiver_phone??"")?q.receiver_phone:null,postal_code:q.postal_code,address:q.address,order_count:1,item_summary:q.item_summary,item_total_price:q.item_total_price,order_status:"accepted"});
+  const {error:ie}=await db.from("domestic_order").insert({order_id:id,customer_order_no:customerNo,platform:"wise",wise_user_id:q.wise_user_id??null,source_order_dates:[date],first_order_date:date,nickname:recipient_name:q.receiver_name,phone:/\d/.test(q.receiver_phone??"")?q.receiver_phone:null,postal_code:q.postal_code,address:q.address,order_count:1,item_summary:q.item_summary,item_total_price:q.item_total_price,order_status:"accepted"});
   if(ie)throw ie;
   const {error:se}=await db.from("domestic_shipping").insert({order_id:id,carrier:"우체국택배",shipping_type:"일반택배",tracking_number:null,shipping_status:"start"});
   if(se)throw new Error("주문 등록됨, 배송정보 저장 실패: "+se.message);
@@ -48,11 +53,11 @@ async function processOne(wise_order_id: number, action: "approve"|"ignore", cac
    const {error:it}=await db.from("domestic_order_item").insert(items.map(x=>({order_id:id,item_text:x.item_name,price:x.item_price})));
    if(it)throw new Error("주문 등록됨, 상품정보 저장 실패: "+it.message);
   }
-  const {error:linkError}=await db.from("domestic_wise_order_link").upsert({wise_order_id,domestic_order_id:id},{onConflict:"wise_order_id"});
+  const {error:linkError}=await db.from("domestic_wise_order_link").upsert({wise_order_id,domestic_order_id:id,wise_user_id:q.wise_user_id??null},{onConflict:"wise_order_id"});
   if(linkError)throw new Error("주문 등록됨, 와이스 ID 연결 실패: "+linkError.message);
   const {error:re}=await db.from("domestic_wise_import_queue").update({review_status:"reviewed"}).eq("wise_order_id",wise_order_id);
   if(re)throw new Error("주문 등록됨, 대기열 상태 저장 실패: "+re.message);
-  if(cachedOrders)cachedOrders.push({order_id:id,nickname,platform:"wise",first_order_date:date,source_order_dates:[date]});
+  if(cachedOrders)cachedOrders.push({order_id:id,nickname,wise_user_id:q.wise_user_id??null,platform:"wise",first_order_date:date,source_order_dates:[date]});
   return NextResponse.json({ok:true,order_id:id});
  }catch(e){return NextResponse.json({error:e instanceof Error?e.message:"저장 실패"},{status:500})}
 }
@@ -65,7 +70,7 @@ export async function POST(req: Request) {
    if(!Array.isArray(ids)||ids.length>40||ids.length===0||!ids.every(Number.isSafeInteger)||new Set(ids).size!==ids.length)
     return NextResponse.json({error:"1~40개 중복 없는 주문 ID가 필요합니다."},{status:400});
    const db=createServiceRoleClient();
-   const {data:existingOrders,error:existingError}=await db.from("domestic_order").select("order_id,nickname,platform,first_order_date,source_order_dates").eq("platform","wise");
+   const {data:existingOrders,error:existingError}=await db.from("domestic_order").select("order_id,nickname,wise_user_id,platform,first_order_date,source_order_dates").eq("platform","wise");
    if(existingError)throw existingError;
    const cachedOrders=(existingOrders??[]) as WiseExistingOrder[];
    const results=[];
