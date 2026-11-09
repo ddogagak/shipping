@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DDOGA Wise shipping bridge
 // @namespace    https://www.ddoga.lol/
-// @version      2.4.15
+// @version      2.4.16
 // @updateURL    https://www.ddoga.lol/ddoga-wise-shipping.user.js
 // @downloadURL  https://www.ddoga.lol/ddoga-wise-shipping.user.js
 // @match        https://wyyyes.com/*
@@ -27,8 +27,8 @@
 
   // raw(page) 컨텍스트: Firefox 모바일의 cross-realm fetch/XHR 충돌 방지.
   const page = window;
-  if (page.__DDOGA_WISE_SHIP_V2415__) return;
-  page.__DDOGA_WISE_SHIP_V2415__ = true;
+  if (page.__DDOGA_WISE_SHIP_V2416__) return;
+  page.__DDOGA_WISE_SHIP_V2416__ = true;
 
   const hasOpener = () => {
     try { return Boolean(window.opener && !window.opener.closed); }
@@ -77,6 +77,9 @@
     if (!Array.isArray(json?.result)) return;
     buyerListCache = json.result;
     buyerListTime = Date.now();
+
+    // 배송기한 자동 재연결 중이면 와이스 앱의 실제 목록 응답을 잡는 즉시 이어서 실행.
+    maybeResumeSnapshot();
   };
   const freshBuyerList = () =>
     buyerListCache && (Date.now() - buyerListTime < 60000) ? buyerListCache : null;
@@ -139,7 +142,7 @@
 
   function diagnostic() {
     return (
-      "DDOGA 2.4.15 · " + phase + "\n" +
+      "DDOGA 2.4.16 · " + phase + "\n" +
       "요청 감지 " + apiSeen +
       " · 인증 " +
       (
@@ -368,40 +371,66 @@
     }, 350);
   }
 
-  async function waitForSnapshotBootstrap(timeout = 12000) {
+  async function waitForSnapshotBootstrap(timeout = 8000) {
     const cached = freshBuyerList();
-    if (cached) {
-      return {users: cached, source: "cache"};
-    }
 
-    if (authHeader) {
-      return {users: null, source: "auth"};
+    if (cached) {
+      return {
+        users: cached,
+        source: "cache"
+      };
     }
 
     const until = Date.now() + timeout;
 
     send("DDOGA_WISE_SNAPSHOT_PROGRESS", {
-      message: "새 와이스 페이지 준비 중 · 인증/구매자 목록 대기..."
+      message: "새 와이스 페이지 준비 중 · 와이스 앱의 구매자 목록 응답 대기..."
     });
 
     while (Date.now() < until) {
       const current = freshBuyerList();
 
       if (current) {
-        return {users: current, source: "cache"};
-      }
-
-      if (authHeader) {
-        return {users: null, source: "auth"};
+        return {
+          users: current,
+          source: "cache"
+        };
       }
 
       await wait(200);
     }
 
-    throw Error(
-      "새 와이스 페이지에서 12초 동안 인증 또는 구매자 목록이 준비되지 않았어. " +
-      "와이스 화면이 완전히 뜬 뒤 다시 새로고침해줘."
-    );
+    // 이미 자동 새로고침 후 재개된 상태라면 반복 새로고침하지 않는다.
+    if (hasSnapshotResume()) {
+      throw Error(
+        "와이스 페이지를 새로고침했지만 미발송 구매자 목록 응답을 잡지 못했어. " +
+        "와이스 미발송 목록이 화면에 정상 표시되는지 확인해줘."
+      );
+    }
+
+    // 스냅샷에서는 undeliveredUsers를 직접 호출하지 않는다.
+    // 와이스 앱이 자기 흐름으로 목록을 요청하게 페이지를 한 번만 새로고침한다.
+    snapshotReconnectRequested = true;
+    markSnapshotResume();
+
+    send("DDOGA_WISE_SNAPSHOT_PROGRESS", {
+      message: "와이스 구매자 목록 응답이 없어 페이지를 한 번 새로고침하고 자동 재개할게."
+    });
+
+    setTimeout(() => {
+      try {
+        window.location.reload();
+      } catch (error) {
+        console.warn(
+          "[DDOGA WISE] 배송기한 구매자 목록 새로고침 실패:",
+          error
+        );
+      }
+    }, 180);
+
+    const error = new Error("와이스 구매자 목록 자동 재연결 중");
+    error.ddogaSnapshotReconnect = true;
+    throw error;
   }
 
   async function waitForAuth(previousVersion, timeout = 45000) {
@@ -424,7 +453,7 @@
     paint();
 
     throw Error(
-      "[2.4.15] 인증 미감지 · 페이지 요청 " +
+      "[2.4.16] 인증 미감지 · 페이지 요청 " +
       apiSeen +
       "건" +
       (hookError ? " · Firefox 페이지 연결 실패" : "") +
@@ -1612,26 +1641,16 @@
 
       const bootstrap = await waitForSnapshotBootstrap();
 
-      let users = bootstrap.users;
+      const users = Array.isArray(bootstrap.users)
+        ? bootstrap.users
+        : [];
 
-      if (!users) {
-        send("DDOGA_WISE_SNAPSHOT_PROGRESS", {
-          message: "인증 확인 완료 · 배송기한 구매자 목록 조회 중..."
-        });
-
-        const list = await request(BUYER_LIST_PATH);
-
-        users = Array.isArray(list.result)
-          ? list.result
-          : [];
-      } else {
-        send("DDOGA_WISE_SNAPSHOT_PROGRESS", {
-          message:
-            "와이스 화면 구매자 목록 " +
-            users.length +
-            "명 재사용 · API 중복 조회 생략"
-        });
-      }
+      send("DDOGA_WISE_SNAPSHOT_PROGRESS", {
+        message:
+          "와이스 화면 구매자 목록 " +
+          users.length +
+          "명 재사용 · 목록 API 직접 호출 안 함"
+      });
 
       const records = new Array(users.length);
       let nextIndex = 0;
@@ -2157,7 +2176,7 @@
     }
 
     if (event.data?.type === "DDOGA_WISE_PREP_PING") {
-      send("DDOGA_WISE_PREP_READY", {token:event.data.token, version:"2.4.15", instance:pageInstance});
+      send("DDOGA_WISE_PREP_READY", {token:event.data.token, version:"2.4.16", instance:pageInstance});
     }
 
     // 2.4.5 전용 명령: 구버전 스크립트가 같이 켜져 있어도 중복 발급을 요청받지 않는다.
@@ -2206,7 +2225,7 @@
 
   const ready = () =>
     send("DDOGA_WISE_SHIP_READY", {
-      version: "2.4.15"
+      version: "2.4.16"
     });
 
   window.addEventListener("load", () => {
