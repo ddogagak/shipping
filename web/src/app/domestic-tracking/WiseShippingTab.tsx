@@ -1,6 +1,6 @@
 "use client";
 import {useEffect,useState} from "react";
-type Row={order_id:string;customer_order_no:string;nickname:string;tracking_number:string};
+type Row={order_id:string;customer_order_no:string;nickname:string;wise_user_id?:string|null;tracking_number:string};
 type Match={order_id:string;nickname:string;tracking_number:string;delivery_id:number;cursor_order_chain_id:number;status:string;reason?:string};
 export default function WiseShippingTab(){
  const [rows,setRows]=useState<Row[]>([]),[selected,setSelected]=useState<string[]>([]),[matches,setMatches]=useState<Match[]>([]);
@@ -52,7 +52,7 @@ export default function WiseShippingTab(){
  return <section style={{border:"1px solid #e5e7eb",borderRadius:16,padding:"clamp(10px,3vw,20px)",background:"white"}}>
   <h2 style={{marginTop:0}}>와이스 송장 연동</h2>
   <p style={{fontSize:13,color:"#92400e"}}>모바일에서는 Firefox + 사용자 스크립트 지원 환경이 필요해. 단일 주문만 자동 등록하고 합배송은 제외해.</p>
-  <p style={{color:"#6b7280"}}>ddoga 미등록 송장을 조회하고, 와이스에서 닉네임으로 배송을 찾아 등록해. 와이스 성공 확인 후에만 ddoga 상태를 변경해.</p>
+  <p style={{color:"#6b7280"}}>ddoga 미등록 송장을 조회하고, Wise 사용자 ID를 우선 사용해 배송을 찾고 ID가 없는 과거 주문만 닉네임으로 보조 매칭해. 와이스 성공 확인 후에만 ddoga 상태를 변경해.</p>
   <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
    <button style={btn} onClick={()=>void load()}>대상 새로고침</button>
    <button style={btn} onClick={openWise}>와이스 연결 탭 열기</button>
