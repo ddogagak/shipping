@@ -46,21 +46,14 @@ export async function PATCH(req: Request) {
      String(ship?.tracking_number || "").trim() !== tracking) {
     return NextResponse.json({error:"주문 상태 또는 송장번호가 변경되었습니다. 다시 조회하세요."},{status:409});
   }
-  const {data:updated,error:updateError} = await db.from("domestic_shipping").update({
-    tracking_registered:true,shipping_status:"registered",updated_at:new Date().toISOString()
-  }).eq("order_id",orderId).eq("tracking_number",tracking).eq("tracking_registered",false)
-    .select("order_id");
-  if(updateError) return NextResponse.json({error:"ddoga 상태 저장 실패",detail:updateError.message},{status:500});
-  if(!updated?.length) return NextResponse.json({error:"업데이트 대상이 없습니다. 새로고침 후 확인하세요."},{status:409});
+  if (wiseUserId && order.wise_user_id && String(order.wise_user_id) !== wiseUserId) {
+    return NextResponse.json({
+      error:"기존 Wise 사용자 ID와 확인된 ID가 달라 자동 변경하지 않았습니다.",
+      detail:String(order.wise_user_id)+" != "+wiseUserId
+    },{status:409});
+  }
 
   if (wiseUserId) {
-    if (order.wise_user_id && String(order.wise_user_id) !== wiseUserId) {
-      return NextResponse.json({
-        error:"기존 Wise 사용자 ID와 확인된 ID가 달라 자동 변경하지 않았습니다.",
-        detail:String(order.wise_user_id)+" != "+wiseUserId
-      },{status:409});
-    }
-
     const {error:userError}=await db.from("domestic_order")
       .update({wise_user_id:wiseUserId,updated_at:new Date().toISOString()})
       .eq("order_id",orderId).eq("platform","wise");
@@ -72,6 +65,13 @@ export async function PATCH(req: Request) {
       .or("wise_user_id.is.null,wise_user_id.eq."+wiseUserId);
     if(linkError)return NextResponse.json({error:"Wise 주문 링크 ID 저장 실패",detail:linkError.message},{status:500});
   }
+
+  const {data:updated,error:updateError} = await db.from("domestic_shipping").update({
+    tracking_registered:true,shipping_status:"registered",updated_at:new Date().toISOString()
+  }).eq("order_id",orderId).eq("tracking_number",tracking).eq("tracking_registered",false)
+    .select("order_id");
+  if(updateError) return NextResponse.json({error:"ddoga 상태 저장 실패",detail:updateError.message},{status:500});
+  if(!updated?.length) return NextResponse.json({error:"업데이트 대상이 없습니다. 새로고침 후 확인하세요."},{status:409});
 
   return NextResponse.json({ok:true,order_id:orderId,wise_delivery_id:deliveryId,wise_user_id:wiseUserId||null});
 }
