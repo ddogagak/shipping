@@ -56,6 +56,10 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
     snapshotRequestedRef.current=true;
     popupRef.current?.postMessage({type:"DDOGA_WISE_SNAPSHOT_REQUEST"},"https://wyyyes.com");
    }
+   if(event.data?.type==="DDOGA_WISE_SNAPSHOT_PROGRESS"){
+    const message=String(event.data.message||"배송기한 조회 중...");
+    setNotice(message);
+   }
    if(event.data?.type==="DDOGA_WISE_SNAPSHOT_RESULT"){
     if(snapshotHandledRef.current)return;
     snapshotHandledRef.current=true;
