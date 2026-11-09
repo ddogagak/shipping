@@ -30,13 +30,14 @@ export async function PATCH(req: Request) {
   const orderId = String(body?.order_id || "").trim();
   const tracking = String(body?.tracking_number || "").trim();
   const deliveryId = Number(body?.wise_delivery_id);
+  const wiseUserId = String(body?.wise_user_id || "").trim();
   const success = body?.wise_success === true;
   if (!orderId || !tracking || !success || !Number.isSafeInteger(deliveryId) || deliveryId <= 0) {
     return NextResponse.json({error:"와이스 성공 응답과 배송 식별자가 필요합니다."},{status:400});
   }
   const db = createServiceRoleClient();
   const {data:order,error} = await db.from("domestic_order").select(
-    "order_id,platform,order_status,domestic_shipping(tracking_number,tracking_registered,shipping_status)"
+    "order_id,platform,wise_user_id,order_status,domestic_shipping(tracking_number,tracking_registered,shipping_status)"
   ).eq("order_id",orderId).single();
   if(error || !order) return NextResponse.json({error:"주문을 찾을 수 없습니다.",detail:error?.message},{status:404});
   const ship = shipping(order);
@@ -51,5 +52,26 @@ export async function PATCH(req: Request) {
     .select("order_id");
   if(updateError) return NextResponse.json({error:"ddoga 상태 저장 실패",detail:updateError.message},{status:500});
   if(!updated?.length) return NextResponse.json({error:"업데이트 대상이 없습니다. 새로고침 후 확인하세요."},{status:409});
-  return NextResponse.json({ok:true,order_id:orderId,wise_delivery_id:deliveryId});
+
+  if (wiseUserId) {
+    if (order.wise_user_id && String(order.wise_user_id) !== wiseUserId) {
+      return NextResponse.json({
+        error:"기존 Wise 사용자 ID와 확인된 ID가 달라 자동 변경하지 않았습니다.",
+        detail:String(order.wise_user_id)+" != "+wiseUserId
+      },{status:409});
+    }
+
+    const {error:userError}=await db.from("domestic_order")
+      .update({wise_user_id:wiseUserId,updated_at:new Date().toISOString()})
+      .eq("order_id",orderId).eq("platform","wise");
+    if(userError)return NextResponse.json({error:"Wise 사용자 ID 저장 실패",detail:userError.message},{status:500});
+
+    const {error:linkError}=await db.from("domestic_wise_order_link")
+      .update({wise_user_id:wiseUserId})
+      .eq("domestic_order_id",orderId)
+      .or("wise_user_id.is.null,wise_user_id.eq."+wiseUserId);
+    if(linkError)return NextResponse.json({error:"Wise 주문 링크 ID 저장 실패",detail:linkError.message},{status:500});
+  }
+
+  return NextResponse.json({ok:true,order_id:orderId,wise_delivery_id:deliveryId,wise_user_id:wiseUserId||null});
 }
