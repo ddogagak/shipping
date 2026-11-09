@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DDOGA Wise shipping bridge
 // @namespace    https://www.ddoga.lol/
-// @version      2.4.11
+// @version      2.4.12
 // @updateURL    https://www.ddoga.lol/ddoga-wise-shipping.user.js
 // @downloadURL  https://www.ddoga.lol/ddoga-wise-shipping.user.js
 // @match        https://wyyyes.com/*
@@ -27,8 +27,8 @@
 
   // raw(page) 컨텍스트: Firefox 모바일의 cross-realm fetch/XHR 충돌 방지.
   const page = window;
-  if (page.__DDOGA_WISE_SHIP_V2411__) return;
-  page.__DDOGA_WISE_SHIP_V2411__ = true;
+  if (page.__DDOGA_WISE_SHIP_V2412__) return;
+  page.__DDOGA_WISE_SHIP_V2412__ = true;
 
   const hasOpener = () => {
     try { return Boolean(window.opener && !window.opener.closed); }
@@ -120,7 +120,7 @@
 
   function diagnostic() {
     return (
-      "DDOGA 2.4.11 · " + phase + "\n" +
+      "DDOGA 2.4.12 · " + phase + "\n" +
       "요청 감지 " + apiSeen +
       " · 인증 " +
       (
@@ -340,7 +340,7 @@
     paint();
 
     throw Error(
-      "[2.4.11] 인증 미감지 · 페이지 요청 " +
+      "[2.4.12] 인증 미감지 · 페이지 요청 " +
       apiSeen +
       "건" +
       (hookError ? " · Firefox 페이지 연결 실패" : "") +
@@ -1440,7 +1440,11 @@
           row: {
             order_id: match.order_id,
             tracking_number: match.tracking_number,
-            delivery_id: match.delivery_id
+            delivery_id: match.delivery_id,
+            wise_user_id:
+              match.user_id ||
+              match.wise_user_id ||
+              null
           }
         });
 
@@ -1945,7 +1949,7 @@
     }
 
     if (event.data?.type === "DDOGA_WISE_PREP_PING") {
-      send("DDOGA_WISE_PREP_READY", {token:event.data.token, version:"2.4.7", instance:pageInstance});
+      send("DDOGA_WISE_PREP_READY", {token:event.data.token, version:"2.4.12", instance:pageInstance});
     }
 
     // 2.4.5 전용 명령: 구버전 스크립트가 같이 켜져 있어도 중복 발급을 요청받지 않는다.
@@ -1985,7 +1989,7 @@
 
   const ready = () =>
     send("DDOGA_WISE_SHIP_READY", {
-      version: "2.4.7"
+      version: "2.4.12"
     });
 
   window.addEventListener("load", ready);
