@@ -106,7 +106,51 @@ export async function GET(req: Request) {
     );
   }
 
-  return NextResponse.json({ ok: true, orders: data || [] });
+  const orders = data || [];
+  const wiseOrderIds = orders
+    .filter((row:any) => String(row.platform || "") === "wise")
+    .map((row:any) => String(row.order_id || "").trim())
+    .filter(Boolean);
+  const linksByDomestic = new Map<string, Array<{wise_order_id:number;wise_user_id:string|null}>>();
+  for (let i = 0; i < wiseOrderIds.length; i += 200) {
+    const ids = wiseOrderIds.slice(i, i + 200);
+    const {data:links,error:linkError} = await supabase
+      .from("domestic_wise_order_link")
+      .select("domestic_order_id,wise_order_id,wise_user_id")
+      .in("domestic_order_id", ids);
+    if (linkError) {
+      return NextResponse.json(
+        { error: "와이스 주문 ID 연결 조회 실패", detail: linkError.message },
+        { status: 500 }
+      );
+    }
+    for (const link of links || []) {
+      const id = String(link.domestic_order_id || "");
+      const list = linksByDomestic.get(id) || [];
+      list.push({
+        wise_order_id: Number(link.wise_order_id),
+        wise_user_id: link.wise_user_id ? String(link.wise_user_id) : null,
+      });
+      linksByDomestic.set(id, list);
+    }
+  }
+
+  const enriched = orders.map((row:any) => {
+    if (String(row.platform || "") !== "wise") return row;
+    const links = linksByDomestic.get(String(row.order_id)) || [];
+    const linkedUserIds = [...new Set(
+      links.map(link => String(link.wise_user_id || "").trim()).filter(Boolean)
+    )];
+    return {
+      ...row,
+      wise_user_id: String(row.wise_user_id || "").trim() || (linkedUserIds.length === 1 ? linkedUserIds[0] : null),
+      wise_order_ids: [...new Set(
+        links.map(link => Number(link.wise_order_id)).filter(id => Number.isSafeInteger(id) && id > 0)
+      )],
+    };
+  });
+
+  return NextResponse.json({ ok: true, orders: enriched });
 }
 
 export async function PATCH(req: Request) {
