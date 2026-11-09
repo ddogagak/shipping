@@ -137,6 +137,8 @@ export async function POST(req:Request){
    const mmdd=formatted.slice(5,7)+formatted.slice(8,10);
    const ddogaOrderNo="W"+key(nickname)+"_"+mmdd;
    const dateDigits=formatted.replace(/\D/g,"");
+   const uid=wiseUserId(o);
+   const byUserId=uid?wiseDomestic.filter(d=>asText(d.wise_user_id)===uid).map(d=>String(d.order_id)):[];
    const exactIds=[...new Set([...(domesticByWiseId.get(o.id)??[]),...(domesticByOrderNo.get(orderNumberKey(ddogaOrderNo+"__"+dateDigits))??[])])];
    const byDate=domesticKeys.get(key(nickname)+"|"+formatted)??[];
    const byOrderNo=(domesticByOrderNo.get(orderNumberKey(ddogaOrderNo))??[]).filter(id=>{
@@ -145,7 +147,7 @@ export async function POST(req:Request){
     const dates=[...(Array.isArray(d.source_order_dates)?d.source_order_dates:[]),d.first_order_date].map(domesticDateKey).filter(Boolean);
     return !dates.length || dates.some(value=>value.slice(0,4)===formatted.slice(0,4));
    });
-   const matched_order_ids=[...new Set(exactIds.length?exactIds:[...byDate,...byOrderNo])];
+   const matched_order_ids=[...new Set(exactIds.length?exactIds:(byUserId.length?byUserId:[...byDate,...byOrderNo]))];
    const existingDomestic=matched_order_ids.length>0;
    return {order:o,wise_order_id:o.id,nickname,ordered_at:date,existingDomestic,matched_order_ids,alreadyQueued:queuedIds.has(o.id),items:o.stocks?.length??0};
   });
