@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { buildInventorySku } from "@/lib/inventorySku";
+import { resolveInventoryUnitSalePrice } from "@/lib/pricing";
 
 import { normalizeSeriesName } from "@/lib/series";
 export async function PATCH(
@@ -66,7 +67,7 @@ export async function PATCH(
         status: body.status ?? "입고전",
         memo: body.memo ?? "",
         component_count: body.component_count ? Number(body.component_count) : null,
-        unit_sale_price: body.unit_sale_price ? Number(body.unit_sale_price) : null,
+        unit_sale_price: resolveInventoryUnitSalePrice(currency, purchasePrice, body.component_count, body.unit_sale_price),
         source_site_code: sku?.sourceSiteCode ?? null,
         source_product_id: sku?.sourceProductId ?? null,
         option_seq: sku?.optionSeq ?? 0,
