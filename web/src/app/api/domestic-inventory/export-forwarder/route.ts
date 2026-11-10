@@ -14,6 +14,22 @@ const TYPE_EN: Record<string,string> = {
   "아크릴":"acrylic", "지류":"paper goods", "뱃지":"badge", "피규어":"figure", "키링":"keychain", "기타":"goods"
 };
 
+
+/**
+ * Japan forwarding worksheet: 139 is used for paper goods, cards, postcards,
+ * stickers and similar printed items. Keep the existing 111 for other goods.
+ * If an item was saved as '기타', fall back to its name, without accidentally
+ * classifying acrylic cards or card holders as paper goods.
+ */
+function forwardingCategoryCode(itemType:unknown,itemName:unknown):111|139{
+  const type=String(itemType||"").trim().toLowerCase().replace(/[\\s_-]/g,"");
+  if(["지류","papergoods","paper","card","cards","postcard","postcards","sticker","stickers","카드","엽서","스티커","포스터","색지"].includes(type))return 139;
+  if(type&&type!=="기타"&&type!=="goods"&&type!=="other")return 111;
+  const name=String(itemName||"").toLowerCase();
+  if(/아크릴|アクリル|acrylic|카드\\s*(?:홀더|케이스|스탠드)|カード(?:ホルダー|ケース)|card\\s*(?:holder|case|stand)/i.test(name))return 111;
+  return /paper\\s*goods|papergoods|\\b(?:postcards?|cards?|stickers?|prints?)\\b|포스트\\s*카드|카드|엽서|색지|스티커|씰|포스터|클리어\\s*시트|ポストカード|カード|ステッカー|シール|色紙|クリアシート/i.test(name)?139:111;
+}
+
 function englishProductName(seriesName:unknown,itemType:unknown){
   const series=String(seriesName||"").trim(),type=String(itemType||"").trim();
   return `${SERIES_EN[series]||series||"other"} ${TYPE_EN[type]||type||"goods"}`.trim();
@@ -35,7 +51,7 @@ export async function POST(req:Request){
     if(body.country!=="JP")return NextResponse.json({ok:false,message:"중국 배대지 양식은 아직 등록되지 않았어."},{status:400});
 
     const supabase=createServiceRoleClient();
-    const{data,error}=await supabase.from("inventory_items").select("id,series_name,item_type,source_url,image_url,purchase_price,total_price,yen_price,quantity,created_at").in("id",ids);
+    const{data,error}=await supabase.from("inventory_items").select("id,item_name,series_name,item_type,source_url,image_url,purchase_price,total_price,yen_price,quantity,created_at").in("id",ids);
     if(error)throw error;
     const byId=new Map((data??[]).map(item=>[String(item.id),item]));
     const items=ids.map(id=>byId.get(id)).filter(Boolean) as NonNullable<typeof data>;
@@ -54,7 +70,7 @@ export async function POST(req:Request){
     items.forEach((item,index)=>{
       const purchasePrice=Number(item.purchase_price??item.total_price??item.yen_price??0);
       const inventoryQuantity=Number(item.quantity??1);
-      const values:Array<string|number>=[600,2,englishProductName(item.series_name,item.item_type),"","",String(item.source_url||""),String(item.image_url||""),1,"",111,Number.isFinite(purchasePrice)?purchasePrice:0,Number.isFinite(inventoryQuantity)?inventoryQuantity:1,"",""];
+      const values:Array<string|number>=[600,2,englishProductName(item.series_name,item.item_type),"","",String(item.source_url||""),String(item.image_url||""),1,"",forwardingCategoryCode(item.item_type,item.item_name),Number.isFinite(purchasePrice)?purchasePrice:0,Number.isFinite(inventoryQuantity)?inventoryQuantity:1,"",""];
       values.forEach((value,column)=>setCell(worksheet,index+2,column,value,templateCells[column]));
     });
     worksheet["!ref"]=`A1:X${Math.max(2,items.length+1)}`;
