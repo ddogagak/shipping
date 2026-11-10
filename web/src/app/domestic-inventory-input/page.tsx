@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { calculatePricing, DEFAULT_PRICING_SETTINGS } from "@/lib/pricing";
 import { useEffect, useMemo, useState } from "react";
 
 type InventoryStatus =
@@ -64,30 +65,6 @@ const seriesList = [
 
 const currencyList = ["JPY", "CNY"];
 
-const EXCHANGE_RATE: Record<string, number> = {
-  JPY: 10,
-  CNY: 230,
-};
-
-function calculatePricing(currency: string, purchasePrice: number, boxCount: number | null) {
-  const rate = EXCHANGE_RATE[currency] ?? EXCHANGE_RATE.JPY;
-  const purchase = Number(purchasePrice) || 0;
-  const packs = Number(boxCount) || 0;
-
-  // 1) 원가 = 구매가 × 환율 × 1.2 + 5,000원
-  const costPrice = Math.round(purchase * rate * 1.2 + 5000);
-
-  // 2) 목표이익 = max(10,000원, 원가의 8%)
-  //    최소마진가격 = (원가 + 목표이익) ÷ 0.84
-  const targetProfit = Math.max(10000, costPrice * 0.08);
-  const minimumMarginPrice = Math.ceil((costPrice + targetProfit) / 0.84);
-
-  // 3) 개당판매가 = 최소마진가격 ÷ 박스당 팩 수
-  const unitSalePrice = packs > 0 ? Math.ceil(minimumMarginPrice / packs) : 0;
-
-  return { costPrice, minimumMarginPrice, unitSalePrice };
-}
-
 const initialManualForm = {
   item_name: "",
   item_type: "기타",
@@ -105,6 +82,68 @@ const initialManualForm = {
   status: "입고전" as InventoryStatus,
   memo: "",
 };
+
+
+/**
+ * Use the exact same shared calculator and price guide as broadcast-sale inventory.
+ * A missing box count must not silently get the multi-item pricing tier.
+ */
+function InventoryPricingOverview({
+  currency,
+  purchasePrice,
+  componentCount,
+}: {
+  currency: string;
+  purchasePrice: number;
+  componentCount: number | null;
+}) {
+  const count = Number(componentCount);
+  const purchase = Number(purchasePrice);
+  if (!Number.isFinite(purchase) || purchase <= 0 || !Number.isInteger(count) || count <= 0) {
+    return <div style={pricingBoxStyle}>구매가와 박스당 팩 수를 입력하면 통일된 판매가가 표시돼.</div>;
+  }
+
+  const pricing = calculatePricing(currency, purchase, count);
+  const retention = DEFAULT_PRICING_SETTINGS.salesRetentionRate;
+  const guides = [
+    { label: "0% 마진 (손익분기점)", unit: Math.ceil(pricing.costPrice / retention / count), featured: false },
+    { label: "기본권장 판매가", unit: pricing.unitSalePrice, featured: true },
+    { label: "순수익률 15%", unit: Math.ceil(pricing.costPrice / (retention - 0.15) / count), featured: false },
+    { label: "순수익률 20%", unit: Math.ceil(pricing.costPrice / (retention - 0.20) / count), featured: false },
+  ];
+
+  return (
+    <div style={{ ...pricingBoxStyle, display: "block" }}>
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 10 }}>
+        <span>비용포함원가 <strong>{pricing.costPrice.toLocaleString("ko-KR")}원</strong></span>
+        <span>최소마진(목표이익) <strong>{pricing.targetProfit.toLocaleString("ko-KR")}원</strong></span>
+        <span>개당판매가 <strong>{pricing.unitSalePrice.toLocaleString("ko-KR")}원</strong></span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
+        {guides.map(({ label, unit, featured }) => (
+          <div
+            key={label}
+            style={{
+              padding: 9,
+              borderRadius: 8,
+              background: featured ? "#eff6ff" : "#fff",
+              border: featured ? "1px solid #2563eb" : "1px solid #e5e7eb",
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+            }}
+          >
+            <span style={{ color: "#475569", fontSize: 12 }}>{label}</span>
+            <strong>{unit.toLocaleString("ko-KR")}원/개</strong>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>
+        방송판매재고와 동일 · 박스당 {count}개 기준 · 판매 수수료·부가세 16% 차감
+      </div>
+    </div>
+  );
+}
 
 export default function DomesticInventoryInputPage() {
   const [inputMode, setInputMode] = useState<InputMode>("manual");
@@ -369,20 +408,11 @@ export default function DomesticInventoryInputPage() {
               <ManualField label="기타사항 / 등급 / 비율" value={manualForm.memo} onChange={(v) => updateManualForm("memo", v)} />
             </div>
 
-            {(() => {
-              const pricing = calculatePricing(
-                manualForm.currency,
-                manualForm.purchase_price,
-                manualForm.component_count || null
-              );
-              return (
-                <div style={pricingBoxStyle}>
-                  <span>원가 <strong>{pricing.costPrice.toLocaleString()}원</strong></span>
-                  <span>최소마진가격 <strong>{pricing.minimumMarginPrice.toLocaleString()}원</strong></span>
-                  <span>개당판매가 <strong>{pricing.unitSalePrice ? `${pricing.unitSalePrice.toLocaleString()}원` : "-"}</strong></span>
-                </div>
-              );
-            })()}
+            <InventoryPricingOverview
+              currency={manualForm.currency}
+              purchasePrice={manualForm.purchase_price}
+              componentCount={manualForm.component_count || null}
+            />
 
             <button type="button" onClick={addManualItem} style={saveButtonStyle}>
               입력 항목 추가
@@ -499,16 +529,11 @@ MEMO:`}
                   <EditableField label={`구매가 (${item.currency})`} value={String(item.purchase_price)} type="number" onChange={(v) => updateItem(item.local_id, "purchase_price", v)} />
                 </div>
 
-                {(() => {
-                  const pricing = calculatePricing(item.currency, item.purchase_price, item.component_count);
-                  return (
-                    <div style={pricingBoxStyle}>
-                      <span>원가 <strong>{pricing.costPrice.toLocaleString()}원</strong></span>
-                      <span>최소마진가격 <strong>{pricing.minimumMarginPrice.toLocaleString()}원</strong></span>
-                      <span>개당판매가 <strong>{pricing.unitSalePrice ? `${pricing.unitSalePrice.toLocaleString()}원` : "-"}</strong></span>
-                    </div>
-                  );
-                })()}
+                <InventoryPricingOverview
+                  currency={item.currency}
+                  purchasePrice={item.purchase_price}
+                  componentCount={item.component_count}
+                />
 
                 <div style={grid4Style}>
                   <EditableField label="박스당 팩 수" value={String(item.component_count ?? "")} type="number" onChange={(v) => updateItem(item.local_id, "component_count", v)} />
