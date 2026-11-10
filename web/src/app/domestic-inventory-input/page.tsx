@@ -117,7 +117,6 @@ function InventoryPricingOverview({
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 10 }}>
         <span>비용포함원가 <strong>{pricing.costPrice.toLocaleString("ko-KR")}원</strong></span>
         <span>최소마진(목표이익) <strong>{pricing.targetProfit.toLocaleString("ko-KR")}원</strong></span>
-        <span>기본권장 박스가격 <strong>{pricing.minimumMarginPrice.toLocaleString("ko-KR")}원</strong></span>
         <span>개당판매가 <strong>{pricing.unitSalePrice.toLocaleString("ko-KR")}원</strong></span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
