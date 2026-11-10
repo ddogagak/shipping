@@ -145,3 +145,26 @@ export function calculatePricing(
     unitSalePrice,
   };
 }
+
+/**
+ * Inventory edits often receive the box count after the sourcing item was saved.
+ * Only suggest a sale price when it was never entered; preserve manual prices.
+ */
+export function resolveInventoryUnitSalePrice(
+  currency: string | null | undefined,
+  purchasePrice: number | null | undefined,
+  boxCount: number | null | undefined,
+  enteredSalePrice: number | null | undefined
+): number | null {
+  const saved = Number(enteredSalePrice);
+  if (enteredSalePrice != null && Number.isFinite(saved) && saved > 0) return saved;
+
+  const purchase = Number(purchasePrice);
+  const count = Number(boxCount);
+  if (
+    purchasePrice == null || !Number.isFinite(purchase) || purchase <= 0 ||
+    boxCount == null || !Number.isInteger(count) || count <= 0
+  ) return null;
+
+  return calculatePricing(currency || "JPY", purchase, count).unitSalePrice;
+}
