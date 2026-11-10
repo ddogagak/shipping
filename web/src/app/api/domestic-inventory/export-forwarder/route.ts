@@ -22,12 +22,12 @@ const TYPE_EN: Record<string,string> = {
  * classifying acrylic cards or card holders as paper goods.
  */
 function forwardingCategoryCode(itemType:unknown,itemName:unknown):111|139{
-  const type=String(itemType||"").trim().toLowerCase().replace(/[\\s_-]/g,"");
+  const type=String(itemType||"").trim().toLowerCase().replace(/[\s_-]/g,"");
   if(["지류","papergoods","paper","card","cards","postcard","postcards","sticker","stickers","카드","엽서","스티커","포스터","색지"].includes(type))return 139;
   if(type&&type!=="기타"&&type!=="goods"&&type!=="other")return 111;
   const name=String(itemName||"").toLowerCase();
-  if(/아크릴|アクリル|acrylic|카드\\s*(?:홀더|케이스|스탠드)|カード(?:ホルダー|ケース)|card\\s*(?:holder|case|stand)/i.test(name))return 111;
-  return /paper\\s*goods|papergoods|\\b(?:postcards?|cards?|stickers?|prints?)\\b|포스트\\s*카드|카드|엽서|색지|스티커|씰|포스터|클리어\\s*시트|ポストカード|カード|ステッカー|シール|色紙|クリアシート/i.test(name)?139:111;
+  if(/아크릴|アクリル|acrylic|카드\s*(?:홀더|케이스|스탠드)|カード(?:ホルダー|ケース)|card\s*(?:holder|case|stand)/i.test(name))return 111;
+  return /paper\s*goods|papergoods|\b(?:postcards?|cards?|stickers?|prints?)\b|포스트\s*카드|카드|엽서|색지|스티커|씰|포스터|클리어\s*시트|ポストカード|カード|ステッカー|シール|色紙|クリアシート/i.test(name)?139:111;
 }
 
 function englishProductName(seriesName:unknown,itemType:unknown){
