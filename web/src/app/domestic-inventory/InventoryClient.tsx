@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { resolveInventoryUnitSalePrice } from "@/lib/pricing";
+import { calculatePricing, DEFAULT_PRICING_SETTINGS, resolveInventoryUnitSalePrice } from "@/lib/pricing";
 import { useMemo, useState } from "react";
 
 type InventoryItem = {
@@ -58,12 +58,39 @@ export default function InventoryClient({initialItems}:{initialItems:InventoryIt
       <label style={labelStyle}>상품명<textarea value={item.item_name??""} onChange={e=>updateItem(item.id,"item_name",e.target.value)} style={titleTextareaStyle}/></label>
       <div style={grid4Style}><FieldSelect label="작품명" value={item.series_name??"기타"} options={seriesList.filter(v=>v!=="전체")} onChange={v=>updateItem(item.id,"series_name",v)}/><FieldSelect label="타입" value={item.item_type??"기타"} options={typeList.filter(v=>v!=="전체")} onChange={v=>updateItem(item.id,"item_type",v)}/><FieldSelect label="상태" value={item.status??"입고전"} options={statusList.filter(v=>v!=="전체")} onChange={v=>saveStatusImmediately(item,v)}/><FieldInput label="옵션 번호" type="number" value={String(item.option_seq??"")} onChange={v=>updateItem(item.id,"option_seq",v)}/></div>
       <div style={grid4Style}><FieldInput label="수량" type="number" value={String(item.quantity??1)} onChange={v=>updateItem(item.id,"quantity",v)}/><FieldSelect label="통화" value={item.currency||"JPY"} options={currencyList} onChange={v=>updateItem(item.id,"currency",v)}/><FieldInput label={`구매가 (${item.currency||"JPY"})`} type="number" value={String(item.purchase_price??item.total_price??item.yen_price??0)} onChange={v=>updateItem(item.id,"purchase_price",v)}/><FieldInput label="박스당 팩 수" type="number" value={String(item.component_count??"")} onChange={v=>updateItem(item.id,"component_count",v)}/></div>
-      <div style={grid4Style}><FieldInput label="개당판매가" type="number" value={String(resolveInventoryUnitSalePrice(item.currency,item.purchase_price??item.yen_price,item.component_count,item.unit_sale_price)??"")} onChange={v=>updateItem(item.id,"unit_sale_price",v)}/><FieldInput label="현지내 배송비" type="number" value={String(item.domestic_shipping_fee??0)} onChange={v=>updateItem(item.id,"domestic_shipping_fee",v)}/><FieldInput label="주문번호" value={item.order_number??""} onChange={v=>updateItem(item.id,"order_number",v)}/><FieldInput label="운송장" value={item.tracking_number??""} onChange={v=>updateItem(item.id,"tracking_number",v)}/></div>
+      <InventoryPriceGuide item={item} onSalePriceChange={v=>updateItem(item.id,"unit_sale_price",v)}/>
       <div style={grid2Style}><FieldInput label="대표 이미지 URL" value={item.image_url??""} onChange={v=>updateItem(item.id,"image_url",v)}/><FieldInput label="라인업 이미지 URL" value={item.lineup_image_url??""} onChange={v=>updateItem(item.id,"lineup_image_url",v)}/></div>
       <div style={grid2Style}><FieldInput label="소싱 URL" value={item.source_url??""} onChange={v=>updateItem(item.id,"source_url",v)}/><div style={sourceLinkBoxStyle}><span style={sourceLinkLabelStyle}>바로가기</span>{item.source_url?<a href={item.source_url} target="_blank" rel="noreferrer" style={sourceLinkStyle}>소싱 페이지 열기 ↗</a>:<span style={sourceLinkEmptyStyle}>소싱 URL 없음</span>}</div></div>
       <label style={labelStyle}>기타사항 / 등급 / 비율<textarea value={item.memo??""} onChange={e=>updateItem(item.id,"memo",e.target.value)} style={memoStyle}/></label><div style={buttonRowStyle}><button type="button" onClick={()=>saveItem(item)} style={saveBtnStyle} disabled={savingId===item.id}>{savingId===item.id?"저장중":"저장"}</button><button type="button" onClick={()=>deleteItem(item)} style={deleteBtnStyle} disabled={deletingId===item.id}>{deletingId===item.id?"삭제중":"삭제"}</button></div></div></article>})}</section>
     {lineupImage?<div style={lineupModalBackdropStyle} onClick={()=>setLineupImage(null)}><div style={lineupModalContentStyle} onClick={e=>e.stopPropagation()}><button type="button" onClick={()=>setLineupImage(null)} style={lineupCloseButtonStyle}>×</button><img src={lineupImage} alt="라인업" style={lineupModalImageStyle}/></div></div>:null}
   </main>;
+}
+
+function InventoryPriceGuide({item,onSalePriceChange}:{item:InventoryItem;onSalePriceChange:(value:string)=>void}){
+  const purchasePrice=Number(item.purchase_price??item.total_price??item.yen_price??0);
+  const count=Number(item.component_count);
+  const valid=Number.isFinite(purchasePrice)&&purchasePrice>0&&Number.isSafeInteger(count)&&count>0;
+  const pricing=valid?calculatePricing(item.currency||"JPY",purchasePrice,count):null;
+  const retention=DEFAULT_PRICING_SETTINGS.salesRetentionRate;
+  const savedSalePrice=resolveInventoryUnitSalePrice(item.currency,purchasePrice,item.component_count,item.unit_sale_price);
+  const guides=pricing?[
+    {label:"0% 마진",price:Math.ceil(pricing.costPrice/retention/count),featured:false},
+    {label:"기본권장 판매가",price:pricing.unitSalePrice,featured:true},
+    {label:"순수익률 15%",price:retention>0.15?Math.ceil(pricing.costPrice/(retention-0.15)/count):null,featured:false},
+    {label:"순수익률 20%",price:retention>0.20?Math.ceil(pricing.costPrice/(retention-0.20)/count):null,featured:false},
+  ]:[];
+  return <div style={pricePanelStyle}>
+    <div style={priceGridStyle}>
+      <FieldInput label="개당판매가 (수정 가능)" type="number" value={String(savedSalePrice??"")} onChange={onSalePriceChange}/>
+      {guides.map(guide=><div key={guide.label} style={{...priceGuideStyle,...(guide.featured?featuredPriceGuideStyle:{})}}>
+        <span style={priceGuideLabelStyle}>{guide.label}</span>
+        <strong style={{color:guide.featured?"#1d4ed8":"#111827"}}>{guide.price===null?"-":guide.price.toLocaleString("ko-KR")+"원"}</strong>
+      </div>)}
+    </div>
+    {pricing?
+      <div style={priceFootnoteStyle}>비용포함원가 {pricing.costPrice.toLocaleString("ko-KR")}원 · 최소마진(목표이익) {pricing.targetProfit.toLocaleString("ko-KR")}원 · 박스당 {count}개 기준 · 수수료·부가세 16% 차감</div>:
+      <div style={priceFootnoteStyle}>구매가와 박스당 팩 수를 입력하면 0%·기본권장·15%·20% 판매가를 계산해.</div>}
+  </div>;
 }
 function FieldInput({label,value,onChange,type="text"}:{label:string;value:string;onChange:(v:string)=>void;type?:string}){return <label style={labelStyle}>{label}<input type={type} value={value} onChange={e=>onChange(e.target.value)} style={inputStyle}/></label>}
 function FieldSelect({label,value,options,onChange}:{label:string;value:string;options:string[];onChange:(v:string)=>void}){return <label style={labelStyle}>{label}<select value={value} onChange={e=>onChange(e.target.value)} style={inputStyle}>{options.map(v=><option key={v}>{v}</option>)}</select></label>}
@@ -76,6 +103,12 @@ const selectionBarStyle:React.CSSProperties={display:"flex",justifyContent:"spac
 const listStyle:React.CSSProperties={display:"flex",flexDirection:"column",gap:14};const cardStyle:React.CSSProperties={display:"grid",gridTemplateColumns:"120px 1fr",gap:16,padding:16,background:"#fff",border:"1px solid #e5e7eb",borderRadius:16};const duplicateCardStyle:React.CSSProperties={...cardStyle,background:"#fff1f2",border:"2px solid #ef4444",boxShadow:"0 0 0 1px rgba(239,68,68,0.08)"};const imageWrapStyle:React.CSSProperties={width:120,minHeight:120,display:"flex",flexDirection:"column",gap:8};const imgStyle:React.CSSProperties={width:120,height:120,objectFit:"cover",borderRadius:12,border:"1px solid #e5e7eb"};const emptyImgStyle:React.CSSProperties={...imgStyle,background:"#f3f4f6",display:"flex",alignItems:"center",justifyContent:"center",color:"#9ca3af",fontWeight:800};const lineupMiniButtonStyle:React.CSSProperties={width:120,height:32,border:"1px solid #d1d5db",borderRadius:8,background:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"};
 const bodyStyle:React.CSSProperties={display:"flex",flexDirection:"column",gap:10,minWidth:0};const badgeRowStyle:React.CSSProperties={display:"flex",gap:6,flexWrap:"wrap"};const badgeStyle:React.CSSProperties={padding:"4px 8px",borderRadius:999,background:"#eef2ff",fontSize:12,fontWeight:800};const typeBadgeStyle={...badgeStyle,background:"#fef3c7"};const statusBadgeStyle={...badgeStyle,background:"#fee2e2"};const currencyBadgeStyle={...badgeStyle,background:"#dcfce7"};const duplicateBadgeStyle={...badgeStyle,background:"#fee2e2",color:"#b91c1c",border:"1px solid #fca5a5"};const skuBadgeStyle={...badgeStyle,background:"#e0f2fe",color:"#075985"};
 const labelStyle:React.CSSProperties={display:"flex",flexDirection:"column",gap:4,fontSize:12,fontWeight:800,minWidth:0};const inputStyle:React.CSSProperties={width:"100%",minWidth:0,height:36,border:"1px solid #d1d5db",borderRadius:8,padding:"0 9px",background:"#fff",boxSizing:"border-box"};const titleTextareaStyle:React.CSSProperties={width:"100%",minHeight:54,border:"1px solid #d1d5db",borderRadius:8,padding:9,resize:"vertical",boxSizing:"border-box"};const memoStyle:React.CSSProperties={...titleTextareaStyle,minHeight:70};const grid4Style:React.CSSProperties={display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(150px, 1fr))",gap:8};const grid2Style:React.CSSProperties={display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(220px, 1fr))",gap:8};
+const pricePanelStyle:React.CSSProperties={border:"1px solid #e2e8f0",borderRadius:10,background:"#f8fafc",padding:10};
+const priceGridStyle:React.CSSProperties={display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(130px, 1fr))",alignItems:"stretch",gap:8};
+const priceGuideStyle:React.CSSProperties={border:"1px solid #e5e7eb",borderRadius:8,background:"#fff",padding:"6px 8px",display:"flex",flexDirection:"column",justifyContent:"space-between",gap:3,minWidth:0,fontSize:14,fontVariantNumeric:"tabular-nums"};
+const featuredPriceGuideStyle:React.CSSProperties={borderColor:"#93c5fd",background:"#eff6ff"};
+const priceGuideLabelStyle:React.CSSProperties={fontSize:11,fontWeight:800,color:"#64748b",lineHeight:1.3,wordBreak:"keep-all"};
+const priceFootnoteStyle:React.CSSProperties={fontSize:11,color:"#64748b",marginTop:7,lineHeight:1.5};
 const sourceLinkBoxStyle:React.CSSProperties={minHeight:56,padding:"6px 9px",border:"1px solid #d1d5db",borderRadius:8,display:"flex",flexDirection:"column",justifyContent:"center",gap:4,boxSizing:"border-box"};const sourceLinkLabelStyle:React.CSSProperties={fontSize:12,fontWeight:800};const sourceLinkStyle:React.CSSProperties={fontSize:13,fontWeight:800,color:"#2563eb",textDecoration:"none",wordBreak:"break-all"};const sourceLinkEmptyStyle:React.CSSProperties={fontSize:13,color:"#9ca3af"};
 const buttonRowStyle:React.CSSProperties={display:"flex",justifyContent:"flex-end",gap:8};const saveBtnStyle:React.CSSProperties={height:38,padding:"0 18px",border:"none",borderRadius:8,background:"#111827",color:"#fff",fontWeight:900,cursor:"pointer"};const deleteBtnStyle:React.CSSProperties={...saveBtnStyle,background:"#dc2626"};const emptyStyle:React.CSSProperties={background:"#fff",border:"1px solid #e5e7eb",borderRadius:16,padding:32,textAlign:"center",color:"#6b7280"};
 const lineupModalBackdropStyle:React.CSSProperties={position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,0.72)",overflowY:"auto",padding:"20px 12px 40px",cursor:"zoom-out"};const lineupModalContentStyle:React.CSSProperties={position:"relative",width:"min(700px, 100%)",margin:"0 auto",cursor:"default"};const lineupModalImageStyle:React.CSSProperties={display:"block",width:"100%",height:"auto",objectFit:"contain",borderRadius:12,background:"#fff"};const lineupCloseButtonStyle:React.CSSProperties={position:"absolute",top:8,right:8,width:36,height:36,border:"none",borderRadius:999,background:"rgba(0,0,0,0.7)",color:"#fff",fontSize:24,lineHeight:"36px",cursor:"pointer"};
