@@ -199,16 +199,28 @@ async function buildReport(excludedKeywords: string[]) {
     if (imported > lastImportedAt) lastImportedAt = imported;
   }
 
-  // Count all original Wise merchandise lines belonging to each order.
-  // Shipping fees are not packable items; exclude them independently of
-  // sales-analysis keyword exclusions so transfers/other recorded goods count.
-  // Counts span all sales dates and do not depend on the currently selected month.
-  const orderItemCounts: Record<string, number> = {};
-  for (const [orderId, order] of orders) {
-    orderItemCounts[orderId] = order.items.filter((item: any) => {
+  // For each Wise sale line, count merchandise with the same normalized name
+  // in its own Wise order. Ignore per-line #1/#2 style indices at either end.
+  // Calculate against all original sale lines, regardless of month/search filters.
+  // Shipping fee lines are excluded from the merchandise count.
+  const sameItemCounts: Record<string, number> = {};
+  for (const order of orders.values()) {
+    const merchandise = order.items.filter((item: any) => {
       const name = String(item.item_name || "").normalize("NFKC").toLowerCase();
       return !SHIPPING_KEYWORDS.some(keyword => name.includes(keyword.toLowerCase()));
-    }).length;
+    });
+    const byName = new Map<string, number>();
+    const normalized = merchandise.map((item: any) => {
+      const name = String(item.item_name || "").normalize("NFKC").toLowerCase().trim()
+        .replace(/^(?:#\s*\d+\s*)+/, "")
+        .replace(/(?:\s*#\s*\d+)+\s*$/, "")
+        .replace(/\s+/g, "");
+      if (name) byName.set(name, (byName.get(name) || 0) + 1);
+      return { id: String(item.id), name };
+    });
+    for (const item of normalized) {
+      sameItemCounts[item.id] = item.name ? (byName.get(item.name) || 1) : 1;
+    }
   }
 
   const monthly = new Map<string, any>();
@@ -246,7 +258,7 @@ async function buildReport(excludedKeywords: string[]) {
     monthly: serialize(monthly),
     quarterly: serialize(quarterly),
     all_time_sales_rows: allTimeSalesRows.sort((a, b) => String(b.ordered_at).localeCompare(String(a.ordered_at))),
-    order_item_counts: orderItemCounts,
+    same_item_counts: sameItemCounts,
     excluded_item_count: excludedItemCount,
     included_order_count: includedOrderCount,
     included_item_count: includedItemCount,
