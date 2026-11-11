@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import {analysisSeriesForSale,type SeriesKeywordRule} from "@/lib/item-analysis-series";
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 
 type SortKey = "ordered_at" | "buyer_nickname" | "item_name" | "item_price";
 type SortDirection = "asc" | "desc";
@@ -11,7 +11,7 @@ type Period = { key: string; sales: number; order_count: number; item_count: num
 type ItemPref = { includeCost: boolean; memo: string; deleted?: boolean };
 type ItemSettings = { id: string; includeCost: boolean; memo: string; deleted: boolean };
 type PurchaseTotals = { monthly: Record<string, number>; quarterly: Record<string, number>; cumulative: number; included_orders: number; unsupported_currencies: string[]; exchange_rates: Record<string, number>; overseas_tax_multiplier: number; overseas_shipping_per_order_krw: number };
-type Report = { purchases: PurchaseTotals; monthly: Period[]; quarterly: Period[]; all_time_sales_rows: SaleRow[]; excluded_item_count: number; included_order_count: number; included_item_count: number; imported_order_count: number; last_imported_at: string | null; wise_gross_total: number; settings: { cumulative_settled_amount: number; excluded_keywords: string[]; item_settings: ItemSettings[] } };
+type Report = { purchases?: PurchaseTotals; monthly: Period[]; quarterly: Period[]; all_time_sales_rows: SaleRow[]; excluded_item_count: number; included_order_count: number; included_item_count: number; imported_order_count: number; last_imported_at: string | null; wise_gross_total: number; settings: { cumulative_settled_amount: number; excluded_keywords: string[]; item_settings: ItemSettings[] } };
 type StockItem = { display_name?: string; product_name?: string; option_text?: string; ordered_at?: string; purchase_quantity?: number; component_count?: number; unit_cost_price?: number; box_cost_price?: number };
 type ItemPrefs = Record<string, ItemPref>;
 const money = (value: number) => Math.round(Number(value || 0)).toLocaleString("ko-KR");
@@ -165,31 +165,54 @@ export default function SalesManagementPage() {
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [auxLoading, setAuxLoading] = useState(false);
+  const [auxError, setAuxError] = useState("");
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState("");
+  const statsCache = useRef<PurchaseTotals | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setAuxLoading(true);
     setError("");
-    try {
-      const [salesResponse, stockResponse, seriesResponse, overridesResponse] = await Promise.all([
-        fetch("/api/sales-management", { cache: "no-store" }),
-        fetch("/api/sale-inventory", { cache: "no-store" }),
-        fetch("/api/sales-management/item-keywords", { cache: "no-store" }),
-        fetch("/api/sales-management/item-series-overrides", { cache: "no-store" }),
+    setAuxError("");
+
+    // Auxiliary lookups must never block the primary sales list.
+    const auxiliary = Promise.all([
+      fetch("/api/sale-inventory", { cache: "no-store" }),
+      fetch("/api/sales-management/item-keywords", { cache: "no-store" }),
+      fetch("/api/sales-management/item-series-overrides", { cache: "no-store" }),
+    ]).then(async ([stockResponse, seriesResponse, overridesResponse]) => {
+      const [stockData, seriesData, overridesData] = await Promise.all([
+        stockResponse.json(), seriesResponse.json(), overridesResponse.json()
       ]);
-      const [salesData, stockData, seriesData, overridesData] = await Promise.all([salesResponse.json(), stockResponse.json(), seriesResponse.json(), overridesResponse.json()]);
-      if (!salesResponse.ok || !salesData.ok) throw new Error(salesData.message || "매출 자료를 불러오지 못했습니다.");
-      if (!stockResponse.ok || !stockData.ok) throw new Error(stockData.message || "방송판매재고 원가를 불러오지 못했습니다.");
+      if (!stockResponse.ok || !stockData.ok) throw new Error(stockData.message || "방송판매재고 원가 조회 실패");
       if (!seriesResponse.ok || !seriesData.ok) throw new Error(seriesData.message || "작품 키워드 조회 실패");
       if (!overridesResponse.ok || !overridesData.ok) throw new Error(overridesData.message || "수동 작품 분류 조회 실패");
-      setSeriesRules((seriesData.rules || []).map((rule: SeriesKeywordRule) => ({...rule, series_name: rule.series_name === "야생" ? "쿠지" : rule.series_name})));
-      setSeriesOverrides(Object.fromEntries((overridesData.overrides || []).map((rule: {item_key:string;series_name:string}) => [rule.item_key,rule.series_name])));
-      setReport(salesData);
+      setSeriesRules((seriesData.rules || []).map((rule: SeriesKeywordRule) => ({
+        ...rule, series_name: rule.series_name === "야생" ? "쿠지" : rule.series_name
+      })));
+      setSeriesOverrides(Object.fromEntries((overridesData.overrides || []).map((rule: { item_key: string; series_name: string }) => [rule.item_key, rule.series_name])));
       setInventory(Array.isArray(stockData.items) ? stockData.items : []);
-      const amount = Number(salesData.settings?.cumulative_settled_amount || 0);
+    }).catch((e: unknown) => {
+      setAuxError(e instanceof Error ? e.message : "원가·작품 분류 조회 실패");
+    }).finally(() => setAuxLoading(false));
+
+    try {
+      const response = await fetch("/api/sales-management?view=sales", { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.message || "매출 자료를 불러오지 못했습니다.");
+      setReport({ ...data, purchases: statsCache.current ?? undefined });
+      const amount = Number(data.settings?.cumulative_settled_amount || 0);
       setSettledAmount(amount);
-      setKeywords(Array.isArray(salesData.settings?.excluded_keywords) ? salesData.settings.excluded_keywords : []);
+      setKeywords(Array.isArray(data.settings?.excluded_keywords) ? data.settings.excluded_keywords : []);
       const prefs: ItemPrefs = {};
-      for (const row of salesData.settings?.item_settings || []) prefs[String(row.id)] = { includeCost: row.includeCost !== false, memo: String(row.memo || ""), deleted: row.deleted === true };
+      for (const row of data.settings?.item_settings || []) {
+        prefs[String(row.id)] = {
+          includeCost: row.includeCost !== false, memo: String(row.memo || ""), deleted: row.deleted === true
+        };
+      }
       setSavedPrefs(prefs);
       setDraftPrefs(prefs);
     } catch (e) {
@@ -197,8 +220,37 @@ export default function SalesManagementPage() {
     } finally {
       setLoading(false);
     }
+    // Let the three independent auxiliary requests finish without blocking sales.
+    void auxiliary;
   }, []);
 
+  const loadStatistics = useCallback(async (force = false) => {
+    if (!force && statsCache.current) return;
+    setStatsLoading(true);
+    setStatsError("");
+    try {
+      const response = await fetch("/api/sales-management?view=purchases", { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok || !data.ok || !data.purchases) {
+        throw new Error(data.message || "매입·매출 통계를 불러오지 못했어.");
+      }
+      statsCache.current = data.purchases as PurchaseTotals;
+      setReport(current => current ? { ...current, purchases: data.purchases } : current);
+    } catch (e) {
+      setStatsError(e instanceof Error ? e.message : "통계를 불러오지 못했어.");
+    } finally {
+      setStatsLoading(false);
+    }
+  }, []);
+
+  const toggleStatistics = () => {
+    if (statsOpen) {
+      setStatsOpen(false);
+      return;
+    }
+    setStatsOpen(true);
+    if (!statsCache.current) void loadStatistics();
+  };
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
     if (!expandedImage) return;
@@ -212,10 +264,10 @@ export default function SalesManagementPage() {
   const rawCurrent = periods.find(p => p.key === selectedKey);
   const currentRows = useMemo(() => visibleRows(rawCurrent?.sales_rows || [], savedPrefs), [rawCurrent, savedPrefs]);
   const currentSummary = useMemo(() => summarizeRows(rawCurrent?.sales_rows || [], savedPrefs), [rawCurrent, savedPrefs]);
-  const broadcastByPeriod = useMemo(() => broadcastMetrics(report?.all_time_sales_rows || [], savedPrefs, granularity), [report, savedPrefs, granularity]);
+  const broadcastByPeriod = useMemo(() => statsOpen ? broadcastMetrics(report?.all_time_sales_rows || [], savedPrefs, granularity) : new Map<string, BroadcastMetrics>(), [report, savedPrefs, granularity, statsOpen]);
   const currentBroadcast = broadcastByPeriod.get(selectedKey) || { count: 0, durationMs: 0, sales: 0, itemCount: 0 };
-  const currentBuyers = useMemo(() => buyersFromRows(rawCurrent?.sales_rows || [], savedPrefs), [rawCurrent, savedPrefs]);
-  const allTimeBuyers = useMemo(() => buyersFromRows(report?.all_time_sales_rows || [], savedPrefs), [report, savedPrefs]);
+  const currentBuyers = useMemo(() => statsOpen ? buyersFromRows(rawCurrent?.sales_rows || [], savedPrefs) : [], [rawCurrent, savedPrefs, statsOpen]);
+  const allTimeBuyers = useMemo(() => statsOpen ? buyersFromRows(report?.all_time_sales_rows || [], savedPrefs) : [], [report, savedPrefs, statsOpen]);
   const allTimeByBuyer = useMemo(() => new Map(allTimeBuyers.map(buyer => [buyer.buyer_nickname, buyer])), [allTimeBuyers]);
   const costIndex = useMemo(() => buildCostIndex(inventory), [inventory]);
   const itemRows = useMemo(() => currentRows.map(row => {
@@ -387,9 +439,24 @@ export default function SalesManagementPage() {
 
     {notice && <div style={{ padding: 10, marginBottom: 12, borderRadius: 8, background: "#f0fdf4", color: "#166534", fontSize: 13 }}>{notice}</div>}
     {error && <div role="alert" style={{ padding: 14, marginBottom: 16, borderRadius: 10, background: "#fff7ed", color: "#9a3412", border: "1px solid #fed7aa" }}>{error}</div>}
-    {loading && <p style={{ color: "#6b7280" }}>불러오는 중...</p>}
+    {loading && <p style={{ color: "#6b7280" }}>판매내역 불러오는 중...</p>}
+    {auxLoading && !loading && <p style={{ color: "#64748b", fontSize: 12 }}>원가·작품 분류 정보는 별도로 불러오는 중이야. 판매내역을 먼저 표시했어.</p>}
+    {auxError && <p role="alert" style={{ color: "#b45309", fontSize: 12 }}>원가·작품 분류 조회 일부 실패: {auxError}</p>}
 
     {!loading && !error && report && <>
+      <section style={{ marginBottom: 14 }}>
+        <button type="button" aria-expanded={statsOpen}
+          onClick={toggleStatistics}
+          style={{ ...button, width: "100%", textAlign: "left", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "14px 16px", background: "#f8fafc" }}>
+          <span>📊 매출·방송 통계</span>
+          <span style={{ color: "#475569", fontSize: 12 }}>{statsOpen ? "▲ 접기" : "▼ 펼치기 · 클릭할 때 통계 조회"}</span>
+        </button>
+      </section>
+      {statsOpen && statsLoading && <p style={{ color: "#64748b", marginBottom: 14 }}>매입·매출 통계 불러오는 중...</p>}
+      {statsOpen && statsError && <div role="alert" style={{ ...panel, marginBottom: 14, color: "#991b1b" }}>
+        {statsError} <button type="button" onClick={() => void loadStatistics(true)} style={{ ...button, marginLeft: 8 }}>다시 불러오기</button>
+      </div>}
+      {statsOpen && !statsLoading && !statsError && report.purchases && <>
       <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12 }}>
         <article style={{ ...card, background: "#eff6ff", borderColor: "#bfdbfe" }}><span style={label}>매출 · {selectedKey ? periodLabel(selectedKey) : "선택 기간"}</span><strong style={{ ...value, color: "#1d4ed8" }}>{money(currentSummary.sales)}원</strong><small style={{ color: "#6b7280" }}>필터·삭제 적용 · 주문 {money(currentSummary.order_count)}건</small></article>
         <article style={card}><span style={label}>매입관리 투입비용 · {selectedKey ? periodLabel(selectedKey) : "선택 기간"}</span><strong style={value}>{money(selectedPurchaseAmount)}원</strong><small style={{ color: "#6b7280" }}>확정 명세서 총금액은 통화별 원화 환산 · 기존 미확정 해외주문만 20% 및 주문당 5만원 추정 가산</small></article>
@@ -430,6 +497,16 @@ export default function SalesManagementPage() {
           </table></div>}
         <div style={{ padding: "8px 12px", color: "#6b7280", fontSize: 12 }}>* 방송시간 = 동일 videoId 내 최초 판매~최종 판매 간격이며 실제 송출시간과 다릅니다. 방송은 최초 판매일 기준 기간에 합산합니다. videoId 또는 soldAt 누락 상품은 방송 통계에서 제외됩니다.</div>
       </section>
+
+      <section style={panel}>
+        <div style={panelTitle}>구매자별 총 구매금액</div>
+        {!currentBuyers.length ? <div style={{ padding: 24, color: "#6b7280" }}>이 기간의 구매자가 없습니다.</div> :
+          <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 700, fontSize: 13 }}>
+            <thead><tr style={{ background: "#f9fafb" }}><th style={th}>구매자</th><th style={th}>선택 기간 구매금액</th><th style={th}>누적 구매금액</th><th style={th}>누적 주문</th><th style={th}>누적 아이템</th></tr></thead>
+            <tbody>{currentBuyers.map(buyer => { const total = allTimeByBuyer.get(buyer.buyer_nickname); return <tr key={buyer.buyer_nickname}><td style={td}><b>{buyer.buyer_nickname}</b></td><td style={td}>{money(buyer.sales)}원</td><td style={td}><b>{money(total?.sales || buyer.sales)}원</b></td><td style={td}>{money(total?.order_count || buyer.order_count)}건</td><td style={td}>{money(total?.item_count || buyer.item_count)}개</td></tr>; })}</tbody>
+          </table></div>}
+      </section>
+      </>}
 
       <section style={panel}>
         <div style={{ ...panelTitle, display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
@@ -475,14 +552,6 @@ export default function SalesManagementPage() {
         </div>}
       </section>
 
-      <section style={panel}>
-        <div style={panelTitle}>구매자별 총 구매금액</div>
-        {!currentBuyers.length ? <div style={{ padding: 24, color: "#6b7280" }}>이 기간의 구매자가 없습니다.</div> :
-          <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 700, fontSize: 13 }}>
-            <thead><tr style={{ background: "#f9fafb" }}><th style={th}>구매자</th><th style={th}>선택 기간 구매금액</th><th style={th}>누적 구매금액</th><th style={th}>누적 주문</th><th style={th}>누적 아이템</th></tr></thead>
-            <tbody>{currentBuyers.map(buyer => { const total = allTimeByBuyer.get(buyer.buyer_nickname); return <tr key={buyer.buyer_nickname}><td style={td}><b>{buyer.buyer_nickname}</b></td><td style={td}>{money(buyer.sales)}원</td><td style={td}><b>{money(total?.sales || buyer.sales)}원</b></td><td style={td}>{money(total?.order_count || buyer.order_count)}건</td><td style={td}>{money(total?.item_count || buyer.item_count)}개</td></tr>; })}</tbody>
-          </table></div>}
-      </section>
     </>}
   </main>;
 }

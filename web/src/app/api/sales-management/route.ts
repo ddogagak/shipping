@@ -247,9 +247,21 @@ function responseError(error: unknown) {
   return NextResponse.json({ ok: false, message }, { status: 500 });
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const view = new URL(request.url).searchParams.get("view");
+    // The sales-management page prioritizes the actual sales table.
+    // Purchase statistics are deliberately fetched only when the summary is expanded.
+    if (view === "purchases") {
+      const purchases = await purchaseTotals();
+      return NextResponse.json({ ok: true, purchases });
+    }
     const settings = await readSettings();
+    if (view === "sales") {
+      const report = await buildReport(settings.excluded_keywords);
+      return NextResponse.json({ ...report, settings });
+    }
+    // Legacy response remains intact for other pages that use this endpoint.
     const [report, purchases] = await Promise.all([buildReport(settings.excluded_keywords), purchaseTotals()]);
     return NextResponse.json({ ...report, purchases, settings });
   } catch (error) {
