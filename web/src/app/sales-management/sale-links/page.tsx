@@ -142,9 +142,17 @@ export default function WiseInventoryLinkPage() {
       await loadSales(videoId);
     } catch (e) {
       const typed = e as Error & { conflict?: boolean };
-      if (typed.conflict && action === "link" && window.confirm(typed.message + "\n기존 연결을 덮어쓸까?")) {
-        setBusy(false);
-        await save("link", true);
+      if (typed.conflict && action === "link" && !overwrite && window.confirm(typed.message + "\n기존 연결을 덮어쓸까?")) {
+        try {
+          const retried = await requestJson("/api/sales-management/sale-links", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "link", stock_ids: selectedIds, overwrite: true, target_type: currentTarget?.type, target_id: currentTarget?.id })
+          });
+          setMessage(retried.count + "개 실제 판매기록 연결 완료. 기존 연결만 교체했어.");
+          await loadSales(videoId);
+        } catch (retryError) {
+          setError(retryError instanceof Error ? retryError.message : "연결 덮어쓰기 실패");
+        }
         return;
       }
       setError(e instanceof Error ? e.message : "매칭 저장 실패");
