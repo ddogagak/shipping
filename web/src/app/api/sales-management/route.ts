@@ -199,6 +199,18 @@ async function buildReport(excludedKeywords: string[]) {
     if (imported > lastImportedAt) lastImportedAt = imported;
   }
 
+  // Count all original Wise merchandise lines belonging to each order.
+  // Shipping fees are not packable items; exclude them independently of
+  // sales-analysis keyword exclusions so transfers/other recorded goods count.
+  // Counts span all sales dates and do not depend on the currently selected month.
+  const orderItemCounts: Record<string, number> = {};
+  for (const [orderId, order] of orders) {
+    orderItemCounts[orderId] = order.items.filter((item: any) => {
+      const name = String(item.item_name || "").normalize("NFKC").toLowerCase();
+      return !SHIPPING_KEYWORDS.some(keyword => name.includes(keyword.toLowerCase()));
+    }).length;
+  }
+
   const monthly = new Map<string, any>();
   const quarterly = new Map<string, any>();
   const allTimeSalesRows: any[] = [];
@@ -234,6 +246,7 @@ async function buildReport(excludedKeywords: string[]) {
     monthly: serialize(monthly),
     quarterly: serialize(quarterly),
     all_time_sales_rows: allTimeSalesRows.sort((a, b) => String(b.ordered_at).localeCompare(String(a.ordered_at))),
+    order_item_counts: orderItemCounts,
     excluded_item_count: excludedItemCount,
     included_order_count: includedOrderCount,
     included_item_count: includedItemCount,
