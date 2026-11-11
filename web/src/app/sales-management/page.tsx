@@ -266,9 +266,9 @@ export default function SalesManagementPage() {
     const counts: Record<string, number> = { ...(report?.same_item_counts ?? {}) };
     const rows = report?.all_time_sales_rows ?? [];
     const nameKey = (name: string) => String(name || "").normalize("NFKC").toLowerCase().trim()
-      .replace(/^(?:#\\s*\\d+\\s*)+/, "")
-      .replace(/(?:\\s*#\\s*\\d+)+\\s*$/, "")
-      .replace(/\\s+/g, "");
+      .replace(/^(?:#\s*\d+\s*)+/, "")
+      .replace(/(?:\s*#\s*\d+)+\s*$/, "")
+      .replace(/\s+/g, "");
     const groupCounts = new Map<string, number>();
     for (const row of rows) {
       const name = nameKey(row.item_name);
