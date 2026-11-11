@@ -5,7 +5,7 @@ import { calculatePricing, calculateDomesticSalePricing } from "@/lib/pricing";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type Link = { wise_stock_id: number | string; purchase_item_id: string | null; random_box_id: string | null };
+type Link = { wise_stock_id: number | string; purchase_item_id: string | null; random_box_id: string | null; quantity: number };
 type CostTarget = { name: string; unit_cost: number | null; kind: "purchase" | "random_box" };
 const BATCH = 300;
 
@@ -26,7 +26,7 @@ async function getAllLinks(sb: ReturnType<typeof createServiceRoleClient>): Prom
   const all: Link[] = [];
   for (let offset = 0; ; offset += 1000) {
     const { data, error } = await sb.from("wise_sale_inventory_links")
-      .select("wise_stock_id,purchase_item_id,random_box_id")
+      .select("wise_stock_id,purchase_item_id,random_box_id,quantity")
       .order("wise_stock_id", { ascending: true }).range(offset, offset + 999);
     if (error) throw error;
     const rows = (data || []) as Link[];
@@ -100,19 +100,37 @@ export async function GET() {
       });
     }
 
+    const grouped = new Map<string, {
+      wise_stock_id: string; name: string[]; total_cost: number; unknown_cost: boolean;
+      parts: Array<{ target_id: string; target_type: "purchase" | "random_box"; name: string; quantity: number; unit_cost: number | null }>
+    }>();
+    for (const row of links) {
+      const stockId = String(row.wise_stock_id);
+      const key = row.purchase_item_id ? "purchase:" + row.purchase_item_id : "random_box:" + row.random_box_id;
+      const target = targetById.get(key);
+      const quantity = firstCount(row.quantity);
+      const kind = row.purchase_item_id ? "purchase" : "random_box";
+      const name = target?.name || "연결된 재고를 찾을 수 없음";
+      const group = grouped.get(stockId) || { wise_stock_id: stockId, name: [], total_cost: 0, unknown_cost: false, parts: [] };
+      group.name.push(name);
+      if (target?.unit_cost == null) group.unknown_cost = true;
+      else group.total_cost += target.unit_cost * quantity;
+      group.parts.push({
+        target_id: String(row.purchase_item_id || row.random_box_id),
+        target_type: kind, name, quantity, unit_cost: target?.unit_cost ?? null
+      });
+      grouped.set(stockId, group);
+    }
+    const matches = [...grouped.values()].map(group => ({
+      wise_stock_id: group.wise_stock_id,
+      target_id: group.parts.length === 1 ? group.parts[0].target_id : null,
+      target_type: group.parts.length === 1 ? group.parts[0].target_type : "multiple",
+      name: group.name.join(" + "),
+      unit_cost: group.unknown_cost ? null : group.total_cost,
+      parts: group.parts
+    }));
     return NextResponse.json({
-      ok: true, mapped_count: links.length,
-      matches: links.map(row => {
-        const key = row.purchase_item_id ? "purchase:" + row.purchase_item_id : "random_box:" + row.random_box_id;
-        const target = targetById.get(key);
-        return {
-          wise_stock_id: String(row.wise_stock_id),
-          target_id: String(row.purchase_item_id || row.random_box_id),
-          target_type: row.purchase_item_id ? "purchase" : "random_box",
-          name: target?.name || "연결된 재고를 찾을 수 없음",
-          unit_cost: target?.unit_cost ?? null
-        };
-      })
+      ok: true, mapped_count: matches.length, link_count: links.length, matches
     });
   } catch (error) {
     return NextResponse.json({
