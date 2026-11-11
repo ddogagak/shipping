@@ -119,6 +119,7 @@ export default function WiseInventoryLinkPage() {
       (!query || [c.name, c.option, c.series, c.purchase_date].some(v => String(v || "").toLowerCase().includes(query))))
       .slice(0, 150);
   }, [candidateSearch, candidates, candidateType]);
+  const candidateNames = useMemo(() => new Map(candidates.map(c => [c.type + "|" + c.id, c.name + (c.option ? " · " + c.option : "")])), [candidates]);
   const selectedIds = useMemo(() => sales.filter(s => selected[s.id]).map(s => s.id), [sales, selected]);
   const linkedCount = useMemo(() => sales.filter(s => s.link).length, [sales]);
   const currentTarget = useMemo(() => candidates.find(c => c.type + "|" + c.id === target), [candidates, target]);
@@ -203,7 +204,7 @@ export default function WiseInventoryLinkPage() {
         <div style={{ maxHeight: "68vh", overflow: "auto", border: "1px solid #e2e8f0", borderRadius: 8 }}>
           <table style={{ borderCollapse: "collapse", width: "100%" }}>
             <thead style={{ position: "sticky", top: 0, background: "#f8fafc", zIndex: 1 }}><tr><th style={th}>선택</th><th style={th}>상품군 · 판매가</th><th style={th}>수량</th><th style={th}>연결</th><th style={th}>상세</th></tr></thead>
-            <tbody>{filteredGroups.map(g => <FragmentGroup key={g.key} group={g} selected={selected} expanded={Boolean(expanded[g.key])} onSelect={checked => setGroupSelection(g, checked)} onToggle={() => setExpanded(prev => ({ ...prev, [g.key]: !prev[g.key] }))} onSelectItem={(id, val) => setSelected(prev => ({ ...prev, [id]: val }))} />)}</tbody>
+            <tbody>{filteredGroups.map(g => <FragmentGroup key={g.key} group={g} selected={selected} expanded={Boolean(expanded[g.key])} onSelect={checked => setGroupSelection(g, checked)} onToggle={() => setExpanded(prev => ({ ...prev, [g.key]: !prev[g.key] }))} onSelectItem={(id, val) => setSelected(prev => ({ ...prev, [id]: val }))} candidateNames={candidateNames} />)}</tbody>
           </table>
           {!filteredGroups.length && <p style={{ textAlign: "center", color: "#64748b", padding: 16 }}>{loadingSales ? "판매기록을 불러오는 중..." : "표시할 판매기록이 없어."}</p>}
         </div>
@@ -242,10 +243,11 @@ export default function WiseInventoryLinkPage() {
   </main>;
 }
 
-function FragmentGroup({ group, selected, expanded, onSelect, onToggle, onSelectItem }: {
+function FragmentGroup({ group, selected, expanded, onSelect, onToggle, onSelectItem, candidateNames }: {
   group: Family; selected: Record<string, boolean>; expanded: boolean;
   onSelect: (checked: boolean) => void; onToggle: () => void;
-  onSelectItem: (id: string, value: boolean) => void
+  onSelectItem: (id: string, value: boolean) => void;
+  candidateNames: Map<string, string>
 }) {
   const checkedCount = group.items.filter(x => selected[x.id]).length;
   return <>
@@ -266,7 +268,7 @@ function FragmentGroup({ group, selected, expanded, onSelect, onToggle, onSelect
         </tr></thead><tbody>{group.items.map(row => <tr key={row.id}>
           <td style={td}><input type="checkbox" checked={Boolean(selected[row.id])} onChange={e => onSelectItem(row.id, e.target.checked)} /></td>
           <td style={td}>{row.item_name}</td><td style={td}>{row.buyer_nickname}</td><td style={td}>{kst(row.sold_at)}</td>
-          <td style={td}>{targetKey(row.link) ? "연결됨" : "미연결"}</td>
+          <td style={td}>{targetKey(row.link) ? (candidateNames.get(targetKey(row.link)) || "연결됨 · 재고 확인 필요") : "미연결"}</td>
         </tr>)}</tbody></table>
       </div>
     </td></tr>}
