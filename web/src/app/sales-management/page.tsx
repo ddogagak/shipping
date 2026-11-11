@@ -14,7 +14,6 @@ type PurchaseTotals = { monthly: Record<string, number>; quarterly: Record<strin
 type Report = { purchases?: PurchaseTotals; monthly: Period[]; quarterly: Period[]; all_time_sales_rows: SaleRow[]; excluded_item_count: number; included_order_count: number; included_item_count: number; imported_order_count: number; last_imported_at: string | null; wise_gross_total: number; settings: { cumulative_settled_amount: number; excluded_keywords: string[]; item_settings: ItemSettings[] } };
 type StockItem = { display_name?: string; product_name?: string; option_text?: string; ordered_at?: string; purchase_quantity?: number; component_count?: number; unit_cost_price?: number; box_cost_price?: number };
 type ItemPrefs = Record<string, ItemPref>;
-type SaleProfitMatch = { wise_stock_id: string; target_id: string; target_type: "purchase" | "random_box"; name: string; unit_cost: number | null };
 const money = (value: number) => Math.round(Number(value || 0)).toLocaleString("ko-KR");
 const itemKey = (text: string) => text.normalize("NFKC").toLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
 const pageStyle: CSSProperties = { maxWidth: 1380, margin: "0 auto", padding: 24, color: "#111827" };
@@ -146,7 +145,6 @@ function cleanPrefs(value: unknown): ItemPrefs {
 
 export default function SalesManagementPage() {
   const [report, setReport] = useState<Report | null>(null);
-  const [saleMatches, setSaleMatches] = useState<Record<string, SaleProfitMatch>>({});
   const [seriesRules, setSeriesRules] = useState<SeriesKeywordRule[]>([]);
   const [seriesOverrides, setSeriesOverrides] = useState<Record<string,string>>({});
   const [keywords, setKeywords] = useState<string[]>([]);
@@ -181,23 +179,20 @@ export default function SalesManagementPage() {
 
     // Auxiliary lookups must never block the primary sales list.
     const auxiliary = Promise.all([
-      fetch("/api/sales-management/sale-profits", { cache: "no-store" }),
       fetch("/api/sales-management/item-keywords", { cache: "no-store" }),
       fetch("/api/sales-management/item-series-overrides", { cache: "no-store" }),
-    ]).then(async ([profitResponse, seriesResponse, overridesResponse]) => {
-      const [profitData, seriesData, overridesData] = await Promise.all([
-        profitResponse.json(), seriesResponse.json(), overridesResponse.json()
+    ]).then(async ([seriesResponse, overridesResponse]) => {
+      const [seriesData, overridesData] = await Promise.all([
+        seriesResponse.json(), overridesResponse.json()
       ]);
-      if (!profitResponse.ok || !profitData.ok) throw new Error(profitData.message || "연결재고 원가 조회 실패");
       if (!seriesResponse.ok || !seriesData.ok) throw new Error(seriesData.message || "작품 키워드 조회 실패");
       if (!overridesResponse.ok || !overridesData.ok) throw new Error(overridesData.message || "수동 작품 분류 조회 실패");
       setSeriesRules((seriesData.rules || []).map((rule: SeriesKeywordRule) => ({
         ...rule, series_name: rule.series_name === "야생" ? "쿠지" : rule.series_name
       })));
       setSeriesOverrides(Object.fromEntries((overridesData.overrides || []).map((rule: { item_key: string; series_name: string }) => [rule.item_key, rule.series_name])));
-      setSaleMatches(Object.fromEntries(((profitData.matches || []) as SaleProfitMatch[]).map(row => [row.wise_stock_id, row])));
     }).catch((e: unknown) => {
-      setAuxError(e instanceof Error ? e.message : "매칭·작품 분류 조회 실패");
+      setAuxError(e instanceof Error ? e.message : "작품 분류 조회 실패");
     }).finally(() => setAuxLoading(false));
 
     try {
@@ -272,13 +267,8 @@ export default function SalesManagementPage() {
   const allTimeByBuyer = useMemo(() => new Map(allTimeBuyers.map(buyer => [buyer.buyer_nickname, buyer])), [allTimeBuyers]);
   const itemRows = useMemo(() => currentRows.map(row => {
     const key = row.id;
-    const match = saleMatches[key];
-    const unitCost = match && Number.isFinite(Number(match.unit_cost)) && Number(match.unit_cost) > 0 ? Number(match.unit_cost) : null;
-    const gross = Number(row.item_price || 0);
-    const profit = unitCost != null && gross > 0 ? gross * 0.84 - unitCost : null;
-    const profitRate = profit != null && gross > 0 ? profit / gross * 100 : null;
-    return { ...row, key, series: analysisSeriesForSale(row.item_name,row.image_url,seriesRules,seriesOverrides), match, unitCost, profit, profitRate, memo: draftPrefs[key]?.memo || "" };
-  }), [currentRows, saleMatches, draftPrefs, seriesRules, seriesOverrides]);
+    return { ...row, key, series: analysisSeriesForSale(row.item_name,row.image_url,seriesRules,seriesOverrides), includeCost: draftPrefs[key]?.includeCost !== false, memo: draftPrefs[key]?.memo || "" };
+  }), [currentRows, draftPrefs, seriesRules, seriesOverrides]);
   const filteredItemRows = useMemo(() => {
     const productQuery = productSearch.normalize("NFKC").trim().toLowerCase();
     const buyerQuery = buyerSearch.normalize("NFKC").trim().toLowerCase();
@@ -310,10 +300,6 @@ export default function SalesManagementPage() {
     {title} <span aria-hidden="true">{saleSort.key === key ? (saleSort.direction === "desc" ? "▼" : "▲") : "↕"}</span>
   </button>;
   const filteredSales = filteredItemRows.reduce((sum, row) => sum + Number(row.item_price || 0), 0);
-  const matchedRows = filteredItemRows.filter(row => row.profit != null);
-  const matchedRevenue = matchedRows.reduce((sum, row) => sum + Number(row.item_price || 0), 0);
-  const matchedProfit = matchedRows.reduce((sum, row) => sum + Number(row.profit || 0), 0);
-  const matchedProfitRate = matchedRevenue > 0 ? (matchedProfit / matchedRevenue * 100) : null;
   const selectedPurchaseAmount = Number((granularity === "month" ? report?.purchases?.monthly : report?.purchases?.quarterly)?.[selectedKey] || 0);
   const cumulativePurchaseAmount = Number(report?.purchases?.cumulative || 0);
   const grossAfterPurchases = currentSummary.sales * 0.84 - selectedPurchaseAmount;
@@ -445,8 +431,8 @@ export default function SalesManagementPage() {
     {notice && <div style={{ padding: 10, marginBottom: 12, borderRadius: 8, background: "#f0fdf4", color: "#166534", fontSize: 13 }}>{notice}</div>}
     {error && <div role="alert" style={{ padding: 14, marginBottom: 16, borderRadius: 10, background: "#fff7ed", color: "#9a3412", border: "1px solid #fed7aa" }}>{error}</div>}
     {loading && <p style={{ color: "#6b7280" }}>판매내역 불러오는 중...</p>}
-    {auxLoading && !loading && <p style={{ color: "#64748b", fontSize: 12 }}>재고 매칭·작품 분류는 별도로 불러오는 중이야. 판매내역을 먼저 표시했어.</p>}
-    {auxError && <p role="alert" style={{ color: "#b45309", fontSize: 12 }}>재고 매칭·작품 분류 조회 일부 실패: {auxError}</p>}
+    {auxLoading && !loading && <p style={{ color: "#64748b", fontSize: 12 }}>작품 분류 정보는 별도로 불러오는 중이야. 판매내역을 먼저 표시했어.</p>}
+    {auxError && <p role="alert" style={{ color: "#b45309", fontSize: 12 }}>작품 분류 조회 일부 실패: {auxError}</p>}
 
     {!loading && !error && report && <>
       <section style={{ marginBottom: 14 }}>
@@ -522,10 +508,10 @@ export default function SalesManagementPage() {
           </div>
         </div>
         <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><input aria-label="상품명 검색" type="search" value={productSearch} onChange={e => setProductSearch(e.target.value)} placeholder="상품명 검색" style={{ height: 36, padding: "0 10px", border: "1px solid #d1d5db", borderRadius: 8, flex: "1 1 220px", maxWidth: 400 }} /><input aria-label="구매자 닉네임 검색" type="search" value={buyerSearch} onChange={e => setBuyerSearch(e.target.value)} placeholder="구매자 닉네임 검색" style={{ height: 36, padding: "0 10px", border: "1px solid #d1d5db", borderRadius: 8, flex: "1 1 220px", maxWidth: 400 }} /><span style={{ color: "#6b7280", fontSize: 12 }}>검색 결과 {filteredItemRows.length}건</span></div>
-        {hasUnsaved && <div style={{ padding: "8px 14px", background: "#fffbeb", color: "#92400e", fontSize: 12 }}>저장되지 않은 삭제·메모 변경사항이 있습니다.</div>}
+        {hasUnsaved && <div style={{ padding: "8px 14px", background: "#fffbeb", color: "#92400e", fontSize: 12 }}>저장되지 않은 판매원가 포함·삭제·메모 변경사항이 있습니다.</div>}
         {!filteredItemRows.length ? <div style={{ padding: 24, color: "#6b7280" }}>{productSearch.trim() || buyerSearch.trim() ? "검색 결과가 없습니다." : "이 기간의 판매 내역이 없습니다."}</div> :
-          <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1350, fontSize: 13 }}>
-            <thead><tr style={{ background: "#f9fafb" }}><th style={th}><input aria-label="현재 판매 내역 전체 선택" type="checkbox" checked={filteredItemRows.length > 0 && filteredItemRows.every(row => selectedItems.includes(row.key))} onChange={e => setSelectedItems(current => e.target.checked ? Array.from(new Set([...current, ...filteredItemRows.map(row => row.key)])) : current.filter(key => !filteredItemRows.some(row => row.key === key)))} /></th><th style={th} aria-sort={saleSort.key === "ordered_at" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("ordered_at", "판매 날짜")}</th><th style={th} aria-sort={saleSort.key === "buyer_nickname" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("buyer_nickname", "구매자 닉네임")}</th><th style={th} aria-sort={saleSort.key === "item_name" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("item_name", "아이템")}</th><th style={th}>작품</th><th style={th} aria-sort={saleSort.key === "item_price" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("item_price", "판매가")}</th><th style={th}>재고 매칭</th><th style={th}>예상 순이익률</th><th style={th}>메모</th></tr></thead>
+          <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1080, fontSize: 13 }}>
+            <thead><tr style={{ background: "#f9fafb" }}><th style={th}><input aria-label="현재 판매 내역 전체 선택" type="checkbox" checked={filteredItemRows.length > 0 && filteredItemRows.every(row => selectedItems.includes(row.key))} onChange={e => setSelectedItems(current => e.target.checked ? Array.from(new Set([...current, ...filteredItemRows.map(row => row.key)])) : current.filter(key => !filteredItemRows.some(row => row.key === key)))} /></th><th style={th} aria-sort={saleSort.key === "ordered_at" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("ordered_at", "판매 날짜")}</th><th style={th} aria-sort={saleSort.key === "buyer_nickname" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("buyer_nickname", "구매자 닉네임")}</th><th style={th} aria-sort={saleSort.key === "item_name" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("item_name", "아이템")}</th><th style={th}>작품</th><th style={th} aria-sort={saleSort.key === "item_price" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("item_price", "판매가")}</th><th style={th}>판매원가 포함</th><th style={th}>메모</th></tr></thead>
             <tbody>{sortedItemRows.map(row => {
               const draft = draftPrefs[row.key] || { includeCost: true, memo: "", deleted: false };
               const pendingDelete = draft.deleted === true && !savedPrefs[row.key]?.deleted;
@@ -540,14 +526,11 @@ export default function SalesManagementPage() {
                 </div></td>
                 <td style={td}><span style={{...chip,whiteSpace:"nowrap"}}>{row.series}</span></td>
                 <td style={td}>{money(row.item_price)}원</td>
-                <td style={td}>{row.match ? <Link href="/sales-management/sale-links" title={row.match.name} style={{ color: "#166534", textDecoration: "underline", fontWeight: 700 }}>✓ 매칭됨</Link> : <Link href="/sales-management/sale-links" style={{ color: "#b45309", textDecoration: "underline" }}>미매칭</Link>}</td>
-                <td style={td} title={row.profit != null ? `판매가 ${money(row.item_price)}원 × 0.84 − 비용포함개당원가 ${money(row.unitCost!)}원 = 예상이익 ${money(row.profit)}원 / ${row.match?.name || ""}` : row.match ? "원가가 없거나 판매가가 0원이어서 이익률을 계산할 수 없어." : "방송판매재고 연결 후 이익률을 계산해."}>
-                  {row.profitRate == null ? <span style={{ color: "#94a3b8" }}>—</span> : <b style={{ color: row.profitRate >= 15 ? "#15803d" : row.profitRate >= 0 ? "#b45309" : "#b91c1c" }}>{row.profitRate.toFixed(1)}%</b>}
-                </td>
+                <td style={td}><button onClick={() => updateDraft(row.key, { includeCost: !draft.includeCost })} aria-label="판매원가 포함 여부 전환" style={{ ...button, minWidth: 44, padding: "5px 10px", background: draft.includeCost ? "#dcfce7" : "#f3f4f6", borderColor: draft.includeCost ? "#86efac" : "#d1d5db", color: draft.includeCost ? "#166534" : "#6b7280" }}>{draft.includeCost ? "Y" : "N"}</button></td>
                 <td style={td}><input value={draft.memo} onChange={e => updateDraft(row.key, { memo: e.target.value })} placeholder="메모 입력" style={{ width: 220, maxWidth: "45vw", height: 32, padding: "0 8px", border: "1px solid #d1d5db", borderRadius: 6 }} /></td>
               </tr>;
             })}</tbody>
-            <tfoot><tr style={{ background: "#f9fafb", fontWeight: 800 }}><td style={td} colSpan={5}>합계</td><td style={td}>{money(filteredSales)}원</td><td style={td}>{matchedRows.length}/{filteredItemRows.length}건 원가확인</td><td style={td}>{matchedProfitRate == null ? "—" : matchedProfitRate.toFixed(1) + "%"}<small style={{ display: "block", fontWeight: 400, color: "#64748b" }}>매칭된 매출 기준 · {money(matchedProfit)}원</small></td><td style={td}>—</td></tr></tfoot>
+            <tfoot><tr style={{ background: "#f9fafb", fontWeight: 800 }}><td style={td} colSpan={5}>합계</td><td style={td}>{money(filteredSales)}원</td><td style={td}>—</td><td style={td}>—</td></tr></tfoot>
           </table></div>}
         {deletedItems.length > 0 && <div style={{ padding: 14, borderTop: "1px solid #e5e7eb", fontSize: 12 }}>
           <b>삭제된 판매 내역 · {deletedItems.length}건</b>
