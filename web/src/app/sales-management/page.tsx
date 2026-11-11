@@ -498,6 +498,15 @@ export default function SalesManagementPage() {
         <div style={{ padding: "8px 12px", color: "#6b7280", fontSize: 12 }}>* 방송시간 = 동일 videoId 내 최초 판매~최종 판매 간격이며 실제 송출시간과 다릅니다. 방송은 최초 판매일 기준 기간에 합산합니다. videoId 또는 soldAt 누락 상품은 방송 통계에서 제외됩니다.</div>
       </section>
 
+      <section style={panel}>
+        <div style={panelTitle}>구매자별 총 구매금액</div>
+        {!currentBuyers.length ? <div style={{ padding: 24, color: "#6b7280" }}>이 기간의 구매자가 없습니다.</div> :
+          <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 700, fontSize: 13 }}>
+            <thead><tr style={{ background: "#f9fafb" }}><th style={th}>구매자</th><th style={th}>선택 기간 구매금액</th><th style={th}>누적 구매금액</th><th style={th}>누적 주문</th><th style={th}>누적 아이템</th></tr></thead>
+            <tbody>{currentBuyers.map(buyer => { const total = allTimeByBuyer.get(buyer.buyer_nickname); return <tr key={buyer.buyer_nickname}><td style={td}><b>{buyer.buyer_nickname}</b></td><td style={td}>{money(buyer.sales)}원</td><td style={td}><b>{money(total?.sales || buyer.sales)}원</b></td><td style={td}>{money(total?.order_count || buyer.order_count)}건</td><td style={td}>{money(total?.item_count || buyer.item_count)}개</td></tr>; })}</tbody>
+          </table></div>}
+      </section>
+      </>}
       </>}
 
       <section style={panel}>
@@ -544,16 +553,6 @@ export default function SalesManagementPage() {
         </div>}
       </section>
 
-      {statsOpen && !statsLoading && !statsError && report.purchases && <>
-      <section style={panel}>
-        <div style={panelTitle}>구매자별 총 구매금액</div>
-        {!currentBuyers.length ? <div style={{ padding: 24, color: "#6b7280" }}>이 기간의 구매자가 없습니다.</div> :
-          <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 700, fontSize: 13 }}>
-            <thead><tr style={{ background: "#f9fafb" }}><th style={th}>구매자</th><th style={th}>선택 기간 구매금액</th><th style={th}>누적 구매금액</th><th style={th}>누적 주문</th><th style={th}>누적 아이템</th></tr></thead>
-            <tbody>{currentBuyers.map(buyer => { const total = allTimeByBuyer.get(buyer.buyer_nickname); return <tr key={buyer.buyer_nickname}><td style={td}><b>{buyer.buyer_nickname}</b></td><td style={td}>{money(buyer.sales)}원</td><td style={td}><b>{money(total?.sales || buyer.sales)}원</b></td><td style={td}>{money(total?.order_count || buyer.order_count)}건</td><td style={td}>{money(total?.item_count || buyer.item_count)}개</td></tr>; })}</tbody>
-          </table></div>}
-      </section>
-      </>}
     </>}
   </main>;
 }
