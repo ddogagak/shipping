@@ -507,7 +507,6 @@ export default function SalesManagementPage() {
           </table></div>}
       </section>
       </>}
-      </>}
 
       <section style={panel}>
         <div style={{ ...panelTitle, display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
