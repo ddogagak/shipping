@@ -11,7 +11,7 @@ type Period = { key: string; sales: number; order_count: number; item_count: num
 type ItemPref = { includeCost: boolean; memo: string; deleted?: boolean };
 type ItemSettings = { id: string; includeCost: boolean; memo: string; deleted: boolean };
 type PurchaseTotals = { monthly: Record<string, number>; quarterly: Record<string, number>; cumulative: number; included_orders: number; unsupported_currencies: string[]; exchange_rates: Record<string, number>; overseas_tax_multiplier: number; overseas_shipping_per_order_krw: number };
-type Report = { order_item_counts?: Record<string, number>; purchases?: PurchaseTotals; monthly: Period[]; quarterly: Period[]; all_time_sales_rows: SaleRow[]; excluded_item_count: number; included_order_count: number; included_item_count: number; imported_order_count: number; last_imported_at: string | null; wise_gross_total: number; settings: { cumulative_settled_amount: number; excluded_keywords: string[]; item_settings: ItemSettings[] } };
+type Report = { same_item_counts?: Record<string, number>; purchases?: PurchaseTotals; monthly: Period[]; quarterly: Period[]; all_time_sales_rows: SaleRow[]; excluded_item_count: number; included_order_count: number; included_item_count: number; imported_order_count: number; last_imported_at: string | null; wise_gross_total: number; settings: { cumulative_settled_amount: number; excluded_keywords: string[]; item_settings: ItemSettings[] } };
 type StockItem = { display_name?: string; product_name?: string; option_text?: string; ordered_at?: string; purchase_quantity?: number; component_count?: number; unit_cost_price?: number; box_cost_price?: number };
 type ItemPrefs = Record<string, ItemPref>;
 const money = (value: number) => Math.round(Number(value || 0)).toLocaleString("ko-KR");
@@ -259,9 +259,8 @@ export default function SalesManagementPage() {
   const selectedKey = periods.some(p => p.key === selectedPeriod) ? selectedPeriod : periods[0]?.key || "";
   const rawCurrent = periods.find(p => p.key === selectedKey);
   const currentRows = useMemo(() => visibleRows(rawCurrent?.sales_rows || [], savedPrefs), [rawCurrent, savedPrefs]);
-  // Per-order merchandise count is calculated once on the server from all Wise sales dates,
-  // so it stays correct across month switches and sales-list search filters.
-  const orderItemCounts = report?.order_item_counts ?? {};
+  // Same-name quantity within each Wise order (independent of month and search filters).
+  const sameItemCounts = report?.same_item_counts ?? {};
   const currentSummary = useMemo(() => summarizeRows(rawCurrent?.sales_rows || [], savedPrefs), [rawCurrent, savedPrefs]);
   const broadcastByPeriod = useMemo(() => statsOpen ? broadcastMetrics(report?.all_time_sales_rows || [], savedPrefs, granularity) : new Map<string, BroadcastMetrics>(), [report, savedPrefs, granularity, statsOpen]);
   const currentBroadcast = broadcastByPeriod.get(selectedKey) || { count: 0, durationMs: 0, sales: 0, itemCount: 0 };
@@ -270,8 +269,8 @@ export default function SalesManagementPage() {
   const allTimeByBuyer = useMemo(() => new Map(allTimeBuyers.map(buyer => [buyer.buyer_nickname, buyer])), [allTimeBuyers]);
   const itemRows = useMemo(() => currentRows.map(row => {
     const key = row.id;
-    return { ...row, key, orderItemCount: orderItemCounts[row.order_id] ?? null, series: analysisSeriesForSale(row.item_name,row.image_url,seriesRules,seriesOverrides), includeCost: draftPrefs[key]?.includeCost !== false, memo: draftPrefs[key]?.memo || "" };
-  }), [currentRows, orderItemCounts, draftPrefs, seriesRules, seriesOverrides]);
+    return { ...row, key, sameItemCount: sameItemCounts[row.id] ?? null, series: analysisSeriesForSale(row.item_name,row.image_url,seriesRules,seriesOverrides), includeCost: draftPrefs[key]?.includeCost !== false, memo: draftPrefs[key]?.memo || "" };
+  }), [currentRows, sameItemCounts, draftPrefs, seriesRules, seriesOverrides]);
   const filteredItemRows = useMemo(() => {
     const productQuery = productSearch.normalize("NFKC").trim().toLowerCase();
     const buyerQuery = buyerSearch.normalize("NFKC").trim().toLowerCase();
@@ -514,7 +513,7 @@ export default function SalesManagementPage() {
         {hasUnsaved && <div style={{ padding: "8px 14px", background: "#fffbeb", color: "#92400e", fontSize: 12 }}>저장되지 않은 판매원가 포함·삭제·메모 변경사항이 있습니다.</div>}
         {!filteredItemRows.length ? <div style={{ padding: 24, color: "#6b7280" }}>{productSearch.trim() || buyerSearch.trim() ? "검색 결과가 없습니다." : "이 기간의 판매 내역이 없습니다."}</div> :
           <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1080, fontSize: 13 }}>
-            <thead><tr style={{ background: "#f9fafb" }}><th style={th}><input aria-label="현재 판매 내역 전체 선택" type="checkbox" checked={filteredItemRows.length > 0 && filteredItemRows.every(row => selectedItems.includes(row.key))} onChange={e => setSelectedItems(current => e.target.checked ? Array.from(new Set([...current, ...filteredItemRows.map(row => row.key)])) : current.filter(key => !filteredItemRows.some(row => row.key === key)))} /></th><th style={th} aria-sort={saleSort.key === "ordered_at" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("ordered_at", "판매 날짜")}</th><th style={th} aria-sort={saleSort.key === "buyer_nickname" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("buyer_nickname", "구매자 닉네임")}</th><th style={th} aria-sort={saleSort.key === "item_name" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("item_name", "아이템")}</th><th style={th}>작품</th><th style={th} aria-sort={saleSort.key === "item_price" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("item_price", "판매가")}</th><th style={th}>판매원가 포함</th><th style={th} title="와이스 주문 ID가 같은 전체 상품 수 · 배송비 제외 · 검색/기간과 무관">같은 주문 상품 수</th><th style={th}>메모</th></tr></thead>
+            <thead><tr style={{ background: "#f9fafb" }}><th style={th}><input aria-label="현재 판매 내역 전체 선택" type="checkbox" checked={filteredItemRows.length > 0 && filteredItemRows.every(row => selectedItems.includes(row.key))} onChange={e => setSelectedItems(current => e.target.checked ? Array.from(new Set([...current, ...filteredItemRows.map(row => row.key)])) : current.filter(key => !filteredItemRows.some(row => row.key === key)))} /></th><th style={th} aria-sort={saleSort.key === "ordered_at" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("ordered_at", "판매 날짜")}</th><th style={th} aria-sort={saleSort.key === "buyer_nickname" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("buyer_nickname", "구매자 닉네임")}</th><th style={th} aria-sort={saleSort.key === "item_name" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("item_name", "아이템")}</th><th style={th}>작품</th><th style={th} aria-sort={saleSort.key === "item_price" ? (saleSort.direction === "asc" ? "ascending" : "descending") : "none"}>{sortHeader("item_price", "판매가")}</th><th style={th}>판매원가 포함</th><th style={th} title="같은 와이스 주문 내 동일 상품명 개수 · 앞뒤 #번호 제외 · 검색/기간과 무관">동일상품 수량</th><th style={th}>메모</th></tr></thead>
             <tbody>{sortedItemRows.map(row => {
               const draft = draftPrefs[row.key] || { includeCost: true, memo: "", deleted: false };
               const pendingDelete = draft.deleted === true && !savedPrefs[row.key]?.deleted;
@@ -530,7 +529,7 @@ export default function SalesManagementPage() {
                 <td style={td}><span style={{...chip,whiteSpace:"nowrap"}}>{row.series}</span></td>
                 <td style={td}>{money(row.item_price)}원</td>
                 <td style={td}><button onClick={() => updateDraft(row.key, { includeCost: !draft.includeCost })} aria-label="판매원가 포함 여부 전환" style={{ ...button, minWidth: 44, padding: "5px 10px", background: draft.includeCost ? "#dcfce7" : "#f3f4f6", borderColor: draft.includeCost ? "#86efac" : "#d1d5db", color: draft.includeCost ? "#166534" : "#6b7280" }}>{draft.includeCost ? "Y" : "N"}</button></td>
-                <td style={td} title={`같은 와이스 주문 전체 상품 수 (배송비 제외): ${row.orderItemCount ?? "확인 불가"}개`}><b style={{ color: Number(row.orderItemCount || 0) > 1 ? "#1d4ed8" : "#475569" }}>{row.orderItemCount == null ? "—" : row.orderItemCount + "개"}</b></td>
+                <td style={td} title={`같은 와이스 주문에서 동일한 상품명 수량 (#번호 제외): ${row.sameItemCount ?? "확인 불가"}개`}><b style={{ color: Number(row.sameItemCount || 0) > 1 ? "#1d4ed8" : "#475569" }}>{row.sameItemCount == null ? "—" : row.sameItemCount + "개"}</b></td>
                 <td style={td}><input value={draft.memo} onChange={e => updateDraft(row.key, { memo: e.target.value })} placeholder="메모 입력" style={{ width: 220, maxWidth: "45vw", height: 32, padding: "0 8px", border: "1px solid #d1d5db", borderRadius: 6 }} /></td>
               </tr>;
             })}</tbody>
