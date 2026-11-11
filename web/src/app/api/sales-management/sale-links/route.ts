@@ -65,14 +65,14 @@ async function getShows(month: string) {
       .sort((a, b) => b.first_sale.localeCompare(a.first_sale))
   });
 }
-async function getSales(videoId: string) {
-  if (!videoId || videoId.length > 160) return fail("방송 ID가 올바르지 않아.");
+async function getSales(videoIds: string[]) {
+  if (!videoIds.length || videoIds.length > 80 || videoIds.some(id => !id || id.length > 160)) return fail("조회할 방송을 1~80개 선택해줘.");
   const sb = createServiceRoleClient();
   const sales: any[] = [];
   for (let start = 0; ; start += PAGE_SIZE) {
     const { data, error } = await sb.from("domestic_wise_item_photo")
       .select("wise_stock_id,video_id,wise_user_id,buyer_nickname,item_name,item_price,image_url,sold_at")
-      .eq("video_id", videoId).order("sold_at", { ascending: true })
+      .in("video_id", videoIds).order("sold_at", { ascending: true })
       .order("wise_stock_id", { ascending: true })
       .range(start, start + PAGE_SIZE - 1);
     if (error) throw error;
@@ -84,21 +84,27 @@ async function getSales(videoId: string) {
   for (let i = 0; i < sales.length; i += MAX_UPDATE) {
     const ids = sales.slice(i, i + MAX_UPDATE).map(row => String(row.wise_stock_id));
     const { data, error } = await sb.from("wise_sale_inventory_links")
-      .select("wise_stock_id,purchase_item_id,random_box_id,updated_at")
+      .select("id,wise_stock_id,purchase_item_id,random_box_id,quantity,updated_at")
       .in("wise_stock_id", ids);
     if (error) throw error;
     links.push(...(data || []));
   }
-  const linkMap = new Map(links.map(row => [String(row.wise_stock_id), row]));
+  const linkMap = new Map<string, any[]>();
+  for (const link of links) {
+    const key = String(link.wise_stock_id);
+    const group = linkMap.get(key) || [];
+    group.push(link);
+    linkMap.set(key, group);
+  }
   return NextResponse.json({
-    ok: true, video_id: videoId,
+    ok: true, video_ids: videoIds,
     sales: sales.map(row => ({
       id: String(row.wise_stock_id),
       video_id: row.video_id, wise_user_id: row.wise_user_id,
       buyer_nickname: row.buyer_nickname,
       item_name: row.item_name, item_price: Number(row.item_price || 0),
       image_url: row.image_url, sold_at: row.sold_at,
-      link: linkMap.get(String(row.wise_stock_id)) || null
+      links: linkMap.get(String(row.wise_stock_id)) || []
     }))
   });
 }
@@ -156,7 +162,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const mode = url.searchParams.get("mode") || "shows";
     if (mode === "shows") return await getShows(url.searchParams.get("month") || "");
-    if (mode === "sales") return await getSales(url.searchParams.get("video_id") || "");
+    if (mode === "sales") return await getSales([...new Set(url.searchParams.getAll("video_id").map(id => id.trim()).filter(Boolean))]);
     if (mode === "inventory") return await getInventory();
     return fail("조회 종류가 올바르지 않아.");
   } catch (error) {
@@ -176,59 +182,90 @@ export async function POST(request: Request) {
     const { data: actual, error: actualError } = await sb.from("domestic_wise_item_photo")
       .select("wise_stock_id,video_id").in("wise_stock_id", ids);
     if (actualError) throw actualError;
-    if (!actual || actual.length !== ids.length || actual.some(row => !row.video_id) ||
-        new Set(actual.map(row => row.video_id)).size !== 1) {
-      return fail("선택한 판매기록이 존재하지 않거나 서로 다른 방송이야. 새로고침 후 다시 선택해줘.", 409);
+    if (!actual || actual.length !== ids.length || actual.some(row => !row.video_id)) {
+      return fail("선택한 판매기록이 존재하지 않거나 방송 정보가 없어. 새로고침 후 다시 선택해줘.", 409);
     }
+
     if (action === "unlink") {
-      const { error } = await sb.from("wise_sale_inventory_links").delete().in("wise_stock_id", ids);
+      const type = String(body.target_type || "");
+      const targetId = String(body.target_id || "");
+      if (type || targetId) {
+        if (!["purchase_item", "random_box"].includes(type) ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId)) {
+          return fail("해제할 재고 연결이 올바르지 않아.");
+        }
+      }
+      let query = sb.from("wise_sale_inventory_links").delete().in("wise_stock_id", ids);
+      if (type) query = query.eq(type === "purchase_item" ? "purchase_item_id" : "random_box_id", targetId);
+      const { data, error } = await query.select("id");
       if (error) throw error;
-      return NextResponse.json({ ok: true, count: ids.length });
+      return NextResponse.json({ ok: true, count: (data || []).length });
     }
 
-    const type = String(body.target_type || "");
-    const targetId = String(body.target_id || "");
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId) ||
-        !["purchase_item", "random_box"].includes(type)) return fail("연결할 방송판매재고를 선택해줘.");
+    const inputTargets: unknown[] = Array.isArray(body.targets) ? body.targets :
+      [{ target_type: body.target_type, target_id: body.target_id, quantity: body.quantity ?? 1 }];
+    if (inputTargets.length < 1 || inputTargets.length > 16) return fail("방송판매재고를 1~16개 선택해줘.");
+    const targets: Array<{target_type: "purchase_item" | "random_box"; target_id: string; quantity: number}> = [];
+    const seen = new Set<string>();
+    for (const input of inputTargets) {
+      if (!input || typeof input !== "object") return fail("재고 선택 정보가 올바르지 않아.");
+      const row = input as Record<string, unknown>;
+      const type = String(row.target_type || "");
+      const targetId = String(row.target_id || "");
+      const quantity = Number(row.quantity);
+      if (!["purchase_item", "random_box"].includes(type) ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId) ||
+        !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 9999) {
+        return fail("재고 종류·ID 또는 연결 수량(1~9999)을 확인해줘.");
+      }
+      const key = type + "|" + targetId;
+      if (seen.has(key)) return fail("중복 선택된 방송판매재고가 있어.");
+      seen.add(key);
+      targets.push({target_type: type as "purchase_item" | "random_box", target_id: targetId, quantity});
+    }
+    if (ids.length * targets.length > 1200) return fail("한 번에 최대 1,200개 연결을 저장할 수 있어.");
 
-    if (type === "purchase_item") {
-      const { data: item, error } = await sb.from("purchase_items")
-        .select("id,purchase_order_id").eq("id", targetId).maybeSingle();
-      if (error) throw error;
-      if (!item) return fail("선택한 매입상품이 없어.", 404);
-      const { data: order, error: orderError } = await sb.from("purchase_orders")
-        .select("order_status").eq("id", item.purchase_order_id).maybeSingle();
+    const purchaseIds = targets.filter(t => t.target_type === "purchase_item").map(t => t.target_id);
+    const boxIds = targets.filter(t => t.target_type === "random_box").map(t => t.target_id);
+    if (purchaseIds.length) {
+      const { data: items, error: itemError } = await sb.from("purchase_items")
+        .select("id,purchase_order_id").in("id", purchaseIds);
+      if (itemError) throw itemError;
+      if ((items || []).length !== purchaseIds.length) return fail("선택한 매입상품 중 찾을 수 없는 상품이 있어.", 404);
+      const orderIds = [...new Set((items || []).map(item => String(item.purchase_order_id)))];
+      const { data: orders, error: orderError } = await sb.from("purchase_orders")
+        .select("id,order_status").in("id", orderIds);
       if (orderError) throw orderError;
-      if (order?.order_status !== "입고완료") return fail("입고완료된 방송판매재고만 연결할 수 있어.", 409);
-    } else {
-      const { data: box, error } = await sb.from("sale_random_boxes")
-        .select("id").eq("id", targetId).maybeSingle();
-      if (error) throw error;
-      if (!box) return fail("선택한 랜덤박스가 없어.", 404);
+      if ((orders || []).length !== orderIds.length || (orders || []).some(order => order.order_status !== "입고완료")) {
+        return fail("입고완료된 방송판매재고만 연결할 수 있어.", 409);
+      }
+    }
+    if (boxIds.length) {
+      const { data: boxes, error: boxError } = await sb.from("sale_random_boxes")
+        .select("id").in("id", boxIds);
+      if (boxError) throw boxError;
+      if ((boxes || []).length !== boxIds.length) return fail("선택한 랜덤박스 중 찾을 수 없는 상품이 있어.", 404);
     }
 
-    const { data: existing, error: existingError } = await sb.from("wise_sale_inventory_links")
-      .select("wise_stock_id,purchase_item_id,random_box_id").in("wise_stock_id", ids);
-    if (existingError) throw existingError;
-    const different = (existing || []).filter(row =>
-      type === "purchase_item" ? row.purchase_item_id !== targetId : row.random_box_id !== targetId
-    );
-    if (different.length && body.overwrite !== true) {
-      return NextResponse.json({
-        ok: false, conflict: true, count: different.length,
-        message: different.length + "개 판매항목은 이미 다른 재고와 연결되어 있어. 덮어쓸지 확인해줘."
-      }, { status: 409 });
-    }
     const now = new Date().toISOString();
-    const rows = ids.map(wise_stock_id => ({
-      wise_stock_id,
-      purchase_item_id: type === "purchase_item" ? targetId : null,
-      random_box_id: type === "random_box" ? targetId : null,
-      updated_at: now
-    }));
-    const { error: saveError } = await sb.from("wise_sale_inventory_links").upsert(rows, { onConflict: "wise_stock_id" });
-    if (saveError) throw saveError;
-    return NextResponse.json({ ok: true, count: ids.length });
+    let saved = 0;
+    for (const type of ["purchase_item", "random_box"] as const) {
+      const selectedTargets = targets.filter(t => t.target_type === type);
+      if (!selectedTargets.length) continue;
+      const rows = ids.flatMap(wise_stock_id => selectedTargets.map(t => ({
+        wise_stock_id, purchase_item_id: type === "purchase_item" ? t.target_id : null,
+        random_box_id: type === "random_box" ? t.target_id : null,
+        quantity: t.quantity, updated_at: now
+      })));
+      const conflict = type === "purchase_item" ? "wise_stock_id,purchase_item_id" : "wise_stock_id,random_box_id";
+      for (let start = 0; start < rows.length; start += 200) {
+        const { error } = await sb.from("wise_sale_inventory_links")
+          .upsert(rows.slice(start, start + 200), { onConflict: conflict });
+        if (error) throw error;
+      }
+      saved += rows.length;
+    }
+    return NextResponse.json({ ok: true, count: saved });
   } catch (error) {
     return fail(errorText(error), 500);
   }

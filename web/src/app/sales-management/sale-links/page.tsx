@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 
-type LinkRow = { wise_stock_id: number | string; purchase_item_id: string | null; random_box_id: string | null };
-type Sale = { id: string; video_id: string; wise_user_id: string | null; buyer_nickname: string; item_name: string; item_price: number; image_url: string | null; sold_at: string | null; link: LinkRow | null };
+type LinkRow = { id: number; wise_stock_id: number | string; purchase_item_id: string | null; random_box_id: string | null; quantity: number };
+type Sale = { id: string; video_id: string; wise_user_id: string | null; buyer_nickname: string; item_name: string; item_price: number; image_url: string | null; sold_at: string | null; links: LinkRow[] };
 type Show = { video_id: string; first_sale: string; last_sale: string; revenue: number; count: number; buyer_count: number };
 type Candidate = { type: "purchase_item" | "random_box"; id: string; name: string; option: string; image_url: string | null; series: string; unit_price: number; currency: string; component_count: number; sale_price: number | null; stock_status: string; purchase_date: string };
 type Family = { key: string; title: string; count: number; revenue: number; linked: number; image: string | null; items: Sale[] };
@@ -37,21 +37,21 @@ function monthNow() {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit" }).formatToParts(date);
   return (parts.find(x => x.type === "year")?.value || "") + "-" + (parts.find(x => x.type === "month")?.value || "");
 }
-function targetKey(row: LinkRow | null) {
-  if (!row) return "";
+function targetKey(row: LinkRow) {
   return row.purchase_item_id ? "purchase_item|" + row.purchase_item_id : row.random_box_id ? "random_box|" + row.random_box_id : "";
 }
 export default function WiseInventoryLinkPage() {
   const [month, setMonth] = useState(monthNow);
   const [shows, setShows] = useState<Show[]>([]);
   const [videoId, setVideoId] = useState("");
+  const [videoIds, setVideoIds] = useState<string[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [groupSearch, setGroupSearch] = useState("");
   const [candidateSearch, setCandidateSearch] = useState("");
   const [candidateType, setCandidateType] = useState("all");
-  const [target, setTarget] = useState("");
+  const [targets, setTargets] = useState<Record<string, number>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [onlyUnlinked, setOnlyUnlinked] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -67,6 +67,7 @@ export default function WiseInventoryLinkPage() {
       const data = await requestJson("/api/sales-management/sale-links?mode=shows&month=" + encodeURIComponent(month));
       setShows(data.shows || []);
       setVideoId("");
+      setVideoIds([]);
       setSales([]);
       setSelected({});
     } catch (e) { setError(e instanceof Error ? e.message : "방송 조회 실패"); }
@@ -74,17 +75,19 @@ export default function WiseInventoryLinkPage() {
   }, [month]);
   useEffect(() => { void loadShows(); }, [loadShows]);
 
-  const loadSales = useCallback(async (id: string) => {
-    if (!id) return;
+  const loadSales = useCallback(async (ids: string[]) => {
+    if (!ids.length) { setSales([]); setSelected({}); return; }
     setLoadingSales(true); setError("");
     try {
-      const data = await requestJson("/api/sales-management/sale-links?mode=sales&video_id=" + encodeURIComponent(id));
+      const params = new URLSearchParams({ mode: "sales" });
+      ids.forEach(id => params.append("video_id", id));
+      const data = await requestJson("/api/sales-management/sale-links?" + params.toString());
       setSales(data.sales || []);
       setSelected({});
     } catch (e) { setError(e instanceof Error ? e.message : "판매기록 조회 실패"); }
     finally { setLoadingSales(false); }
   }, []);
-  useEffect(() => { if (videoId) void loadSales(videoId); }, [videoId, loadSales]);
+  useEffect(() => { void loadSales(videoIds); }, [videoIds, loadSales]);
 
   const loadInventory = useCallback(async () => {
     setLoadingInventory(true);
@@ -103,7 +106,7 @@ export default function WiseInventoryLinkPage() {
       const g = map.get(key) || { key, title: name + " · " + won(row.item_price), count: 0, revenue: 0, linked: 0, image: row.image_url || null, items: [] };
       g.count += 1;
       g.revenue += row.item_price;
-      g.linked += row.link ? 1 : 0;
+      g.linked += row.links?.length ? 1 : 0;
       g.image ||= row.image_url;
       g.items.push(row);
       map.set(key, g);
@@ -121,8 +124,11 @@ export default function WiseInventoryLinkPage() {
   }, [candidateSearch, candidates, candidateType]);
   const candidateNames = useMemo(() => new Map(candidates.map(c => [c.type + "|" + c.id, c.name + (c.option ? " · " + c.option : "")])), [candidates]);
   const selectedIds = useMemo(() => sales.filter(s => selected[s.id]).map(s => s.id), [sales, selected]);
-  const linkedCount = useMemo(() => sales.filter(s => s.link).length, [sales]);
-  const currentTarget = useMemo(() => candidates.find(c => c.type + "|" + c.id === target), [candidates, target]);
+  const linkedCount = useMemo(() => sales.filter(s => s.links?.length).length, [sales]);
+  const selectedTargets = useMemo(() => Object.entries(targets).filter(([, quantity]) => quantity >= 1).map(([key, quantity]) => {
+    const candidate = candidates.find(c => c.type + "|" + c.id === key);
+    return candidate ? { ...candidate, quantity } : null;
+  }).filter((value): value is Candidate & { quantity: number } => value !== null), [candidates, targets]);
   const setGroupSelection = (family: Family, checked: boolean) => {
     setSelected(prev => {
       const next = { ...prev };
@@ -130,36 +136,32 @@ export default function WiseInventoryLinkPage() {
       return next;
     });
   };
-  async function save(action: "link" | "unlink", overwrite = false) {
-    if (!videoId || !selectedIds.length || busy) return;
-    if (action === "link" && !currentTarget) { setError("먼저 오른쪽에서 연결할 방송판매재고를 골라줘."); return; }
+  async function save(action: "link" | "unlink", single?: { saleId: string; target: LinkRow }) {
+    const ids = single ? [single.saleId] : selectedIds;
+    if (!videoIds.length || !ids.length || busy) return;
+    if (action === "link" && !selectedTargets.length) { setError("오른쪽에서 연결할 방송판매재고를 체크해줘."); return; }
     setBusy(true); setError(""); setMessage("");
     try {
-      const body = { action, stock_ids: selectedIds, overwrite, target_type: currentTarget?.type, target_id: currentTarget?.id };
+      const target = single?.target;
+      const body = {
+        action, stock_ids: ids,
+        targets: action === "link" ? selectedTargets.map(row => ({
+          target_type: row.type, target_id: row.id, quantity: row.quantity
+        })) : undefined,
+        target_type: target ? (target.purchase_item_id ? "purchase_item" : "random_box") : undefined,
+        target_id: target ? (target.purchase_item_id || target.random_box_id) : undefined
+      };
       const data = await requestJson("/api/sales-management/sale-links", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
       });
-      setMessage(data.count + "개 실제 판매기록 " + (action === "link" ? "연결" : "연결 해제") + " 완료. 원본 매출·재고 수량은 변경되지 않았어.");
-      await loadSales(videoId);
-    } catch (e) {
-      const typed = e as Error & { conflict?: boolean };
-      if (typed.conflict && action === "link" && !overwrite && window.confirm(typed.message + "\n기존 연결을 덮어쓸까?")) {
-        try {
-          const retried = await requestJson("/api/sales-management/sale-links", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "link", stock_ids: selectedIds, overwrite: true, target_type: currentTarget?.type, target_id: currentTarget?.id })
-          });
-          setMessage(retried.count + "개 실제 판매기록 연결 완료. 기존 연결만 교체했어.");
-          await loadSales(videoId);
-        } catch (retryError) {
-          setError(retryError instanceof Error ? retryError.message : "연결 덮어쓰기 실패");
-        }
-        return;
-      }
-      setError(e instanceof Error ? e.message : "매칭 저장 실패");
-    } finally { setBusy(false); }
+      setMessage(data.count + "개 재고 연결 " + (action === "link" ? "저장" : "해제") + " 완료. 원본 매출·재고 수량은 변경되지 않았어.");
+      if (action === "link") setTargets({});
+      await loadSales(videoIds);
+    } catch (e) { setError(e instanceof Error ? e.message : "매칭 저장 실패"); }
+    finally { setBusy(false); }
   }
-  const show = shows.find(s => s.video_id === videoId);
+  const selectedShows = shows.filter(show => videoIds.includes(show.video_id));
+  const totalShowRevenue = selectedShows.reduce((sum, show) => sum + show.revenue, 0);
   return <main style={{ padding: 22, maxWidth: 1480, margin: "0 auto", color: "#0f172a", fontFamily: "inherit" }}>
     <header style={{ display: "flex", justifyContent: "space-between", alignItems: "start", flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
       <div><h1 style={{ margin: 0, fontSize: 28 }}>실판매 ↔ 방송판매재고 연결</h1>
@@ -184,12 +186,19 @@ export default function WiseInventoryLinkPage() {
             {shows.map(s => <option key={s.video_id} value={s.video_id}>{kst(s.first_sale)} · {won(s.revenue)} · {s.count}개 · {s.buyer_count}명</option>)}
           </select>
         </label>
-        <button style={btn} disabled={!videoId || loadingSales} onClick={() => void loadSales(videoId)}>{loadingSales ? "불러오는 중..." : "판매내역 갱신"}</button>
+        <button style={btn} disabled={!videoId || videoIds.includes(videoId) || videoIds.length >= 80} onClick={() => setVideoIds(prev => [...prev, videoId])}>방송 추가</button>
+        <button style={btn} disabled={!videoIds.length || loadingSales} onClick={() => void loadSales(videoIds)}>{loadingSales ? "불러오는 중..." : "판매내역 갱신"}</button>
       </div>
-      {show && <p style={{ fontSize: 13, color: "#475569", marginBottom: 0 }}>선택 방송: {kst(show.first_sale)} ~ {kst(show.last_sale)} / 판매 {show.count}개 / {won(show.revenue)}</p>}
+      {videoIds.length > 0 && <div style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>조회 방송 {videoIds.length}개 · 합산 매출 {won(totalShowRevenue)}</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+          {selectedShows.map(show => <button key={show.video_id} type="button" style={{ ...btn, background: "#eff6ff", borderColor: "#bfdbfe" }} onClick={() => setVideoIds(prev => prev.filter(id => id !== show.video_id))} title="조회 목록에서 제거">{kst(show.first_sale)} · {show.count}건 ×</button>)}
+          <button type="button" style={btn} onClick={() => setVideoIds([])}>전체 제거</button>
+        </div>
+      </div>}
     </section>
 
-    {videoId && <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.8fr) minmax(320px, 1fr)", gap: 12, alignItems: "start" }}>
+    {videoIds.length > 0 && <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.8fr) minmax(320px, 1fr)", gap: 12, alignItems: "start" }}>
       <section style={panel}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <div><b style={{ fontSize: 17 }}>실제 판매기록</b><div style={{ fontSize: 12, color: "#64748b" }}>전체 {sales.length}개 · 연결 {linkedCount}개 · 미연결 {sales.length - linkedCount}개</div></div>
@@ -204,7 +213,7 @@ export default function WiseInventoryLinkPage() {
         <div style={{ maxHeight: "68vh", overflow: "auto", border: "1px solid #e2e8f0", borderRadius: 8 }}>
           <table style={{ borderCollapse: "collapse", width: "100%" }}>
             <thead style={{ position: "sticky", top: 0, background: "#f8fafc", zIndex: 1 }}><tr><th style={th}>선택</th><th style={th}>상품군 · 판매가</th><th style={th}>수량</th><th style={th}>연결</th><th style={th}>상세</th></tr></thead>
-            <tbody>{filteredGroups.map(g => <FragmentGroup key={g.key} group={g} selected={selected} expanded={Boolean(expanded[g.key])} onSelect={checked => setGroupSelection(g, checked)} onToggle={() => setExpanded(prev => ({ ...prev, [g.key]: !prev[g.key] }))} onSelectItem={(id, val) => setSelected(prev => ({ ...prev, [id]: val }))} candidateNames={candidateNames} />)}</tbody>
+            <tbody>{filteredGroups.map(g => <FragmentGroup key={g.key} group={g} selected={selected} expanded={Boolean(expanded[g.key])} onSelect={checked => setGroupSelection(g, checked)} onToggle={() => setExpanded(prev => ({ ...prev, [g.key]: !prev[g.key] }))} onSelectItem={(id, val) => setSelected(prev => ({ ...prev, [id]: val }))} candidateNames={candidateNames} onUnlink={(saleId, target) => { if (window.confirm("이 판매건에서 선택한 재고 연결만 해제할까?")) void save("unlink", { saleId, target }); }} />)}</tbody>
           </table>
           {!filteredGroups.length && <p style={{ textAlign: "center", color: "#64748b", padding: 16 }}>{loadingSales ? "판매기록을 불러오는 중..." : "표시할 판매기록이 없어."}</p>}
         </div>
@@ -212,7 +221,7 @@ export default function WiseInventoryLinkPage() {
 
       <aside style={{ ...panel, position: "sticky", top: 10 }}>
         <h2 style={{ fontSize: 17, margin: "0 0 8px" }}>연결할 방송판매재고</h2>
-        <p style={{ fontSize: 12, color: "#64748b" }}>실판매를 체크하고 아래에서 재고를 하나 선택해 연결해줘. 여러 판매항목을 같은 재고에 연결할 수 있어.</p>
+        <p style={{ fontSize: 12, color: "#64748b" }}>실판매를 체크하고 재고를 여러 개 선택해 추가 연결할 수 있어. 선택 재고별 수량도 지정할 수 있어. 기존 연결은 유지돼.</p>
         <input aria-label="재고 검색" placeholder="재고명·작품명·매입일 검색" value={candidateSearch} onChange={e => setCandidateSearch(e.target.value)} style={{ ...field, width: "100%", boxSizing: "border-box" }} />
         <div style={{ display: "flex", gap: 8, margin: "9px 0" }}>
           <select aria-label="재고 구분" value={candidateType} onChange={e => setCandidateType(e.target.value)} style={{ ...field, flex: 1 }}>
@@ -222,8 +231,8 @@ export default function WiseInventoryLinkPage() {
         </div>
         <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>후보 {candidates.length}개 · 목록은 최대 150개 표시</div>
         <div style={{ maxHeight: 340, overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: 8 }}>
-          {filteredCandidates.map(c => <label key={c.type + c.id} style={{ display: "flex", gap: 9, padding: 9, alignItems: "center", borderBottom: "1px solid #f1f5f9", background: target === c.type + "|" + c.id ? "#eff6ff" : "#fff", cursor: "pointer" }}>
-            <input type="radio" name="target" checked={target === c.type + "|" + c.id} onChange={() => setTarget(c.type + "|" + c.id)} />
+          {filteredCandidates.map(c => <label key={c.type + c.id} style={{ display: "flex", gap: 9, padding: 9, alignItems: "center", borderBottom: "1px solid #f1f5f9", background: targets[c.type + "|" + c.id] ? "#eff6ff" : "#fff", cursor: "pointer" }}>
+            <input type="checkbox" checked={Boolean(targets[c.type + "|" + c.id])} onChange={event => { const key = c.type + "|" + c.id; setTargets(prev => { const next = {...prev}; if (event.target.checked) next[key] = 1; else delete next[key]; return next; }); }} />
             {c.image_url ? <img src={c.image_url} alt="" loading="lazy" style={{ width: 48, height: 48, objectFit: "contain", borderRadius: 5 }} /> : <span style={{ width: 48, height: 48, display: "grid", placeItems: "center", background: "#f1f5f9", borderRadius: 5, fontSize: 10 }}>사진 없음</span>}
             <span style={{ flex: 1, minWidth: 0, fontSize: 12 }}><b>{c.name}</b><br />
               <span style={{ color: "#64748b" }}>{c.type === "random_box" ? "랜덤박스" : "매입상품"} · {c.option || c.series || "옵션 없음"}<br />{c.sale_price != null ? "판매가 " + won(c.sale_price) + " · " : ""}{c.component_count}개 구성 · {c.stock_status}</span>
@@ -231,23 +240,31 @@ export default function WiseInventoryLinkPage() {
           </label>)}
           {!filteredCandidates.length && <p style={{ fontSize: 13, color: "#64748b", padding: 12 }}>검색 결과가 없어.</p>}
         </div>
-        {currentTarget && <div style={{ padding: 10, background: "#eff6ff", fontSize: 13, marginTop: 10, borderRadius: 8 }}><b>선택 재고:</b> {currentTarget.name} {currentTarget.option}</div>}
+        {selectedTargets.length > 0 && <div style={{ padding: 10, background: "#eff6ff", fontSize: 13, marginTop: 10, borderRadius: 8 }}>
+          <b>선택 재고 {selectedTargets.length}개 (최대 16개)</b>
+          {selectedTargets.map(c => <div key={c.type + "|" + c.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, paddingTop: 8 }}>
+            <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{c.name} {c.option}</span>
+            <label style={{ whiteSpace: "nowrap" }}>수량 <input aria-label={c.name + " 연결 수량"} type="number" min={1} max={9999} value={c.quantity} style={{ ...field, width: 72 }} onChange={e => { const quantity = Number(e.target.value); setTargets(prev => ({ ...prev, [c.type + "|" + c.id]: Number.isSafeInteger(quantity) && quantity >= 1 ? Math.min(quantity, 9999) : 1 })); }} /></label>
+            <button type="button" style={btn} onClick={() => setTargets(prev => { const next = { ...prev }; delete next[c.type + "|" + c.id]; return next; })}>제거</button>
+          </div>)}
+        </div>}
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-          <button style={{ ...btn, flex: 1, background: "#1d4ed8", color: "#fff", borderColor: "#1d4ed8" }} disabled={busy || selectedIds.length === 0 || selectedIds.length > 300 || !currentTarget} onClick={() => void save("link")}>{busy ? "저장 중..." : selectedIds.length + "개 연결 저장"}</button>
+          <button style={{ ...btn, flex: 1, background: "#1d4ed8", color: "#fff", borderColor: "#1d4ed8" }} disabled={busy || selectedIds.length === 0 || selectedIds.length > 300 || selectedTargets.length === 0 || selectedTargets.length > 16 || selectedIds.length * selectedTargets.length > 1200} onClick={() => void save("link")}>{busy ? "저장 중..." : selectedIds.length + "건 × " + selectedTargets.length + "개 재고 연결"}</button>
           <button style={{ ...btn, color: "#991b1b" }} disabled={busy || selectedIds.length === 0 || selectedIds.length > 300} onClick={() => { if (window.confirm("선택한 실제 판매기록의 재고 연결만 해제할까?")) void save("unlink"); }}>연결 해제</button>
         </div>
         <p style={{ fontSize: 12, color: "#64748b" }}>연결은 이 별도 테이블에만 저장돼. 재고 수량·배송 상태·실판매 금액·매입 상태는 바뀌지 않아.</p>
       </aside>
     </div>}
-    {!videoId && <section style={{ ...panel, color: "#64748b" }}>위에서 방송을 하나 선택하면 그 방송의 실제 판매기록만 불러와. 기존 매출관리 페이지는 추가 데이터를 불러오지 않아.</section>}
+    {videoIds.length === 0 && <section style={{ ...panel, color: "#64748b" }}>방송을 하나 이상 추가하면 해당 방송의 실제 판매기록을 한 번에 불러와. 기존 매출관리 페이지는 추가 데이터를 불러오지 않아.</section>}
   </main>;
 }
 
-function FragmentGroup({ group, selected, expanded, onSelect, onToggle, onSelectItem, candidateNames }: {
+function FragmentGroup({ group, selected, expanded, onSelect, onToggle, onSelectItem, candidateNames, onUnlink }: {
   group: Family; selected: Record<string, boolean>; expanded: boolean;
   onSelect: (checked: boolean) => void; onToggle: () => void;
   onSelectItem: (id: string, value: boolean) => void;
-  candidateNames: Map<string, string>
+  candidateNames: Map<string, string>;
+  onUnlink: (saleId: string, target: LinkRow) => void;
 }) {
   const checkedCount = group.items.filter(x => selected[x.id]).length;
   return <>
@@ -264,11 +281,14 @@ function FragmentGroup({ group, selected, expanded, onSelect, onToggle, onSelect
     {expanded && <tr><td colSpan={5} style={{ padding: 10, background: "#f8fafc" }}>
       <div style={{ maxHeight: 330, overflowY: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}><thead><tr>
-          <th style={th}>선택</th><th style={th}>판매상품명</th><th style={th}>구매자</th><th style={th}>판매시각</th><th style={th}>연결상태</th>
+          <th style={th}>선택</th><th style={th}>판매상품명</th><th style={th}>구매자</th><th style={th}>방송 / 판매시각</th><th style={th}>연결상태</th>
         </tr></thead><tbody>{group.items.map(row => <tr key={row.id}>
           <td style={td}><input type="checkbox" checked={Boolean(selected[row.id])} onChange={e => onSelectItem(row.id, e.target.checked)} /></td>
-          <td style={td}>{row.item_name}</td><td style={td}>{row.buyer_nickname}</td><td style={td}>{kst(row.sold_at)}</td>
-          <td style={td}>{targetKey(row.link) ? (candidateNames.get(targetKey(row.link)) || "연결됨 · 재고 확인 필요") : "미연결"}</td>
+          <td style={td}>{row.item_name}</td><td style={td}>{row.buyer_nickname}</td><td style={td}>{row.video_id} · {kst(row.sold_at)}</td>
+          <td style={td}>{row.links?.length ? <div style={{ display: "grid", gap: 4 }}>{row.links.map(link => <div key={link.id} style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "space-between" }}>
+            <span>{candidateNames.get(targetKey(link)) || "연결됨 · 재고 확인 필요"} × {link.quantity || 1}</span>
+            <button type="button" style={{ ...btn, color: "#991b1b", padding: "4px 7px" }} onClick={() => onUnlink(row.id, link)}>해제</button>
+          </div>)}</div> : "미연결"}</td>
         </tr>)}</tbody></table>
       </div>
     </td></tr>}
