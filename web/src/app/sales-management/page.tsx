@@ -259,8 +259,30 @@ export default function SalesManagementPage() {
   const selectedKey = periods.some(p => p.key === selectedPeriod) ? selectedPeriod : periods[0]?.key || "";
   const rawCurrent = periods.find(p => p.key === selectedKey);
   const currentRows = useMemo(() => visibleRows(rawCurrent?.sales_rows || [], savedPrefs), [rawCurrent, savedPrefs]);
-  // Same-name quantity within each Wise order (independent of month and search filters).
-  const sameItemCounts = report?.same_item_counts ?? {};
+  // Prefer the API's per-sale count, but calculate it from the complete sales rows
+  // when an older deployment or cached response does not yet supply the new field.
+  // This also prevents the column from displaying only dashes during a rolling deploy.
+  const sameItemCounts = useMemo(() => {
+    const counts: Record<string, number> = { ...(report?.same_item_counts ?? {}) };
+    const rows = report?.all_time_sales_rows ?? [];
+    const nameKey = (name: string) => String(name || "").normalize("NFKC").toLowerCase().trim()
+      .replace(/^(?:#\\s*\\d+\\s*)+/, "")
+      .replace(/(?:\\s*#\\s*\\d+)+\\s*$/, "")
+      .replace(/\\s+/g, "");
+    const groupCounts = new Map<string, number>();
+    for (const row of rows) {
+      const name = nameKey(row.item_name);
+      if (!name) continue;
+      const key = JSON.stringify([row.order_id, name]);
+      groupCounts.set(key, (groupCounts.get(key) ?? 0) + 1);
+    }
+    for (const row of rows) {
+      if (counts[row.id] != null) continue;
+      const name = nameKey(row.item_name);
+      counts[row.id] = name ? (groupCounts.get(JSON.stringify([row.order_id, name])) ?? 1) : 1;
+    }
+    return counts;
+  }, [report]);
   const currentSummary = useMemo(() => summarizeRows(rawCurrent?.sales_rows || [], savedPrefs), [rawCurrent, savedPrefs]);
   const broadcastByPeriod = useMemo(() => statsOpen ? broadcastMetrics(report?.all_time_sales_rows || [], savedPrefs, granularity) : new Map<string, BroadcastMetrics>(), [report, savedPrefs, granularity, statsOpen]);
   const currentBroadcast = broadcastByPeriod.get(selectedKey) || { count: 0, durationMs: 0, sales: 0, itemCount: 0 };
@@ -269,7 +291,7 @@ export default function SalesManagementPage() {
   const allTimeByBuyer = useMemo(() => new Map(allTimeBuyers.map(buyer => [buyer.buyer_nickname, buyer])), [allTimeBuyers]);
   const itemRows = useMemo(() => currentRows.map(row => {
     const key = row.id;
-    return { ...row, key, sameItemCount: sameItemCounts[row.id] ?? null, series: analysisSeriesForSale(row.item_name,row.image_url,seriesRules,seriesOverrides), includeCost: draftPrefs[key]?.includeCost !== false, memo: draftPrefs[key]?.memo || "" };
+    return { ...row, key, sameItemCount: sameItemCounts[row.id] ?? 1, series: analysisSeriesForSale(row.item_name,row.image_url,seriesRules,seriesOverrides), includeCost: draftPrefs[key]?.includeCost !== false, memo: draftPrefs[key]?.memo || "" };
   }), [currentRows, sameItemCounts, draftPrefs, seriesRules, seriesOverrides]);
   const filteredItemRows = useMemo(() => {
     const productQuery = productSearch.normalize("NFKC").trim().toLowerCase();
