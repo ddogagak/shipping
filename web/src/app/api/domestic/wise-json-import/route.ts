@@ -102,6 +102,19 @@ export async function POST(req:Request){
    for(const row of data??[])queuedIds.add(Number(row.wise_order_id));
    if((data??[]).length<500)break;
   }
+  // Duplicate detection is per Wise ORDER, never per repeat customer.
+  // Explicit Wise order links are authoritative even for combined shipping.
+  const linkedDomesticByWiseId=new Map<number,string[]>();
+  for(let offset=0;;offset+=500){
+   const {data,error}=await db.from("domestic_wise_order_link")
+    .select("wise_order_id,domestic_order_id").order("wise_order_id").range(offset,offset+499);
+   if(error)throw new Error("기존 와이스 주문 연결 조회 실패: "+error.message);
+   for(const link of data??[]){
+    const id=Number(link.wise_order_id);
+    linkedDomesticByWiseId.set(id,[...(linkedDomesticByWiseId.get(id)??[]),String(link.domestic_order_id)]);
+   }
+   if((data??[]).length<500)break;
+  }
   const domesticKeys=new Map<string,string[]>();
   const wiseDomestic=domestic.filter(d=>d.platform==="wise");
   const domesticByWiseId=new Map<number,string[]>();
@@ -137,17 +150,23 @@ export async function POST(req:Request){
    const mmdd=formatted.slice(5,7)+formatted.slice(8,10);
    const ddogaOrderNo="W"+key(nickname)+"_"+mmdd;
    const dateDigits=formatted.replace(/\D/g,"");
-   const uid=wiseUserId(o);
-   const byUserId=uid?wiseDomestic.filter(d=>asText(d.wise_user_id)===uid).map(d=>String(d.order_id)):[];
-   const exactIds=[...new Set([...(domesticByWiseId.get(o.id)??[]),...(domesticByOrderNo.get(orderNumberKey(ddogaOrderNo+"__"+dateDigits))??[])])];
-   const byDate=domesticKeys.get(key(nickname)+"|"+formatted)??[];
-   const byOrderNo=(domesticByOrderNo.get(orderNumberKey(ddogaOrderNo))??[]).filter(id=>{
+   // A buyer can make many purchases: wise_user_id/nickname alone is NEVER a duplicate.
+   const exactIds=[...new Set([
+    ...(linkedDomesticByWiseId.get(o.id)??[]),
+    ...(domesticByWiseId.get(o.id)??[]),
+    ...(domesticByOrderNo.get(orderNumberKey(ddogaOrderNo+"__"+dateDigits))??[])
+   ])];
+   // Legacy rows without Wise links: require the same minute, amount AND item names.
+   // An ambiguous legacy match must be reviewed, not silently treated as an existing order.
+   const stockNames=(o.stocks??[]).map(stock=>asText(stock.name).normalize("NFKC").trim());
+   const stockTotal=(o.stocks??[]).reduce((sum,stock)=>sum+Number(stock.price??0),0);
+   const legacyIds=(domesticKeys.get(key(nickname)+"|"+formatted)??[]).filter(id=>{
     const d=domesticById.get(id);
-    if(!d)return false;
-    const dates=[...(Array.isArray(d.source_order_dates)?d.source_order_dates:[]),d.first_order_date].map(domesticDateKey).filter(Boolean);
-    return !dates.length || dates.some(value=>value.slice(0,4)===formatted.slice(0,4));
+    if(!d||Number(d.order_count)!==1||!stockNames.length)return false;
+    const oldNames=asText(d.item_summary).split(/\\s*\\/\\s*/).map(name=>name.normalize("NFKC").trim());
+    return Number(d.item_total_price)===stockTotal&&JSON.stringify(oldNames)===JSON.stringify(stockNames);
    });
-   const matched_order_ids=[...new Set(exactIds.length?exactIds:(byUserId.length?byUserId:[...byDate,...byOrderNo]))];
+   const matched_order_ids=[...new Set(exactIds.length?exactIds:(legacyIds.length===1?legacyIds:[]))];
    const existingDomestic=matched_order_ids.length>0;
    return {order:o,wise_order_id:o.id,nickname,ordered_at:date,existingDomestic,matched_order_ids,alreadyQueued:queuedIds.has(o.id),items:o.stocks?.length??0};
   });
