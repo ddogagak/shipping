@@ -163,7 +163,7 @@ export async function POST(req:Request){
    const legacyIds=(domesticKeys.get(key(nickname)+"|"+formatted)??[]).filter(id=>{
     const d=domesticById.get(id);
     if(!d||Number(d.order_count)!==1||!stockNames.length)return false;
-    const oldNames=asText(d.item_summary).split(/\\s*\\/\\s*/).map(name=>name.normalize("NFKC").trim());
+    const oldNames=asText(d.item_summary).split(/\s*\/\s*/).map(name=>name.normalize("NFKC").trim());
     return Number(d.item_total_price)===stockTotal&&JSON.stringify(oldNames)===JSON.stringify(stockNames);
    });
    const matched_order_ids=[...new Set(exactIds.length?exactIds:(legacyIds.length===1?legacyIds:[]))];
