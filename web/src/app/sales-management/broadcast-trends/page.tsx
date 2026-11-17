@@ -49,7 +49,6 @@ const clockLabel=(minutes:number)=>String(Math.floor((minutes%1440)/60)).padStar
 const timeLabel=(index:number,step:number)=>clockLabel(index*step)+"~"+clockLabel((index+1)*step);
 const newBucket=():Bucket=>({amount:0,rateAmount:0,items:0,buyers:new Set(),sessions:new Set(),saleSessions:new Set(),minutes:0});
 const rate=(b:Bucket)=>b.minutes>0?b.rateAmount/(b.minutes/60):null;
-const sample=(b:Bucket)=>b.sessions.size>=3&&b.minutes>=60;
 const metricLabel:Record<Metric,string>={perHour:"추정 시간당 매출",amount:"총매출",buyers:"구매자 수",items:"판매 수량"};
 function metricValue(b:Bucket,m:Metric):number|null{
  if(m==="perHour")return rate(b);
@@ -91,26 +90,27 @@ function buildClockMetrics(sessions:Session[],step:number,basis:DayBasis){
 }
 function MetricsTable({rows}:{rows:{key:string;label:string;bucket:Bucket}[]}){
  return <div style={{overflowX:"auto"}}><table style={{borderCollapse:"collapse",width:"100%",fontSize:13}}>
-  <thead><tr>{["구분","총매출","시간당 매출*","구매자","판매수량","방송 수","판매 구간","표본"].map(t=><th style={th} key={t}>{t}</th>)}</tr></thead>
+  <thead><tr>{["구분","총매출","시간당 매출*","구매자","판매수량","방송 수","판매 구간"].map(t=><th style={th} key={t}>{t}</th>)}</tr></thead>
   <tbody>{rows.map(({key,label,bucket:b})=><tr key={key}>
    <td style={{...td,textAlign:"left",fontWeight:700}}>{label}</td><td style={td}>{money(b.amount)}원</td>
-   <td style={{...td,fontWeight:800,color:sample(b)?"#0f766e":undefined}}>{metricText(b,"perHour")}</td>
+   <td style={{...td,fontWeight:800}}>{metricText(b,"perHour")}</td>
    <td style={td}>{money(b.buyers.size)}명</td><td style={td}>{money(b.items)}개</td>
    <td style={td}>{new Set([...b.sessions,...b.saleSessions]).size}회</td><td style={td}>{Math.round(b.minutes)}분</td>
-   <td style={{...td,color:sample(b)?"#0f766e":"#64748b"}}>{sample(b)?"기준 충족":b.minutes||b.items?"적음":"없음"}</td>
   </tr>)}</tbody>
  </table></div>;
 }
 function WeekHourMatrix({cells,step,metric}:{cells:Bucket[][];step:number;metric:Metric}){
- const peak=Math.max(1,...cells.flat().filter(b=>metric!=="perHour"||sample(b)).map(b=>metricValue(b,metric)||0));
+ const peak=Math.max(1,...cells.flat().map(b=>metricValue(b,metric)||0));
+ const colors=["#fff7d6","#fde68a","#fdba74","#f97316","#b91c1c"];
  return <div style={{overflowX:"auto",marginTop:12}}><table style={{borderCollapse:"separate",borderSpacing:4,width:"100%",minWidth:690,fontSize:12}}>
   <thead><tr><th style={{...th,textAlign:"left"}}>시간대 (KST)</th>{weekdays.map(d=><th key={d} style={{...th,textAlign:"center"}}>{d}</th>)}</tr></thead>
   <tbody>{cells.map((row,index)=><tr key={index}><th scope="row" style={{...td,textAlign:"left",fontSize:12}}>{timeLabel(index,step)}</th>{row.map((b,day)=>{
-   const v=metricValue(b,metric),hasData=b.minutes>0||b.items>0,limited=!sample(b);
+   const v=metricValue(b,metric),hasData=b.minutes>0||b.items>0,hasValue=hasData&&v!==null;
    const strength=Math.max(0,Math.min(1,(v||0)/peak));
-   const bg=!hasData?"#f8fafc":limited?"#fef3c7":"rgba(13,148,136,"+(0.08+0.62*strength)+")";
-   return <td key={day} title={timeLabel(index,step)+" · "+weekdays[day]+"요일 · 총매출 "+money(b.amount)+"원 · 구매자 "+b.buyers.size+"명 · 판매 "+b.items+"개 · 방송 "+new Set([...b.sessions,...b.saleSessions]).size+"회 · 추정 "+b.minutes.toFixed(1)+"분"} style={{padding:"9px 5px",textAlign:"center",background:bg,borderRadius:5,whiteSpace:"nowrap",fontWeight:700,color:!hasData?"#94a3b8":"#0f172a"}}>
-    {hasData?metricText(b,metric):"—"}{hasData&&<div style={{fontSize:10,fontWeight:400,color:"#475569",marginTop:3}}>{new Set([...b.sessions,...b.saleSessions]).size}회 · {Math.round(b.minutes)}분</div>}
+   const band=Math.min(4,Math.floor(strength*5));
+   const bg=hasValue?colors[band]:"#f8fafc",dark=hasValue&&band===4;
+   return <td key={day} title={timeLabel(index,step)+" · "+weekdays[day]+"요일 · 총매출 "+money(b.amount)+"원 · 구매자 "+b.buyers.size+"명 · 판매 "+b.items+"개 · 방송 "+new Set([...b.sessions,...b.saleSessions]).size+"회 · 추정 "+b.minutes.toFixed(1)+"분"} style={{padding:"9px 5px",textAlign:"center",background:bg,borderRadius:5,whiteSpace:"nowrap",fontWeight:700,color:!hasValue?"#94a3b8":dark?"#fff":"#0f172a"}}>
+    {hasData?metricText(b,metric):"—"}{hasData&&<div style={{fontSize:10,fontWeight:400,color:dark?"#fee2e2":"#475569",marginTop:3}}>{new Set([...b.sessions,...b.saleSessions]).size}회 · {Math.round(b.minutes)}분</div>}
    </td>;
   })}</tr>)}</tbody>
  </table></div>;
@@ -131,9 +131,9 @@ export default function BroadcastTrendsPage(){
  const clock=useMemo(()=>buildClockMetrics(active,step,dayBasis),[active,step,dayBasis]);
  const total=active.reduce((s,x)=>s+x.sales,0),allMs=active.reduce((s,x)=>s+x.duration,0),allItems=active.reduce((s,x)=>s+x.items,0);
  const measuredSales=active.filter(s=>s.duration>0).reduce((sum,s)=>sum+s.sales,0);
- const topTime=clock.times.map((bucket,index)=>({bucket,index})).filter(x=>sample(x.bucket)).sort((a,b)=>(rate(b.bucket)||0)-(rate(a.bucket)||0))[0];
- const topDay=clock.days.map((bucket,index)=>({bucket,index})).filter(x=>sample(x.bucket)).sort((a,b)=>(rate(b.bucket)||0)-(rate(a.bucket)||0))[0];
- const topCell=clock.cells.flatMap((row,index)=>row.map((bucket,day)=>({bucket,index,day}))).filter(x=>sample(x.bucket)).sort((a,b)=>(rate(b.bucket)||0)-(rate(a.bucket)||0))[0];
+ const topTime=clock.times.map((bucket,index)=>({bucket,index})).filter(x=>rate(x.bucket)!==null).sort((a,b)=>(rate(b.bucket)||0)-(rate(a.bucket)||0))[0];
+ const topDay=clock.days.map((bucket,index)=>({bucket,index})).filter(x=>rate(x.bucket)!==null).sort((a,b)=>(rate(b.bucket)||0)-(rate(a.bucket)||0))[0];
+ const topCell=clock.cells.flatMap((row,index)=>row.map((bucket,day)=>({bucket,index,day}))).filter(x=>(x.bucket.minutes>0||x.bucket.items>0)&&metricValue(x.bucket,metric)!==null).sort((a,b)=>(metricValue(b.bucket,metric)||0)-(metricValue(a.bucket,metric)||0))[0];
  return <main style={{maxWidth:1380,margin:"auto",padding:"24px 20px 60px",color:"#0f172a"}}>
   <div style={{display:"flex",justifyContent:"space-between",gap:12,flexWrap:"wrap",alignItems:"center",marginBottom:20}}>
    <div><div style={{fontSize:12,color:"#64748b",marginBottom:6}}>매출관리 / 방송 트렌드</div><h1 style={{fontSize:29,margin:0}}>방송 트렌드 분석</h1><p style={{...muted,margin:"8px 0 0"}}>요일·실제 판매 시간대별 매출과 구매자 비교</p></div>
@@ -154,8 +154,8 @@ export default function BroadcastTrendsPage(){
      ["방송 매출",money(total)+"원",money(allItems)+"개 판매"],
      ["누적 판매 구간",duration(allMs),"최초~최종 판매 시간의 합"],
      ["시간당 매출",allMs?money(measuredSales/(allMs/3600000))+"원":"-","측정 가능한 판매 구간 기준"],
-     ["효율 최고 시간대",topTime?timeLabel(topTime.index,step):"-",topTime?metricText(topTime.bucket,"perHour"):"표본 부족"],
-     ["효율 최고 요일",topDay?weekdays[topDay.index]+"요일":"-",topDay?metricText(topDay.bucket,"perHour"):"표본 부족"]
+     ["효율 최고 시간대",topTime?timeLabel(topTime.index,step):"-",topTime?metricText(topTime.bucket,"perHour"):"측정 데이터 없음"],
+     ["효율 최고 요일",topDay?weekdays[topDay.index]+"요일":"-",topDay?metricText(topDay.bucket,"perHour"):"측정 데이터 없음"]
     ].map(([title,main,sub])=><div key={title} style={frame}><div style={{...muted,fontWeight:700}}>{title}</div><strong style={{display:"block",fontSize:23,margin:"10px 0 5px",letterSpacing:"-.035em"}}>{main}</strong><span style={muted}>{sub}</span></div>)}
    </section>
    <section style={{...frame,marginBottom:16}}>
@@ -163,9 +163,10 @@ export default function BroadcastTrendsPage(){
      <div><h2 style={{fontSize:19,margin:"0 0 6px"}}>요일 × 실제 시간대 분석</h2><p style={{...muted,margin:0}}>{dayBasis==="end"?"방송의 마지막 판매일을 해당 방송의 요일로 사용":"각 판매와 판매 구간을 실제 한국시간 요일에 귀속"} · 시각은 항상 실제 KST 기준.</p></div>
      <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{(Object.keys(metricLabel) as Metric[]).map(m=><button key={m} onClick={()=>setMetric(m)} style={{...control,background:metric===m?"#d1fae5":"#fff"}}>{metricLabel[m]}</button>)}</div>
     </div>
-    <p style={{fontSize:13,margin:"14px 0 0"}}>효율 최고 조합 (표본 기준 충족): <b>{topCell?weekdays[topCell.day]+"요일 "+timeLabel(topCell.index,step)+" · "+metricText(topCell.bucket,"perHour"):"아직 충분한 표본이 없어"}</b></p>
+    <p style={{fontSize:13,margin:"14px 0 0"}}>{metricLabel[metric]} 최고 조합: <b>{topCell?weekdays[topCell.day]+"요일 "+timeLabel(topCell.index,step)+" · "+metricText(topCell.bucket,metric):"측정 데이터 없음"}</b></p>
+    <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",gap:7,marginTop:12,fontSize:12,color:"#64748b"}}><span>낮음</span>{["#fff7d6","#fde68a","#fdba74","#f97316","#b91c1c"].map(color=><span key={color} style={{display:"inline-block",width:24,height:13,background:color,borderRadius:3}}/>)}<span>높음 (선택 지표 최고값 대비)</span></div>
     <WeekHourMatrix cells={clock.cells} step={step} metric={metric}/>
-    <p style={{...muted,lineHeight:1.7,marginBottom:0}}>초록색이 진할수록 선택 지표가 높아. 노란 칸은 판매 구간 60분 미만 또는 방송 3회 미만으로 참고용이야. 회색 칸은 관측된 방송 또는 판매가 없어. 시간당 매출은 최초~최종 판매 구간을 시간대로 나눈 추정치이며, 시간당 계산에는 해당 칸의 측정 가능한 방송 매출만 사용해.</p>
+    <p style={{...muted,lineHeight:1.7,marginBottom:0}}>노랑에서 주황, 빨강으로 갈수록 선택 지표가 높아. 방송 횟수와 무관하게 모든 측정값을 같은 기준으로 색상 비교해. 회색은 해당 지표를 측정할 데이터가 없는 구간이야. 시간당 매출은 최초~최종 판매 구간을 시간대로 나눈 추정치이며, 시간당 계산에는 해당 칸의 측정 가능한 방송 매출만 사용해.</p>
    </section>
    <section style={{...frame,marginBottom:16}}><h2 style={{fontSize:18,margin:"0 0 6px"}}>요일별 방송 성과</h2><p style={muted}>누적 매출뿐 아니라 시간당 매출과 해당 요일의 고유 구매자(닉네임 기준)를 비교해.</p>
     <MetricsTable rows={clock.days.map((bucket,index)=>({key:String(index),label:weekdays[index]+"요일",bucket}))}/>
