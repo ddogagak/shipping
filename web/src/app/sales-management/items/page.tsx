@@ -104,7 +104,7 @@ export default function ItemAnalysis(){
   {loading&&<div style={card}>판매재고 데이터를 읽어오는 중…</div>}
   {error&&<div style={{...card,color:"#b91c1c"}} role="alert">{error}</div>}
   {!loading&&!error&&<>
-   <div style={{...card,background:"#f8fafc",marginBottom:16,fontSize:13,lineHeight:1.8}}><b>작품 분류:</b> <Link href="/sales-management/items/keywords">키워드 관리</Link>에서 등록한 단어로 상품명을 판별하며, 일치하지 않으면 기존 저장 작품명을 사용해. 여러 작품 키워드가 동시에 일치하면 원본 작품명을 유지하거나 미분류로 표시해. 실제 상품·매입 데이터는 수정하지 않아.</div>
+   <div style={{...card,background:"#f8fafc",marginBottom:16,fontSize:13,lineHeight:1.8}}><b>작품 분류:</b> 기존에 등록된 작품명을 우선 사용해. 작품명이 없거나 기타·미분류인 경우에만 <Link href="/sales-management/items/keywords">키워드 관리</Link>의 등록 단어로 판별하며, 여러 작품 키워드가 일치하면 미분류(키워드 충돌)로 표시해. 실제 상품·매입 데이터는 수정하지 않아.</div>
    <div style={{...card,background:"#f8fafc",marginBottom:16,fontSize:13,lineHeight:1.8}}><b>분석 기준:</b> 방송판매 재고에서 완료 상태이고 개당 판매가가 입력된 품목 중, 박스 구성수량과 판매 박스 수가 확인되는 항목을 집계해. <b>완료 시 재고 전체가 판매 처리되는 현행 시스템 규칙</b>에 따라 실제 결제 확정 매출과 다를 수 있어. <b>이익 = 추정 매출 × 0.84 − 분석 원가</b>이며, <b>분석 원가 = 국내 상품 매입가 그대로 / 해외 상품 매입가 × 기준환율 × 1.2</b>야. 판매가 계산기의 가상 고정비는 완료건 분석에서 제외해. 0.84는 현행 방송판매 재고 화면의 수수료·세금 단순 가정이야. 실제 세무상 순이익이나 정산 금액은 아니야. 원가 누락 품목은 이익률에서 제외해. <b>월별 필터와 추세, 정렬, 상세 날짜는 실제 매입일을 기준으로 하고 완료일은 집계 날짜에 사용하지 않아.</b></div>
    <section style={{...card,display:"flex",gap:10,flexWrap:"wrap",marginBottom:16,alignItems:"center"}}>
     <label>작품 <select style={input} value={series} onChange={e=>setSeries(e.target.value)}><option>전체</option>{seriesList.map(x=><option key={x}>{x}</option>)}</select></label>

@@ -13,11 +13,11 @@ export function classifySeriesByKeywords(title:string,rules:SeriesKeywordRule[])
  return {series:matches.length===1?matches[0]:null,matches};
 }
 export function resolveAnalysisSeries(title:string,recordedSeries:string|null|undefined,rules:SeriesKeywordRule[]):{series:string;source:"keyword"|"recorded"|"unclassified"|"conflict";matches:string[]}{
- const keyword=classifySeriesByKeywords(title,rules);
  const stored=String(recordedSeries||"").trim();
- if(keyword.matches.length>1)return {series:stored&&stored!=="기타"&&stored!=="미분류"?stored:"미분류 (키워드 충돌)",source:"conflict",matches:keyword.matches};
- if(keyword.series)return {series:keyword.series,source:"keyword",matches:keyword.matches};
  if(stored&&stored!=="기타"&&stored!=="미분류")return {series:stored,source:"recorded",matches:[]};
+ const keyword=classifySeriesByKeywords(title,rules);
+ if(keyword.matches.length>1)return {series:"미분류 (키워드 충돌)",source:"conflict",matches:keyword.matches};
+ if(keyword.series)return {series:keyword.series,source:"keyword",matches:keyword.matches};
  return {series:"미분류",source:"unclassified",matches:[]};
 }
 
