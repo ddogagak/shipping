@@ -11,6 +11,9 @@ const money=(n:number)=>Math.round(n).toLocaleString("ko-KR");
 const duration=(ms:number)=>{const m=Math.round(ms/60000);return Math.floor(m/60)+"시간 "+String(m%60).padStart(2,"0")+"분";};
 const dateText=(v:number)=>new Intl.DateTimeFormat("ko-KR",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(v));
 const monthOf=(v:number)=>new Intl.DateTimeFormat("sv-SE",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit"}).format(new Date(v));
+const quarterOf=(month:string)=>month.slice(0,4)+"-Q"+(Math.floor((Number(month.slice(5,7))-1)/3)+1);
+const periodLabel=(key:string)=>key.includes("-Q")?key.replace("-Q","년 ")+"분기":key.replace("-","년 ")+"월";
+const inPeriod=(month:string,period:string)=>period==="all"||month===period||quarterOf(month)===period;
 const frame:CSSProperties={border:"1px solid #e5e7eb",borderRadius:14,padding:18,background:"#fff"};
 const muted:CSSProperties={color:"#64748b",fontSize:12};
 const control:CSSProperties={border:"1px solid #cbd5e1",borderRadius:9,padding:"9px 12px",background:"#fff",color:"#0f172a",fontWeight:700};
@@ -120,15 +123,17 @@ function WeekHourMatrix({cells,step,metric}:{cells:Bucket[][];step:number;metric
 export default function BroadcastTrendsPage(){
  const [report,setReport]=useState<Report|null>(null);
  const [loading,setLoading]=useState(true),[error,setError]=useState("");
- const [month,setMonth]=useState("all"),[step,setStep]=useState(60);
+ const [period,setPeriod]=useState(()=>quarterOf(monthOf(Date.now()))),[step,setStep]=useState(60);
  const [metric,setMetric]=useState<Metric>("perHour");
  const [dayBasis,setDayBasis]=useState<DayBasis>("end");
  const [selected,setSelected]=useState("all");
  useEffect(()=>{let alive=true;fetch("/api/sales-management?view=sales",{cache:"no-store"}).then(async r=>{const d=await r.json();if(!r.ok||!d.ok)throw Error(d.message||"방송 데이터를 불러오지 못했어.");if(alive)setReport(d);}).catch(e=>{if(alive)setError(String(e.message||e));}).finally(()=>{if(alive)setLoading(false);});return()=>{alive=false;};},[]);
  const {sessions,unmapped}=useMemo(()=>buildSessions(report?.all_time_sales_rows||[],new Set((report?.settings?.item_settings||[]).filter(p=>p.deleted).map(p=>p.id))),[report]);
  const months=useMemo(()=>Array.from(new Set(sessions.map(s=>s.month))).sort().reverse(),[sessions]);
- const inMonth=useMemo(()=>sessions.filter(s=>month==="all"||s.month===month),[sessions,month]);
- const active=useMemo(()=>selected==="all"?inMonth:inMonth.filter(s=>s.id===selected),[inMonth,selected]);
+ const quarters=useMemo(()=>Array.from(new Set([quarterOf(monthOf(Date.now())),...months.map(quarterOf)])).sort().reverse(),[months]);
+ const inSelectedPeriod=useMemo(()=>sessions.filter(s=>inPeriod(s.month,period)),[sessions,period]);
+ const comparisonPeriods=period!=="all"&&!period.includes("-Q")?months:quarters.filter(q=>months.some(m=>quarterOf(m)===q));
+ const active=useMemo(()=>selected==="all"?inSelectedPeriod:inSelectedPeriod.filter(s=>s.id===selected),[inSelectedPeriod,selected]);
  const clock=useMemo(()=>buildClockMetrics(active,step,dayBasis),[active,step,dayBasis]);
  const total=active.reduce((s,x)=>s+x.sales,0),allMs=active.reduce((s,x)=>s+x.duration,0),allItems=active.reduce((s,x)=>s+x.items,0);
  const measuredSales=active.filter(s=>s.duration>0).reduce((sum,s)=>sum+s.sales,0);
@@ -144,8 +149,8 @@ export default function BroadcastTrendsPage(){
   {error&&<div role="alert" style={{...frame,color:"#b91c1c"}}>{error}</div>}
   {!loading&&!error&&report&&<>
    <section style={{...frame,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:16}}>
-    <label style={{fontSize:13,fontWeight:700}}>기간 <select value={month} onChange={e=>{setMonth(e.target.value);setSelected("all");}} style={{...control,marginLeft:7}}><option value="all">전체 기간</option>{months.map(m=><option value={m} key={m}>{m.replace("-","년 ")}월</option>)}</select></label>
-    <label style={{fontSize:13,fontWeight:700}}>분석 방송 <select value={selected} onChange={e=>setSelected(e.target.value)} style={{...control,marginLeft:7,maxWidth:230}}><option value="all">선택 기간 전체 방송</option>{inMonth.map(s=><option value={s.id} key={s.id}>{dateText(s.first)} · {money(s.sales)}원</option>)}</select></label>
+    <label style={{fontSize:13,fontWeight:700}}>기간 <select value={period} onChange={e=>{setPeriod(e.target.value);setSelected("all");}} style={{...control,marginLeft:7}}><optgroup label="분기별">{quarters.map(q=><option value={q} key={q}>{periodLabel(q)}</option>)}</optgroup><optgroup label="월별">{months.map(m=><option value={m} key={m}>{periodLabel(m)}</option>)}</optgroup><option value="all">전체 기간</option></select></label>
+    <label style={{fontSize:13,fontWeight:700}}>분석 방송 <select value={selected} onChange={e=>setSelected(e.target.value)} style={{...control,marginLeft:7,maxWidth:230}}><option value="all">선택 기간 전체 방송</option>{inSelectedPeriod.map(s=><option value={s.id} key={s.id}>{dateText(s.first)} · {money(s.sales)}원</option>)}</select></label>
     <label style={{fontSize:13,fontWeight:700}}>요일 기준 <select value={dayBasis} onChange={e=>setDayBasis(e.target.value as DayBasis)} style={{...control,marginLeft:7}}><option value="end">방송 종료일 기준</option><option value="actual">실제 판매일 기준</option></select></label>
     <label style={{fontSize:13,fontWeight:700}}>시간 간격 <select value={step} onChange={e=>setStep(Number(e.target.value))} style={{...control,marginLeft:7}}><option value={30}>30분</option><option value={60}>60분</option></select></label>
    </section>
@@ -175,14 +180,14 @@ export default function BroadcastTrendsPage(){
    <section style={{...frame,marginBottom:16}}><h2 style={{fontSize:18,margin:"0 0 6px"}}>실제 시간대별 방송 성과 (한국시간)</h2><p style={muted}>선택한 시간 간격 기준이며 판매가 없는 방송 구간도 시간당 매출 계산에 포함돼. * 시간당 매출은 측정 가능한 판매 구간 기준이야.</p>
     <MetricsTable rows={displaySlotOrder(step).map(index=>({key:String(index),label:timeLabel(index,step),bucket:clock.times[index]}))}/>
    </section>
-   <section style={{...frame,marginBottom:16}}><h2 style={{fontSize:18,margin:"0 0 8px"}}>월별 방송 효율 비교</h2>
-    <div style={{overflowX:"auto"}}><table style={{borderCollapse:"collapse",width:"100%",fontSize:13}}><thead><tr>{["기간","방송","방송 매출","총 판매시간","시간당 매출","방송당 평균","구매자"].map(t=><th key={t} style={th}>{t}</th>)}</tr></thead><tbody>{months.map(m=>{const list=sessions.filter(s=>s.month===m),rev=list.reduce((x,s)=>x+s.sales,0),ms=list.reduce((x,s)=>x+s.duration,0),measured=list.filter(s=>s.duration>0).reduce((x,s)=>x+s.sales,0),buyers=new Set(list.flatMap(s=>s.salesList.map(x=>x.buyer))).size;return <tr key={m} onClick={()=>{setMonth(m);setSelected("all");}} style={{cursor:"pointer",background:month===m?"#eff6ff":"#fff"}}><td style={{...td,textAlign:"left",fontWeight:800}}>{m.replace("-","년 ")}월</td><td style={td}>{list.length}회</td><td style={td}>{money(rev)}원</td><td style={td}>{duration(ms)}</td><td style={td}>{ms?money(measured/(ms/3600000))+"원":"-"}</td><td style={td}>{money(rev/list.length)}원</td><td style={td}>{money(buyers)}명</td></tr>;})}</tbody></table></div>
+   <section style={{...frame,marginBottom:16}}><h2 style={{fontSize:18,margin:"0 0 8px"}}>{period!=="all"&&!period.includes("-Q")?"월별":"분기별"} 방송 효율 비교</h2>
+    <div style={{overflowX:"auto"}}><table style={{borderCollapse:"collapse",width:"100%",fontSize:13}}><thead><tr>{["기간","방송","방송 매출","총 판매시간","시간당 매출","방송당 평균","구매자"].map(t=><th key={t} style={th}>{t}</th>)}</tr></thead><tbody>{comparisonPeriods.map(m=>{const list=sessions.filter(s=>inPeriod(s.month,m)),rev=list.reduce((x,s)=>x+s.sales,0),ms=list.reduce((x,s)=>x+s.duration,0),measured=list.filter(s=>s.duration>0).reduce((x,s)=>x+s.sales,0),buyers=new Set(list.flatMap(s=>s.salesList.map(x=>x.buyer))).size;return <tr key={m} onClick={()=>{setPeriod(m);setSelected("all");}} style={{cursor:"pointer",background:period===m?"#eff6ff":"#fff"}}><td style={{...td,textAlign:"left",fontWeight:800}}>{periodLabel(m)}</td><td style={td}>{list.length}회</td><td style={td}>{money(rev)}원</td><td style={td}>{duration(ms)}</td><td style={td}>{ms?money(measured/(ms/3600000))+"원":"-"}</td><td style={td}>{money(rev/list.length)}원</td><td style={td}>{money(buyers)}명</td></tr>;})}</tbody></table></div>
    </section>
    <section style={frame}><h2 style={{fontSize:18,margin:"0 0 8px"}}>방송별 상세 분석</h2><p style={muted}>행을 선택하면 해당 방송만 위 분석표에 표시돼. 고객 수는 닉네임 기준 추정치야.</p>
-    <div style={{overflowX:"auto",maxHeight:540,overflowY:"auto"}}><table style={{borderCollapse:"collapse",width:"100%",fontSize:13}}><thead><tr>{["최초 판매 일시","최종 판매 일시","종료 요일","방송 ID","판매 구간","매출","아이템","구매자","시간당 매출"].map(t=><th key={t} style={th}>{t}</th>)}</tr></thead><tbody>{inMonth.map(s=>{return <tr key={s.id} onClick={()=>setSelected(s.id)} style={{cursor:"pointer",background:selected===s.id?"#ecfdf5":"#fff"}}><td style={{...td,textAlign:"left"}}>{dateText(s.first)}</td><td style={td}>{dateText(s.last)}</td><td style={td}>{weekdays[weekday(s.last)]}요일</td><td style={{...td,fontFamily:"monospace",fontSize:11}}>{s.id.slice(0,12)}…</td><td style={td}>{duration(s.duration)}</td><td style={td}>{money(s.sales)}원</td><td style={td}>{s.items}개</td><td style={td}>{s.buyers}명</td><td style={td}>{s.duration?money(s.sales/(s.duration/3600000))+"원":"-"}</td></tr>;})}</tbody></table></div>
+    <div style={{overflowX:"auto",maxHeight:540,overflowY:"auto"}}><table style={{borderCollapse:"collapse",width:"100%",fontSize:13}}><thead><tr>{["최초 판매 일시","최종 판매 일시","종료 요일","방송 ID","판매 구간","매출","아이템","구매자","시간당 매출"].map(t=><th key={t} style={th}>{t}</th>)}</tr></thead><tbody>{inSelectedPeriod.map(s=>{return <tr key={s.id} onClick={()=>setSelected(s.id)} style={{cursor:"pointer",background:selected===s.id?"#ecfdf5":"#fff"}}><td style={{...td,textAlign:"left"}}>{dateText(s.first)}</td><td style={td}>{dateText(s.last)}</td><td style={td}>{weekdays[weekday(s.last)]}요일</td><td style={{...td,fontFamily:"monospace",fontSize:11}}>{s.id.slice(0,12)}…</td><td style={td}>{duration(s.duration)}</td><td style={td}>{money(s.sales)}원</td><td style={td}>{s.items}개</td><td style={td}>{s.buyers}명</td><td style={td}>{s.duration?money(s.sales/(s.duration/3600000))+"원":"-"}</td></tr>;})}</tbody></table></div>
    </section>
    <div style={{...muted,lineHeight:1.7,marginTop:15}}>
-    <b>해석 주의</b> · 방송 시작은 실제 송출 시작이 아니라 첫 판매시각이며, 방송 종료도 마지막 판매시각이야. 판매 없는 대기시간은 실제 방송과 차이가 있을 수 있어. 측정 가능한 판매 구간이 없는 방송은 매출·수량·구매자에는 포함되고 시간당 매출에서는 제외돼. 구매자 수는 각 구간 안의 고유 닉네임 기준이며 구간 간 합산하면 중복될 수 있어. 방송은 최초 판매 월에 귀속되며, 키워드 제외·저장된 삭제 설정을 반영해. 판매시간/방송 ID가 없는 아이템 {money(unmapped)}개는 이 통계에서 제외돼. 현재 집계는 확정된 총매출이 아니라 분석 대상 방송의 판매 기록 기준이야.
+    <b>해석 주의</b> · 방송 시작은 실제 송출 시작이 아니라 첫 판매시각이며, 방송 종료도 마지막 판매시각이야. 판매 없는 대기시간은 실제 방송과 차이가 있을 수 있어. 측정 가능한 판매 구간이 없는 방송은 매출·수량·구매자에는 포함되고 시간당 매출에서는 제외돼. 구매자 수는 각 구간 안의 고유 닉네임 기준이며 구간 간 합산하면 중복될 수 있어. 방송은 최초 판매일 기준 월·분기에 귀속되며, 키워드 제외·저장된 삭제 설정을 반영해. 판매시간/방송 ID가 없는 아이템 {money(unmapped)}개는 이 통계에서 제외돼. 현재 집계는 확정된 총매출이 아니라 분석 대상 방송의 판매 기록 기준이야.
    </div>
   </>}
  </main>;
