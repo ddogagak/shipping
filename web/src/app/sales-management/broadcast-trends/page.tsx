@@ -47,6 +47,7 @@ const hourOf=(at:number)=>new Date(at+kstOffset).getUTCHours();
 const minuteOf=(at:number)=>new Date(at+kstOffset).getUTCMinutes();
 const clockLabel=(minutes:number)=>String(Math.floor((minutes%1440)/60)).padStart(2,"0")+":"+String(minutes%60).padStart(2,"0");
 const timeLabel=(index:number,step:number)=>clockLabel(index*step)+"~"+clockLabel((index+1)*step);
+const displaySlotOrder=(step:number)=>Array.from({length:1440/step},(_,i)=>(i+960/step)%(1440/step));
 const newBucket=():Bucket=>({amount:0,rateAmount:0,items:0,buyers:new Set(),sessions:new Set(),saleSessions:new Set(),minutes:0});
 const rate=(b:Bucket)=>b.minutes>0?b.rateAmount/(b.minutes/60):null;
 const metricLabel:Record<Metric,string>={perHour:"추정 시간당 매출",amount:"총매출",buyers:"구매자 수",items:"판매 수량"};
@@ -104,7 +105,7 @@ function WeekHourMatrix({cells,step,metric}:{cells:Bucket[][];step:number;metric
  const colors=["#fff7d6","#fde68a","#fdba74","#f97316","#b91c1c"];
  return <div style={{overflowX:"auto",marginTop:12}}><table style={{borderCollapse:"separate",borderSpacing:4,width:"100%",minWidth:690,fontSize:12}}>
   <thead><tr><th style={{...th,textAlign:"left"}}>시간대 (KST)</th>{weekdays.map(d=><th key={d} style={{...th,textAlign:"center"}}>{d}</th>)}</tr></thead>
-  <tbody>{cells.map((row,index)=><tr key={index}><th scope="row" style={{...td,textAlign:"left",fontSize:12}}>{timeLabel(index,step)}</th>{row.map((b,day)=>{
+  <tbody>{displaySlotOrder(step).map(index=><tr key={index}><th scope="row" style={{...td,textAlign:"left",fontSize:12}}>{timeLabel(index,step)}</th>{cells[index].map((b,day)=>{
    const v=metricValue(b,metric),hasData=b.minutes>0||b.items>0,hasValue=hasData&&v!==null;
    const strength=Math.max(0,Math.min(1,(v||0)/peak));
    const band=Math.min(4,Math.floor(strength*5));
@@ -172,7 +173,7 @@ export default function BroadcastTrendsPage(){
     <MetricsTable rows={clock.days.map((bucket,index)=>({key:String(index),label:weekdays[index]+"요일",bucket}))}/>
    </section>
    <section style={{...frame,marginBottom:16}}><h2 style={{fontSize:18,margin:"0 0 6px"}}>실제 시간대별 방송 성과 (한국시간)</h2><p style={muted}>선택한 시간 간격 기준이며 판매가 없는 방송 구간도 시간당 매출 계산에 포함돼. * 시간당 매출은 측정 가능한 판매 구간 기준이야.</p>
-    <MetricsTable rows={clock.times.map((bucket,index)=>({key:String(index),label:timeLabel(index,step),bucket}))}/>
+    <MetricsTable rows={displaySlotOrder(step).map(index=>({key:String(index),label:timeLabel(index,step),bucket:clock.times[index]}))}/>
    </section>
    <section style={{...frame,marginBottom:16}}><h2 style={{fontSize:18,margin:"0 0 8px"}}>월별 방송 효율 비교</h2>
     <div style={{overflowX:"auto"}}><table style={{borderCollapse:"collapse",width:"100%",fontSize:13}}><thead><tr>{["기간","방송","방송 매출","총 판매시간","시간당 매출","방송당 평균","구매자"].map(t=><th key={t} style={th}>{t}</th>)}</tr></thead><tbody>{months.map(m=>{const list=sessions.filter(s=>s.month===m),rev=list.reduce((x,s)=>x+s.sales,0),ms=list.reduce((x,s)=>x+s.duration,0),measured=list.filter(s=>s.duration>0).reduce((x,s)=>x+s.sales,0),buyers=new Set(list.flatMap(s=>s.salesList.map(x=>x.buyer))).size;return <tr key={m} onClick={()=>{setMonth(m);setSelected("all");}} style={{cursor:"pointer",background:month===m?"#eff6ff":"#fff"}}><td style={{...td,textAlign:"left",fontWeight:800}}>{m.replace("-","년 ")}월</td><td style={td}>{list.length}회</td><td style={td}>{money(rev)}원</td><td style={td}>{duration(ms)}</td><td style={td}>{ms?money(measured/(ms/3600000))+"원":"-"}</td><td style={td}>{money(rev/list.length)}원</td><td style={td}>{money(buyers)}명</td></tr>;})}</tbody></table></div>
