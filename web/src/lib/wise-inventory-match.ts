@@ -34,19 +34,31 @@ const types = [
   ["노트", /노트|수첩|notebook/i],
   ["파일", /파일|홀더|clear\s*file/i],
   ["캘린더", /캘린더|달력|calendar/i],
+  ["마그넷", /마그넷|마그네트|자석|magnet|マグネット/i],
+  ["브로마이드", /브로마이드|브로마이도|bromide|ブロマイド/i],
+  ["포스터", /포스터|poster|ポスター/i],
+  ["클립", /클립|clip|クリップ/i],
+  ["파우치", /파우치|필통|pouch|ポーチ/i],
 ] as const;
 function found(text:string, dictionary: readonly (readonly [string, RegExp])[]) { return dictionary.filter(([,re]) => re.test(text)).map(([label]) => label); }
 const intersection = (a:string[],b:string[]) => a.some(x => b.includes(x));
 const related = (a:string[],b:string[]) => a.some(x=>b.some(y=> (x==="씰"&&y==="스티커")||(x==="스티커"&&y==="씰")||(x==="피규어"&&y==="봉제")||(x==="봉제"&&y==="피규어")));
-export function recommendInventory(sale:{item_name:string; image_url:string|null;item_price:number}, candidate:{name:string;option:string;series:string;item_type?:string;image_url:string|null;sale_price:number|null;stock_status:string;random_member?:boolean}) {
+export function recommendInventory(sale:{item_name:string; image_url:string|null;item_price:number}, candidate:{name:string;option:string;series:string;item_type?:string;image_url:string|null;sale_price:number|null;reference_prices?:number[];stock_status:string;random_member?:boolean}) {
   const a = sale.item_name, b = [candidate.name,candidate.option,candidate.series,candidate.item_type].join(" ");
   const sa=found(a,series), sb=found(b,series), ta=found(a,types), tb=found(b,types);
   const sameSeries=intersection(sa,sb), sameType=intersection(ta,tb), nearType=related(ta,tb);
   const sameImage=Boolean(imageIdentity(sale.image_url))&&imageIdentity(sale.image_url)===imageIdentity(candidate.image_url);
   const sameName=normalizeProductName(a)===normalizeProductName(candidate.name);
-  const price=candidate.sale_price==null?0:Math.max(0,8-Math.abs(candidate.sale_price-sale.item_price)/Math.max(1,sale.item_price)*8);
-  const tier=sameSeries&&sameType?400:sameSeries&&nearType?300:sameSeries&&sameImage?250:sameSeries?200:sameImage?150:sameType?100:0;
-  const score=tier+(sameImage?25:0)+(sameName?20:0)+price-(candidate.random_member?2:0);
-  const reason=sameSeries&&sameType?"동일 작품 · 상품 키워드":sameSeries&&nearType?"동일 작품 · 유사 키워드":sameSeries?"동일 작품":sameImage?"동일 이미지":sameType?"동일 상품 키워드":"";
+  // Strict priority: series, kind, then actual listed sale price. Price and
+  // appearance cannot outweigh a stronger series/kind match. A repeated-lot
+  // group may have several different sale prices: compare its closest one.
+  const prices=[candidate.sale_price,...(candidate.reference_prices||[])].filter((p):p is number=>typeof p==='number'&&Number.isFinite(p)&&p>0);
+  const diff=sale.item_price>0&&prices.length?Math.min(...prices.map(p=>Math.abs(p-sale.item_price)/sale.item_price)):null;
+  const nearPrice=diff!==null&&diff<=0.1000000001;
+  const priceTier=nearPrice?2:diff!==null?1:0;
+  const closeness=diff===null?0:Math.round(999/(1+diff))*10;
+  const score=(sameSeries?1_000_000:0)+(sameType?200_000:nearType?100_000:0)+priceTier*10_000+closeness+(sameImage?4:0)+(sameName?2:0)+(candidate.random_member?0:1);
+  const reasons=[sameSeries?"동일 작품":"",sameType?"동일 종류":nearType?"유사 종류":"",nearPrice?`판매가 ±10% (${(diff!*100).toFixed(1)}% 차이)`:"",sameImage?"동일 이미지":""].filter(Boolean);
+  const reason=reasons.join(" · ");
   return {score,reason};
 }

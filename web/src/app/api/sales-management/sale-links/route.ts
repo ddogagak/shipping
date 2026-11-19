@@ -186,7 +186,8 @@ async function getInventory() {
     if(!lots.length)continue;
     lots.forEach(c=>hiddenIds.add(c.id));
     const first=lots[0],remaining=lots.reduce((s,c)=>s+c.remaining_units,0);
-    groupCandidates.push({...first,id:group.id,type:'inventory_group',name:group.title,option:`동일상품 묶음 · ${lots.length}차수`,remaining_units:remaining,stock_status:remaining?'active':'soldout',sale_price:null,random_member:false});
+    const referencePrices=[...new Set(lots.map(c=>c.sale_price).filter((p):p is number=>typeof p==='number'&&Number.isFinite(p)&&p>0))].sort((a,b)=>a-b);
+    groupCandidates.push({...first,id:group.id,type:'inventory_group',name:group.title,option:`동일상품 묶음 · ${lots.length}차수`,remaining_units:remaining,stock_status:remaining?'active':'soldout',sale_price:null,reference_prices:referencePrices,random_member:false});
   }
   return NextResponse.json({ ok: true, candidates:[...groupCandidates,...candidates.filter(c=>!hiddenIds.has(c.id))], names });
 }

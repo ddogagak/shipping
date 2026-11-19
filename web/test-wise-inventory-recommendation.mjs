@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import ts from 'typescript';
+
+const src=readFileSync(new URL('./src/lib/wise-inventory-match.ts',import.meta.url),'utf8');
+const code=ts.transpileModule(src,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
+const {recommendInventory}=await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+const sale={item_name:'치이카와 클리어카드 #1',image_url:'https://example.com/a.png',item_price:10000};
+const candidate=(name,price,extra={})=>({name,option:'',series:'',item_type:'',image_url:null,sale_price:price,stock_status:'active',...extra});
+const rec=(name,price,extra)=>recommendInventory(sale,candidate(name,price,extra));
+assert.ok(rec('치이카와 아크릴',30000).score>rec('귀멸 카드',10000,{image_url:sale.image_url}).score,'series dominates type, price and image');
+assert.ok(rec('치이카와 카드',30000).score>rec('치이카와 아크릴',10000,{image_url:sale.image_url}).score,'kind dominates price and image');
+assert.ok(rec('치이카와 카드',11000).score>rec('치이카와 카드',11001,{image_url:sale.image_url}).score,'inclusive 10% boundary');
+assert.ok(rec('치이카와 카드',9000).reason.includes('판매가 ±10%'));
+assert.ok(!rec('치이카와 카드',8999).reason.includes('판매가 ±10%'));
+assert.ok(rec('치이카와 카드',10200).score>rec('치이카와 카드',10900).score,'nearer price first');
+assert.ok(rec('치이카와 카드',10000).score>rec('치이카와 카드',null).score,'missing price below known price');
+assert.ok(rec('치이카와 카드',null,{reference_prices:[7000,10300,14000]}).reason.includes('3.0% 차이'),'group compares nearest reference price');
+assert.ok(rec('치이카와 카드',null,{reference_prices:[0,NaN]}).score===rec('치이카와 카드',null).score,'invalid prices ignored');
+console.log('PASS: work > kind > ±10% price; price closeness; grouped reference prices; missing prices.');

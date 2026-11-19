@@ -7,8 +7,8 @@ import { baseProductName, imageIdentity, normalizeProductName, recommendInventor
 type LinkRow = { id: number; wise_stock_id: number | string; purchase_item_id: string | null; random_box_id: string | null; inventory_group_id: string | null; quantity: number; applied_units: number };
 type Sale = { id: string; video_id: string; wise_user_id: string | null; buyer_nickname: string; item_name: string; item_price: number; image_url: string | null; sold_at: string | null; links: LinkRow[] };
 type Show = { video_id: string; first_sale: string; last_sale: string; revenue: number; count: number; buyer_count: number };
-type Candidate = { type: "purchase_item" | "random_box" | "inventory_group"; id: string; name: string; option: string; image_url: string | null; series: string; unit_price: number; currency: string; component_count: number; sale_price: number | null; stock_status: string; purchase_date: string; item_type: string; remaining_units: number; random_member: boolean };
-type Family = { key: string; title: string; count: number; revenue: number; linked: number; image: string | null; items: Sale[] };
+type Candidate = { type: "purchase_item" | "random_box" | "inventory_group"; id: string; name: string; option: string; image_url: string | null; series: string; unit_price: number; currency: string; component_count: number; sale_price: number | null; reference_prices?:number[]; stock_status: string; purchase_date: string; item_type: string; remaining_units: number; random_member: boolean };
+type Family = { key: string; title: string; count: number; price:number; revenue: number; linked: number; image: string | null; items: Sale[] };
 
 const panel: CSSProperties = { border: "1px solid #e2e8f0", borderRadius: 13, padding: 16, background: "#fff" };
 const field: CSSProperties = { padding: "9px 11px", borderRadius: 8, border: "1px solid #cbd5e1", color: "#0f172a", background: "#fff", maxWidth: "100%" };
@@ -50,6 +50,7 @@ export default function WiseInventoryLinkPage() {
   const [inventoryNames,setInventoryNames]=useState<Record<string,string>>({});
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [groupSearch, setGroupSearch] = useState("");
+  const [saleSort,setSaleSort]=useState<"quantity"|"price_desc"|"price_asc">("quantity");
   const [candidateSearch, setCandidateSearch] = useState("");
   const [candidateType, setCandidateType] = useState("all");
   const [targets, setTargets] = useState<Record<string, number>>({});
@@ -121,7 +122,7 @@ export default function WiseInventoryLinkPage() {
     const map = new Map<string, Family>();
     for (const row of sales) {
       const { key, name } = familyOf(row);
-      const g = map.get(key) || { key, title: name + " · " + won(row.item_price), count: 0, revenue: 0, linked: 0, image: row.image_url || null, items: [] };
+      const g = map.get(key) || { key, title: name + " · " + won(row.item_price), count: 0, price:row.item_price, revenue: 0, linked: 0, image: row.image_url || null, items: [] };
       g.count += 1;
       g.revenue += row.item_price;
       g.linked += row.links?.length ? 1 : 0;
@@ -133,7 +134,7 @@ export default function WiseInventoryLinkPage() {
   }, [sales]);
   const filteredGroups = useMemo(() => familyGroups.filter(g =>
     (!onlyUnlinked || g.linked < g.count) && (!groupSearch || g.title.toLowerCase().includes(groupSearch.trim().toLowerCase()))
-  ), [familyGroups, groupSearch, onlyUnlinked]);
+  ).sort((a,b)=>(saleSort==='price_desc'?b.price-a.price:saleSort==='price_asc'?a.price-b.price:0)||b.count-a.count||a.title.localeCompare(b.title)), [familyGroups, groupSearch, onlyUnlinked,saleSort]);
   const filteredCandidates = useMemo(() => {
     const query = normalizeProductName(candidateSearch);
     const chosen = sales.filter(row => selected[row.id]);
@@ -233,6 +234,7 @@ export default function WiseInventoryLinkPage() {
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <div><b style={{ fontSize: 17 }}>실제 판매기록</b><div style={{ fontSize: 12, color: "#64748b" }}>전체 {sales.length}개 · 연결 {linkedCount}개 · 미연결 {sales.length - linkedCount}개</div></div>
           <input aria-label="판매상품 검색" placeholder="판매상품 이름 검색" value={groupSearch} onChange={e => setGroupSearch(e.target.value)} style={field} />
+          <select aria-label="판매목록 정렬" value={saleSort} onChange={e=>setSaleSort(e.target.value as typeof saleSort)} style={field}><option value="quantity">판매수량 많은순</option><option value="price_desc">판매가 높은순</option><option value="price_asc">판매가 낮은순</option></select>
           <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}><input type="checkbox" checked={onlyUnlinked} onChange={e => setOnlyUnlinked(e.target.checked)} />미연결 포함만</label>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
@@ -251,7 +253,7 @@ export default function WiseInventoryLinkPage() {
 
       <aside style={{ ...panel, position: "sticky", top: 10 }}>
         <h2 style={{ fontSize: 17, margin: "0 0 8px" }}>연결할 방송판매재고</h2>
-        <p style={{ fontSize: 12, color: "#64748b" }}>실판매를 체크하면 동일 작품·상품 키워드가 먼저 추천돼. 완판 상품도 과거 연결을 위해 유지해.</p>
+        <p style={{ fontSize: 12, color: "#64748b" }}>추천 순서: ① 동일 작품 → ② 동일 상품 종류 → ③ 판매가 ±10% 근접. 완판 상품도 과거 연결을 위해 유지해.</p>
         <input aria-label="재고 검색" placeholder="재고명·작품명·매입일 검색" value={candidateSearch} onChange={e => setCandidateSearch(e.target.value)} style={{ ...field, width: "100%", boxSizing: "border-box" }} />
         <div style={{ display: "flex", gap: 8, margin: "9px 0" }}>
           <select aria-label="재고 구분" value={candidateType} onChange={e => setCandidateType(e.target.value)} style={{ ...field, flex: 1 }}>
@@ -265,7 +267,7 @@ export default function WiseInventoryLinkPage() {
             <input type="checkbox" checked={Boolean(targets[c.type + "|" + c.id])} onChange={event => { const key = c.type + "|" + c.id; setTargets(prev => { const next = {...prev}; if (event.target.checked) next[key] = 1; else delete next[key]; return next; }); }} />
             {c.image_url ? <img src={c.image_url} alt="" loading="lazy" style={{ width: 48, height: 48, objectFit: "contain", borderRadius: 5 }} /> : <span style={{ width: 48, height: 48, display: "grid", placeItems: "center", background: "#f1f5f9", borderRadius: 5, fontSize: 10 }}>사진 없음</span>}
             <span style={{ flex: 1, minWidth: 0, fontSize: 12 }}><b>{c.name}</b><br />
-              <span style={{ color: "#64748b" }}>{c.type === "random_box" ? "랜덤박스" : c.type==='inventory_group'?'묶음 재고':"매입상품"} · {c.option || c.series || "옵션 없음"}<br />{c.sale_price != null ? "판매가 " + won(c.sale_price) + " · " : ""}{c.type==='inventory_group'?'오래된 입고부터 차감':`${c.component_count}개 구성`} · 잔여 {c.remaining_units}개 {c.random_member?"· 랜덤박스 구성품(연결만 가능)":""}</span>{c.recommendation.reason&&<span style={{display:"block",color:"#166534",fontWeight:700}}>{c.recommendation.reason}</span>}
+              <span style={{ color: "#64748b" }}>{c.type === "random_box" ? "랜덤박스" : c.type==='inventory_group'?'묶음 재고':"매입상품"} · {c.option || c.series || "옵션 없음"}<br />{c.sale_price != null ? "판매가 " + won(c.sale_price) + " · " : c.reference_prices?.length ? "판매가 " + won(c.reference_prices[0]) + (c.reference_prices.length>1?"~"+won(c.reference_prices[c.reference_prices.length-1]):"") + " · " : ""}{c.type==='inventory_group'?'오래된 입고부터 차감':`${c.component_count}개 구성`} · 잔여 {c.remaining_units}개 {c.random_member?"· 랜덤박스 구성품(연결만 가능)":""}</span>{c.recommendation.reason&&<span style={{display:"block",color:"#166534",fontWeight:700}}>{c.recommendation.reason}</span>}
             </span>
           </label>)}
           {!filteredCandidates.length && <p style={{ fontSize: 13, color: "#64748b", padding: 12 }}>검색 결과가 없어.</p>}
