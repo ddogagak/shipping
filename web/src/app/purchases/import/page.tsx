@@ -125,6 +125,7 @@ export default function PurchaseImport() {
                     {e.shop_name || "거래처 미입력"} ·{" "}
                     {Number(e.paid_amount || 0).toLocaleString("ko-KR")}원 ·{" "}
                     {e.category || "매입"} ·{" "}
+                    {e.merged_count > 1 ? `합친 매입 ${e.merged_count}건 · ` : ""}
                     {e.ordered_at
                       ? new Intl.DateTimeFormat("sv-SE", {
                           timeZone: "Asia/Seoul",
