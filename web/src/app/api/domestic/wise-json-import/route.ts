@@ -38,6 +38,22 @@ async function upsertWisePhotosPreservingTimes(db:ReturnType<typeof createServic
   if(error)throw new Error(errorPrefix+": "+error.message);
  }
 }
+// Auto-match only eligible, paid/dispatchable source orders. A failed match
+// never interrupts the shipping or sales import; it remains reviewable.
+async function applyRememberedMatches(db:ReturnType<typeof createServiceRoleClient>,orders:RawOrder[]){
+ const {data:rules,error:ruleError}=await db.from("wise_inventory_match_rules").select("enabled_at").order("enabled_at",{ascending:true}).limit(1);
+ if(ruleError){console.error("Wise inventory rules read failed",ruleError.message);return {inventory_auto_matched:0,inventory_auto_skipped:0};}
+ if(!rules?.length)return {inventory_auto_matched:0,inventory_auto_skipped:0};
+ const since=Date.parse(rules[0].enabled_at);
+ const ids=[...new Set(orders.filter(o=>[10,16,25].includes(Number(o.status))).flatMap(o=>(o.stocks||[]).filter(s=>Number.isSafeInteger(s.id)&&validDate(s.soldAt)&&Date.parse(s.soldAt!)>=since&&asText(s.videoId)).map(s=>s.id)))];
+ let matched=0,skipped=0;
+ for(const chunk of batches(ids,300)){
+  const {data,error}=await db.rpc("wise_auto_match_inventory",{p_ids:chunk});
+  if(error){console.error("Wise inventory auto-match failed",error.message);skipped+=chunk.length;continue;}
+  matched+=Number(data?.matched||0);skipped+=Number(data?.skipped||0);
+ }
+ return {inventory_auto_matched:matched,inventory_auto_skipped:skipped};
+}
 export async function POST(req:Request){
  try{
   const form=await req.formData();
@@ -65,7 +81,8 @@ export async function POST(req:Request){
     imported_at:importedAt
    })));
    await upsertWisePhotosPreservingTimes(db,salesRows,"와이스 매출 자료 저장 실패");
-   return NextResponse.json({ok:true,sales_saved_orders:salesOrders.length,sales_saved_items:salesRows.length,sold_at_count:salesRows.filter(row=>row.sold_at).length,missing_sold_at_count:salesRows.filter(row=>!row.sold_at).length,imported_at:importedAt});
+   const inventoryResult=await applyRememberedMatches(db,salesOrders);
+   return NextResponse.json({ok:true,sales_saved_orders:salesOrders.length,sales_saved_items:salesRows.length,sold_at_count:salesRows.filter(row=>row.sold_at).length,missing_sold_at_count:salesRows.filter(row=>!row.sold_at).length,imported_at:importedAt,...inventoryResult});
   }
   // Queue only selected orders for approval. Do not run the expensive full-history
   // sales snapshot, nickname reconciliation, or all-domestic-order scan.
@@ -436,6 +453,7 @@ export async function POST(req:Request){
   }
   const photoRows=orders.flatMap(o=>(o.stocks??[]).filter(s=>Number.isSafeInteger(s.id)).map(s=>({wise_stock_id:s.id,wise_order_id:o.id,wise_user_id:wiseUserId(o),buyer_nickname:asText(o.user?.nickname),ordered_at:validDate(o.createdAt)??new Date().toISOString(),sold_at:validDate(s.soldAt),video_id:asText(s.videoId)||null,item_name:asText(s.name),item_price:Number(s.price??0),image_url:s.thumbnail??null})));
   await upsertWisePhotosPreservingTimes(db,photoRows,"와이스 상품정보 저장 실패");
+  const inventoryResult=await applyRememberedMatches(db,orders);
   const selectedRaw=asText(form.get("selected_ids"));
   const selectedIds=selectedRaw?JSON.parse(selectedRaw):null;
   if(selectedIds!==null&&(!Array.isArray(selectedIds)||selectedIds.length>40||!selectedIds.every(Number.isSafeInteger)||new Set(selectedIds).size!==selectedIds.length))
@@ -446,7 +464,7 @@ export async function POST(req:Request){
    const payload=chunk.map(({order:o,ordered_at,nickname})=>({wise_order_id:o.id,wise_user_id:wiseUserId(o),buyer_nickname:nickname,ordered_at,receiver_name:o.receiverName??null,receiver_phone:wisePhone(o)||null,postal_code:o.postNum??null,address:[o.addr1,o.addr2,o.addr3].filter(Boolean).join(" "),item_summary:(o.stocks??[]).map(s=>asText(s.name)).join(" / "),item_total_price:(o.stocks??[]).reduce((sum,s)=>sum+Number(s.price??0),0),item_count:o.stocks?.length??0}));
    const {error}=await db.from("domestic_wise_import_queue").upsert(payload,{onConflict:"wise_order_id",ignoreDuplicates:true});if(error)throw error;
   }
-  return NextResponse.json({ok:true,recovered_links:recoveredLinks,queued_new:fresh.length,sales_saved:salesRows.length,updated_snapshots:orders.length,updated_items:photoRows.length,excluded_count:parsed.length-orders.length,skipped_existing:rows.filter(x=>x.existingDomestic).length,skipped_queued:rows.filter(x=>x.alreadyQueued).length});
+  return NextResponse.json({ok:true,recovered_links:recoveredLinks,queued_new:fresh.length,sales_saved:salesRows.length,updated_snapshots:orders.length,updated_items:photoRows.length,excluded_count:parsed.length-orders.length,skipped_existing:rows.filter(x=>x.existingDomestic).length,skipped_queued:rows.filter(x=>x.alreadyQueued).length,...inventoryResult});
  }catch(e){
   console.error("Wise JSON import failed:",e);
   const err=e as {message?:string;details?:string;hint?:string;code?:string}|null;

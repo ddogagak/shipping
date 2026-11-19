@@ -20,6 +20,9 @@ export async function GET() {
       .select("*,sale_random_box_members(*)")
       .order("created_at", { ascending: false });
     if (error) throw error;
+    const {data:actualSales,error:actualError}=await sb.rpc("wise_inventory_actual_sales");
+    if(actualError)throw actualError;
+    const salesById=new Map((actualSales||[]).filter((s:any)=>s.target_type==="random_box").map((s:any)=>[String(s.target_id),s]));
     // 랜덤박스에는 독립적인 매입일이 없으므로 구성품의 실제 매입일 중 최신 날짜를 사용한다.
     const purchaseItemIds = [...new Set((data || []).flatMap((box: any) =>
       (box.sale_random_box_members || []).map((member: any) => String(member.purchase_item_id || "")).filter(Boolean),
@@ -43,7 +46,11 @@ export async function GET() {
         purchaseDateByItemId.set(String(item.id), purchaseDateByOrderId.get(String(item.purchase_order_id)) || "");
       }
     }
-    const items = (data || []).map((row: any) => ({
+    const items = (data || []).map((row: any) => {
+      const totalUnits=Number(row.purchase_quantity||1)*Math.max(1,Number(row.component_count||1));
+      const remainingUnits=row.view_status==="completed"?0:Number(row.remaining_units??totalUnits);
+      const actual:any=salesById.get(String(row.id));
+      return ({
       ordered_at: (row.sale_random_box_members || []).map((member: any) =>
         purchaseDateByItemId.get(String(member.purchase_item_id)) || "",
       ).filter(Boolean).sort().at(-1) || null,
@@ -58,8 +65,11 @@ export async function GET() {
       public_comment: row.public_comment,
       component_count: row.component_count,
       purchase_quantity: Number(row.purchase_quantity || 1),
-      sold_quantity: row.view_status === "completed" ? Number(row.purchase_quantity || 1) : 0,
-      remaining_quantity: row.view_status === "completed" ? 0 : Number(row.purchase_quantity || 1),
+      sold_quantity: Math.floor((totalUnits-remainingUnits)/Math.max(1,Number(row.component_count||1))),
+      remaining_quantity: Math.ceil(remainingUnits/Math.max(1,Number(row.component_count||1))),
+      remaining_units:remainingUnits,sold_units:Math.max(0,totalUnits-remainingUnits),stock_revision:row.updated_at,
+      actual_average_sale_price:actual?.average_price??null,actual_sales_revenue:Number(actual?.revenue??0),actual_sales_units:Number(actual?.sold_units??0),
+      actual_sale_price_override:row.actual_sale_price_override??null,
       box_cost_price: Number(row.total_cost_krw),
       unit_cost_price: Math.ceil(Number(row.total_cost_krw) / Number(row.component_count)),
       actual_purchase_currency: "KRW",
@@ -71,7 +81,7 @@ export async function GET() {
       series_tags: row.series_tags || [],
       item_type: "기타",
       members: row.sale_random_box_members || [],
-    }));
+    });});
     return NextResponse.json({ ok: true, items });
   } catch (e) {
     return NextResponse.json({ ok: false, message: message(e) }, { status: 500 });
@@ -179,6 +189,29 @@ export async function PATCH(req: Request) {
     const qty = Number(body.purchase_quantity);
     if (!Number.isSafeInteger(qty) || qty < 1 || qty > 100000) return NextResponse.json({ok:false,message:"입고 박스는 1~100,000개 정수로 입력해줘."},{status:400});
     const sb = createServiceRoleClient();
+    const {data:current,error:currentError}=await sb.from("sale_random_boxes").select("*").eq("id",body.id).single();
+    if(currentError)throw currentError;
+    if(Object.prototype.hasOwnProperty.call(body,"stock_revision")&&body.stock_revision!==current.updated_at)
+      return NextResponse.json({ok:false,message:"다른 작업에서 랜덤박스 재고가 변경됐어. 새로고침해줘."},{status:409});
+    if(body.sold_units!=null||current.remaining_units!=null){
+      const count=Math.max(1,Number(current.component_count||1));
+      const capacity=qty*count;
+      const oldSold=current.view_status==="completed"?Number(current.purchase_quantity)*count:Math.max(0,Number(current.purchase_quantity)*count-Number(current.remaining_units??Number(current.purchase_quantity)*count));
+      const sold=Number(body.sold_units??oldSold);
+      const status=String(body.view_status||"display");
+      if(!["display","hidden","completed"].includes(status)||!Number.isSafeInteger(sold)||sold<0||sold>capacity)throw Error("랜덤박스 판매 낱개 수량 또는 상태를 확인해줘.");
+      if(current.view_status==="completed"&&status!=="completed")throw Error("완료된 랜덤박스는 수정으로 다시 열 수 없어. 차감 연결 해제를 이용해줘.");
+      const remaining=status==="completed"?0:capacity-sold;
+      const price=body.sale_price===""||body.sale_price==null?null:Number(body.sale_price);
+      const actualPrice=body.actual_sale_price_override===""||body.actual_sale_price_override==null?null:Number(body.actual_sale_price_override);
+      const title=String(body.title||"").trim().slice(0,200);
+      if(!title||(price!=null&&(!Number.isFinite(price)||price<0))||(actualPrice!=null&&(!Number.isFinite(actualPrice)||actualPrice<0)))throw Error("제목과 판매가를 확인해줘.");
+      // Random-box units belong to the pool. Never guess the identity of the
+      // sold member or mark all source items sold as a side effect.
+      const {error}=await sb.from("sale_random_boxes").update({title,image_url:String(body.image_url||current.image_url),sale_memo:String(body.sale_memo||""),public_comment:String(body.public_comment||"").slice(0,100),sale_price:price,...(Object.prototype.hasOwnProperty.call(body,"actual_sale_price_override")?{actual_sale_price_override:actualPrice}:{}),purchase_quantity:qty,remaining_units:remaining,view_status:remaining===0?"completed":status,updated_at:new Date().toISOString()}).eq("id",body.id).eq("updated_at",current.updated_at).select("id").single();
+      if(error)throw error;
+      return NextResponse.json({ok:true,id:body.id});
+    }
     const { data, error } = await sb.rpc("update_sale_random_box", {
       p_id: body.id,
       p_title: String(body.title || "").slice(0, 200),

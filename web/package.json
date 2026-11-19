@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "test:inventory": "node test-wise-inventory.mjs",
     "lint": "next lint"
   },
   "dependencies": {
@@ -16,6 +17,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.16",
     "@types/node": "^22.15.17",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",

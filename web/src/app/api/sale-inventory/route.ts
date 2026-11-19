@@ -71,6 +71,8 @@ export async function GET(req: Request) {
       { data: sourcingRows, error: sourcingError },
       { data: ledgers, error: ledgerError },
       { data: excluded, error: excludeError },
+      { data: actualSales, error: actualSalesError },
+      { data: randomMembers, error: randomMembersError },
     ] = await Promise.all([
       sb.from("purchase_orders")
         .select("id,order_number,ordered_at,shop_name,currency,source_site,paid_amount,local_shipping,raw_data,purchase_items(*)")
@@ -80,12 +82,18 @@ export async function GET(req: Request) {
         .select("id,item_name,item_type,series_name,image_url,lineup_image_url,source_url,memo,currency,purchase_price,total_price,component_count,unit_sale_price,internal_sku,source_product_id,source_site_code,option_seq"),
       sb.from("purchase_sale_inventory").select("*"),
       sb.from("sale_inventory_exclusions").select("purchase_item_id"),
+      sb.rpc("wise_inventory_actual_sales"),
+      sb.from("sale_random_box_members").select("purchase_item_id,random_box_id"),
     ]);
 
     if (error) throw error;
     if (sourcingError) throw sourcingError;
     if (ledgerError) throw ledgerError;
     if (excludeError) throw excludeError;
+    if (actualSalesError) throw actualSalesError;
+    if(randomMembersError)throw randomMembersError;
+    const randomMembersById=new Set((randomMembers||[]).map((row:any)=>String(row.purchase_item_id)));
+    const salesById = new Map((actualSales || []).filter((row:any)=>row.target_type==="purchase_item").map((row:any)=>[String(row.target_id),row]));
     const excludedIds = new Set((excluded ?? []).map((row: any) => String(row.purchase_item_id)));
 
     const sourcingBySku = new Map<string, any[]>();
@@ -159,6 +167,9 @@ export async function GET(req: Request) {
           ? sourcing.image_url
           : item.image_url || domesticMeta?.image_url || (!fixedSku ? sourcing?.image_url : null) || null);
         const defaultViewStatus = imageUrl ? "display" : "hidden";
+        const remainingUnits = ledger?.stock_status === "soldout" ? 0 : Math.max(0, Number(ledger?.remaining_units ?? (ledger ? Number(ledger.remaining_quantity || 0) : boxQuantity) * actualComponentCount));
+        const soldUnits = Math.max(0, boxQuantity * actualComponentCount - remainingUnits);
+        const actualSale:any = salesById.get(String(item.id));
 
         // 기존에 이미 완료 처리된 항목도 판매박스=입고박스, 재고=0으로 실제 DB를 보정한다.
         if (
@@ -216,6 +227,11 @@ export async function GET(req: Request) {
           unit_cost_price: pricing.unitCostPrice,
           recommended_unit_sale_price: pricing.unitSalePrice,
           sale_price: ledger?.sale_price ?? null,
+          actual_average_sale_price: actualSale?.average_price ?? null,
+          actual_sale_price_override:ledger?.actual_sale_price_override??null,
+          actual_sales_revenue: Number(actualSale?.revenue ?? 0), actual_sales_units: Number(actualSale?.sold_units ?? 0),
+          remaining_units: remainingUnits, sold_units: soldUnits, stock_revision: ledger?.updated_at ?? null,
+          is_random_member:randomMembersById.has(String(item.id)),
           remaining_quantity: ledger ? Number(ledger.remaining_quantity || 0) : boxQuantity,
           sold_quantity: ledger ? Number(ledger.sold_quantity || 0) : 0,
           stock_status: ledger?.stock_status || "active",
@@ -259,7 +275,7 @@ export async function PATCH(req: Request) {
       if (!Number.isFinite(newPrice) || newPrice <= 0 || newPrice > 10000000000)
         return NextResponse.json({ok:false,message:"0보다 큰 실제 매입가를 입력해줘."},{status:400});
       const {data:purchase,error:purchaseError}=await sb.from("purchase_items")
-        .select("id,unit_price,quantity,received_quantity").eq("id",body.purchase_item_id).maybeSingle();
+        .select("id,unit_price,quantity,received_quantity,component_count").eq("id",body.purchase_item_id).maybeSingle();
       if(purchaseError)throw purchaseError;
       if(!purchase)return NextResponse.json({ok:false,message:"대상 상품을 찾을 수 없어."},{status:404});
       const {data:existing,error:existingError}=await sb.from("purchase_sale_inventory")
@@ -279,13 +295,17 @@ export async function PATCH(req: Request) {
       const oldSold=Math.max(0,Number(existing?.sold_quantity ?? 0));
       const sold=existing?.stock_status==="soldout" ? nextQty : Math.min(oldSold,nextQty);
       const remaining=existing?.stock_status==="soldout" ? 0:Math.max(0,nextQty-sold);
+      const oldCount=resolveComponentCount(existing?.component_count_override,purchase.component_count);
+      const unitsSold=existing?.remaining_units==null?oldSold*oldCount:Math.max(0,effectiveQty*oldCount-Number(existing.remaining_units));
+      const nextRemainingUnits=existing?.stock_status==="soldout"?0:nextQty*nextComponent-unitsSold;
+      if(mode==="box"&&nextRemainingUnits<0)return NextResponse.json({ok:false,message:"새 구성수량이 이미 판매한 낱개 수량보다 작아."},{status:409});
       const changes:Record<string,unknown>={
         purchase_price_override:newPrice,
-        ...(mode==="box"?{box_quantity_override:nextQty,component_count_override:nextComponent}:{}),
-        sold_quantity:sold,remaining_quantity:remaining
+        updated_at:new Date().toISOString(),
+        ...(mode==="box"?{box_quantity_override:nextQty,component_count_override:nextComponent,remaining_units:nextRemainingUnits,remaining_quantity:Math.ceil(nextRemainingUnits/nextComponent),sold_quantity:Math.floor((nextQty*nextComponent-nextRemainingUnits)/nextComponent),stock_status:nextRemainingUnits===0?"soldout":"active"}:existing?{}:{sold_quantity:sold,remaining_quantity:remaining})
       };
       const result=existing
-        ? await sb.from("purchase_sale_inventory").update(changes).eq("purchase_item_id",body.purchase_item_id).select().single()
+        ? await sb.from("purchase_sale_inventory").update(changes).eq("purchase_item_id",body.purchase_item_id).eq("updated_at",existing.updated_at).select().single()
         : await sb.from("purchase_sale_inventory").insert({
             purchase_item_id:body.purchase_item_id,
             sale_price:null,
@@ -314,12 +334,26 @@ export async function PATCH(req: Request) {
 
     // 완료로 저장하는 순간 판매박스를 입고박스와 동일하게 맞추고 재고를 0으로 만든다.
     const requestedSold = Math.max(0, Math.trunc(Number(body.sold_quantity ?? 0)));
-    const sold = viewStatus === "completed" ? received : requestedSold;
-    const remaining = viewStatus === "completed" ? 0 : Math.max(0, received - sold);
-    const status = viewStatus === "completed" ? "soldout" : "active";
+    const { data: currentLedger, error: lookupError } = await sb.from("purchase_sale_inventory")
+      .select("*").eq("purchase_item_id",body.purchase_item_id).maybeSingle();
+    if (lookupError) throw lookupError;
+    if (Object.prototype.hasOwnProperty.call(body,"stock_revision") && (body.stock_revision??null)!==(currentLedger?.updated_at??null))
+      return NextResponse.json({ok:false,message:"다른 작업에서 재고가 변경됐어. 새로고침 후 다시 저장해줘."},{status:409});
+    const count=resolveComponentCount(componentCount,currentLedger?.component_count_override,body.component_count);
+    const totalUnits=received*count;
+    const requestedUnits=body.sold_units==null? (currentLedger?.remaining_units!=null ? Math.max(0,totalUnits-Number(currentLedger.remaining_units)) : requestedSold*count) : Number(body.sold_units);
+    if (!Number.isSafeInteger(totalUnits)||!Number.isSafeInteger(requestedUnits)||requestedUnits<0||requestedUnits>totalUnits)
+      return NextResponse.json({ok:false,message:"판매 낱개 수량은 0부터 총 입고 낱개 수량 사이여야 해."},{status:400});
+    const soldUnits=viewStatus==="completed"?totalUnits:requestedUnits;
+    const remainingUnits=totalUnits-soldUnits;
+    const sold=Math.floor(soldUnits/count),remaining=Math.ceil(remainingUnits/count);
+    const status=remainingUnits===0?"soldout":"active";
     const cleanMemo = String(body.sale_memo || "").replace(HIDDEN_MARKER, "").trim();
     const cleanPublicComment = String(body.public_comment || "").replace(/[\r\n\t]+/g, " ").trim().slice(0, 100);
     const storedMemo = viewStatus === "hidden" ? `${HIDDEN_MARKER}${cleanMemo}` : (cleanMemo || null);
+    const hasActualPrice=Object.prototype.hasOwnProperty.call(body,"actual_sale_price_override");
+    const actualPrice=body.actual_sale_price_override===""||body.actual_sale_price_override==null?null:Number(body.actual_sale_price_override);
+    if(hasActualPrice&&actualPrice!=null&&(!Number.isFinite(actualPrice)||actualPrice<0))return NextResponse.json({ok:false,message:"실판매가를 확인해줘."},{status:400});
     const payload = {
       purchase_item_id: body.purchase_item_id,
       ...(hasDisplayName ? { display_name: displayName } : {}),
@@ -327,8 +361,10 @@ export async function PATCH(req: Request) {
       ...(hasComponentCount ? { component_count_override: componentCount } : {}),
       box_quantity_override: received,
       sale_price: body.sale_price === "" || body.sale_price == null ? null : Number(body.sale_price),
+      ...(hasActualPrice?{actual_sale_price_override:actualPrice}:{}),
       remaining_quantity: remaining,
       sold_quantity: sold,
+      remaining_units:remainingUnits,updated_at:new Date().toISOString(),
       stock_status: status,
       sale_memo: storedMemo,
       public_comment: cleanPublicComment || null,
@@ -336,12 +372,9 @@ export async function PATCH(req: Request) {
     };
 
     // Updating only selected fields preserves sale-only cost/box overrides.
-    const { data: currentLedger, error: lookupError } = await sb.from("purchase_sale_inventory")
-      .select("purchase_item_id").eq("purchase_item_id",body.purchase_item_id).maybeSingle();
-    if (lookupError) throw lookupError;
     const { data, error } = currentLedger
       ? await sb.from("purchase_sale_inventory").update(payload)
-          .eq("purchase_item_id",body.purchase_item_id).select().single()
+          .eq("purchase_item_id",body.purchase_item_id).eq("updated_at",currentLedger.updated_at).select().single()
       : await sb.from("purchase_sale_inventory")
           .insert(payload).select().single();
     if (error) throw error;
@@ -351,7 +384,8 @@ export async function PATCH(req: Request) {
       purchase_quantity: received,
       sold_quantity: sold,
       remaining_quantity: remaining,
-      view_status: viewStatus,
+      remaining_units:remainingUnits,sold_units:soldUnits,stock_revision:data.updated_at,
+      view_status: status==="soldout"?"completed":viewStatus,
       sale_memo: cleanMemo,
       public_comment: cleanPublicComment,
     };

@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { baseProductName, imageIdentity, normalizeProductName, recommendInventory } from "@/lib/wise-inventory-match";
 
-type LinkRow = { id: number; wise_stock_id: number | string; purchase_item_id: string | null; random_box_id: string | null; quantity: number };
+type LinkRow = { id: number; wise_stock_id: number | string; purchase_item_id: string | null; random_box_id: string | null; quantity: number; applied_units: number };
 type Sale = { id: string; video_id: string; wise_user_id: string | null; buyer_nickname: string; item_name: string; item_price: number; image_url: string | null; sold_at: string | null; links: LinkRow[] };
 type Show = { video_id: string; first_sale: string; last_sale: string; revenue: number; count: number; buyer_count: number };
-type Candidate = { type: "purchase_item" | "random_box"; id: string; name: string; option: string; image_url: string | null; series: string; unit_price: number; currency: string; component_count: number; sale_price: number | null; stock_status: string; purchase_date: string };
+type Candidate = { type: "purchase_item" | "random_box"; id: string; name: string; option: string; image_url: string | null; series: string; unit_price: number; currency: string; component_count: number; sale_price: number | null; stock_status: string; purchase_date: string; item_type: string; remaining_units: number; random_member: boolean };
 type Family = { key: string; title: string; count: number; revenue: number; linked: number; image: string | null; items: Sale[] };
 
 const panel: CSSProperties = { border: "1px solid #e2e8f0", borderRadius: 13, padding: 16, background: "#fff" };
@@ -16,10 +17,9 @@ const th: CSSProperties = { textAlign: "left", padding: "9px 10px", fontSize: 12
 const td: CSSProperties = { padding: "9px 10px", borderBottom: "1px solid #e2e8f0", fontSize: 13, verticalAlign: "middle" };
 const won = (n: number) => Math.round(n || 0).toLocaleString("ko-KR") + "원";
 const kst = (s: string | null) => s ? new Date(s).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }) : "—";
-const normalize = (s: string) => String(s || "").normalize("NFKC").toLowerCase().replace(/^\s*#\s*\d+\s*/, "").replace(/\s+/g, "").trim();
 function familyOf(row: Sale) {
-  const name = row.item_name.normalize("NFKC").replace(/^\s*#\s*\d+\s*/, "").trim();
-  const key = normalize(row.item_name) + "|" + row.item_price;
+  const name = baseProductName(row.item_name);
+  const key = normalizeProductName(row.item_name) + "|" + row.item_price + "|" + imageIdentity(row.image_url);
   return { key, name };
 }
 async function requestJson(url: string, init?: RequestInit) {
@@ -60,6 +60,9 @@ export default function WiseInventoryLinkPage() {
   const [loadingInventory, setLoadingInventory] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [cutover, setCutover] = useState("");
+  const [deductionMode, setDeductionMode] = useState<"future"|"historical"|"link_only">("future");
+  const [remember, setRemember] = useState(false);
 
   const loadShows = useCallback(async () => {
     setLoadingShows(true); setError("");
@@ -83,6 +86,7 @@ export default function WiseInventoryLinkPage() {
       ids.forEach(id => params.append("video_id", id));
       const data = await requestJson("/api/sales-management/sale-links?" + params.toString());
       setSales(data.sales || []);
+      setCutover(data.cutover || "");
       setSelected({});
     } catch (e) { setError(e instanceof Error ? e.message : "판매기록 조회 실패"); }
     finally { setLoadingSales(false); }
@@ -117,13 +121,20 @@ export default function WiseInventoryLinkPage() {
     (!onlyUnlinked || g.linked < g.count) && (!groupSearch || g.title.toLowerCase().includes(groupSearch.trim().toLowerCase()))
   ), [familyGroups, groupSearch, onlyUnlinked]);
   const filteredCandidates = useMemo(() => {
-    const query = candidateSearch.trim().toLowerCase();
+    const query = normalizeProductName(candidateSearch);
+    const chosen = sales.filter(row => selected[row.id]);
+    // Compare distinct selected families rather than every identical sale row.
+    const samples = [...new Map(chosen.map(row=>[familyOf(row).key,row])).values()];
     return candidates.filter(c => (candidateType === "all" || c.type === candidateType) &&
-      (!query || [c.name, c.option, c.series, c.purchase_date].some(v => String(v || "").toLowerCase().includes(query))))
-      .slice(0, 150);
-  }, [candidateSearch, candidates, candidateType]);
+      (!query || [c.name, c.option, c.series, c.purchase_date, c.item_type].some(v => normalizeProductName(v).includes(query))))
+      .map(c=>({...c, recommendation:samples.map(s=>recommendInventory(s,c)).sort((a,b)=>b.score-a.score)[0]||{score:0,reason:""}}))
+      .sort((a,b)=>b.recommendation.score-a.recommendation.score).slice(0,150);
+  }, [candidateSearch, candidates, candidateType, sales, selected]);
   const candidateNames = useMemo(() => new Map(candidates.map(c => [c.type + "|" + c.id, c.name + (c.option ? " · " + c.option : "")])), [candidates]);
   const selectedIds = useMemo(() => sales.filter(s => selected[s.id]).map(s => s.id), [sales, selected]);
+  const selectedSales = useMemo(()=>sales.filter(s=>selected[s.id]),[sales,selected]);
+  const applicableSales = selectedSales.filter(s=>deductionMode==="historical" || deductionMode==="future" && cutover && s.sold_at && new Date(s.sold_at)>=new Date(cutover));
+  const canRemember = selectedSales.length>0 && selectedSales.every(s=>Boolean(imageIdentity(s.image_url)) && familyOf(s).key===familyOf(selectedSales[0]).key);
   const linkedCount = useMemo(() => sales.filter(s => s.links?.length).length, [sales]);
   const selectedTargets = useMemo(() => Object.entries(targets).filter(([, quantity]) => quantity >= 1).map(([key, quantity]) => {
     const candidate = candidates.find(c => c.type + "|" + c.id === key);
@@ -140,11 +151,13 @@ export default function WiseInventoryLinkPage() {
     const ids = single ? [single.saleId] : selectedIds;
     if (!videoIds.length || !ids.length || busy) return;
     if (action === "link" && !selectedTargets.length) { setError("오른쪽에서 연결할 방송판매재고를 체크해줘."); return; }
+    if(action==="link" && deductionMode==="historical" && !window.confirm("과거 판매도 실제 차감합니다. 이미 수동으로 차감한 판매는 중복될 수 있어. 미리보기 수량을 확인했나요?"))return;
     setBusy(true); setError(""); setMessage("");
     try {
       const target = single?.target;
       const body = {
         action, stock_ids: ids,
+        deduction_mode: deductionMode, remember: remember&&canRemember,
         targets: action === "link" ? selectedTargets.map(row => ({
           target_type: row.type, target_id: row.id, quantity: row.quantity
         })) : undefined,
@@ -154,9 +167,10 @@ export default function WiseInventoryLinkPage() {
       const data = await requestJson("/api/sales-management/sale-links", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
       });
-      setMessage(data.count + "개 재고 연결 " + (action === "link" ? "저장" : "해제") + " 완료. 원본 매출·재고 수량은 변경되지 않았어.");
+      setMessage(data.count + "개 연결 " + (action === "link" ? "저장" : "해제") + " 완료 · " + (data.deducted_units>0?`낱개 ${data.deducted_units}개 차감`:data.deducted_units<0?`낱개 ${-data.deducted_units}개 복원`:"재고 변화 없음") + (data.remembered?" · 다음 방송 자동 매칭 저장됨":""));
       if (action === "link") setTargets({});
       await loadSales(videoIds);
+      await loadInventory();
     } catch (e) { setError(e instanceof Error ? e.message : "매칭 저장 실패"); }
     finally { setBusy(false); }
   }
@@ -165,7 +179,7 @@ export default function WiseInventoryLinkPage() {
   return <main style={{ padding: 22, maxWidth: 1480, margin: "0 auto", color: "#0f172a", fontFamily: "inherit" }}>
     <header style={{ display: "flex", justifyContent: "space-between", alignItems: "start", flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
       <div><h1 style={{ margin: 0, fontSize: 28 }}>실판매 ↔ 방송판매재고 연결</h1>
-        <p style={{ color: "#64748b", margin: "8px 0 0", fontSize: 14 }}>실제 판매기록을 나중에 재고와 연결하는 독립 관리 페이지 · 매출·재고 차감 없음</p></div>
+        <p style={{ color: "#64748b", margin: "8px 0 0", fontSize: 14 }}>작품·상품 키워드 추천 · 낱개 단위 차감 · 기존 완료 및 과거 수동 재고 보호</p></div>
       <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
         <Link style={btn} href="/sales-management">매출관리</Link>
         <Link style={btn} href="/sale-inventory">방송판매재고</Link>
@@ -221,7 +235,7 @@ export default function WiseInventoryLinkPage() {
 
       <aside style={{ ...panel, position: "sticky", top: 10 }}>
         <h2 style={{ fontSize: 17, margin: "0 0 8px" }}>연결할 방송판매재고</h2>
-        <p style={{ fontSize: 12, color: "#64748b" }}>실판매를 체크하고 재고를 여러 개 선택해 추가 연결할 수 있어. 선택 재고별 수량도 지정할 수 있어. 기존 연결은 유지돼.</p>
+        <p style={{ fontSize: 12, color: "#64748b" }}>실판매를 체크하면 동일 작품·상품 키워드가 먼저 추천돼. 완판 상품도 과거 연결을 위해 유지해.</p>
         <input aria-label="재고 검색" placeholder="재고명·작품명·매입일 검색" value={candidateSearch} onChange={e => setCandidateSearch(e.target.value)} style={{ ...field, width: "100%", boxSizing: "border-box" }} />
         <div style={{ display: "flex", gap: 8, margin: "9px 0" }}>
           <select aria-label="재고 구분" value={candidateType} onChange={e => setCandidateType(e.target.value)} style={{ ...field, flex: 1 }}>
@@ -235,7 +249,7 @@ export default function WiseInventoryLinkPage() {
             <input type="checkbox" checked={Boolean(targets[c.type + "|" + c.id])} onChange={event => { const key = c.type + "|" + c.id; setTargets(prev => { const next = {...prev}; if (event.target.checked) next[key] = 1; else delete next[key]; return next; }); }} />
             {c.image_url ? <img src={c.image_url} alt="" loading="lazy" style={{ width: 48, height: 48, objectFit: "contain", borderRadius: 5 }} /> : <span style={{ width: 48, height: 48, display: "grid", placeItems: "center", background: "#f1f5f9", borderRadius: 5, fontSize: 10 }}>사진 없음</span>}
             <span style={{ flex: 1, minWidth: 0, fontSize: 12 }}><b>{c.name}</b><br />
-              <span style={{ color: "#64748b" }}>{c.type === "random_box" ? "랜덤박스" : "매입상품"} · {c.option || c.series || "옵션 없음"}<br />{c.sale_price != null ? "판매가 " + won(c.sale_price) + " · " : ""}{c.component_count}개 구성 · {c.stock_status}</span>
+              <span style={{ color: "#64748b" }}>{c.type === "random_box" ? "랜덤박스" : "매입상품"} · {c.option || c.series || "옵션 없음"}<br />{c.sale_price != null ? "판매가 " + won(c.sale_price) + " · " : ""}{c.component_count}개 구성 · 잔여 {c.remaining_units}개 {c.random_member?"· 랜덤박스 구성품(연결만 가능)":""}</span>{c.recommendation.reason&&<span style={{display:"block",color:"#166534",fontWeight:700}}>{c.recommendation.reason}</span>}
             </span>
           </label>)}
           {!filteredCandidates.length && <p style={{ fontSize: 13, color: "#64748b", padding: 12 }}>검색 결과가 없어.</p>}
@@ -244,15 +258,24 @@ export default function WiseInventoryLinkPage() {
           <b>선택 재고 {selectedTargets.length}개 (최대 16개)</b>
           {selectedTargets.map(c => <div key={c.type + "|" + c.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, paddingTop: 8 }}>
             <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{c.name} {c.option}</span>
-            <label style={{ whiteSpace: "nowrap" }}>수량 <input aria-label={c.name + " 연결 수량"} type="number" min={1} max={9999} value={c.quantity} style={{ ...field, width: 72 }} onChange={e => { const quantity = Number(e.target.value); setTargets(prev => ({ ...prev, [c.type + "|" + c.id]: Number.isSafeInteger(quantity) && quantity >= 1 ? Math.min(quantity, 9999) : 1 })); }} /></label>
+            <label style={{ whiteSpace: "nowrap" }}>낱개 <input aria-label={c.name + " 연결 수량"} type="number" min={1} max={9999} value={c.quantity} style={{ ...field, width: 72 }} onChange={e => { const quantity = Number(e.target.value); setTargets(prev => ({ ...prev, [c.type + "|" + c.id]: Number.isSafeInteger(quantity) && quantity >= 1 ? Math.min(quantity, 9999) : 1 })); }} /><button type="button" style={{...btn,padding:"4px 6px"}} onClick={()=>setTargets(prev=>({...prev,[c.type+"|"+c.id]:c.component_count}))}>1박스</button></label>
             <button type="button" style={btn} onClick={() => setTargets(prev => { const next = { ...prev }; delete next[c.type + "|" + c.id]; return next; })}>제거</button>
           </div>)}
         </div>}
+        <div style={{display:"grid",gap:6,fontSize:12,padding:10,background:"#f8fafc",marginTop:10,borderRadius:8}}>
+          <b>재고 반영 방식</b>
+          <select value={deductionMode} onChange={e=>setDeductionMode(e.target.value as typeof deductionMode)} style={field}>
+            <option value="future">신규 판매만 자동 차감 (과거 연결만)</option><option value="link_only">연결만 · 수량 변화 없음</option><option value="historical">과거 포함 실제 차감</option>
+          </select>
+          {selectedTargets.map(c=>{const delta=applicableSales.reduce((sum,s)=>sum+c.quantity-(s.links.find(l=>targetKey(l)===c.type+"|"+c.id)?.applied_units||0),0);return <div key={c.id}>{c.name}: {c.remaining_units}개 → {c.remaining_units-delta}개 {delta!==0?`(${delta>0?"차감":"복원"} ${Math.abs(delta)}개)`:"(유지)"}</div>})}
+          <label><input type="checkbox" checked={remember&&canRemember} disabled={!canRemember} onChange={e=>setRemember(e.target.checked)}/> 같은 상품명·이미지·가격을 다음 판매부터 자동 연결 및 차감</label>
+          {!canRemember&&<span style={{color:"#64748b"}}>한 상품군(이미지 포함)을 선택하면 자동 연결을 기억할 수 있어.</span>}
+        </div>
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
           <button style={{ ...btn, flex: 1, background: "#1d4ed8", color: "#fff", borderColor: "#1d4ed8" }} disabled={busy || selectedIds.length === 0 || selectedIds.length > 300 || selectedTargets.length === 0 || selectedTargets.length > 16 || selectedIds.length * selectedTargets.length > 1200} onClick={() => void save("link")}>{busy ? "저장 중..." : selectedIds.length + "건 × " + selectedTargets.length + "개 재고 연결"}</button>
           <button style={{ ...btn, color: "#991b1b" }} disabled={busy || selectedIds.length === 0 || selectedIds.length > 300} onClick={() => { if (window.confirm("선택한 실제 판매기록의 재고 연결만 해제할까?")) void save("unlink"); }}>연결 해제</button>
         </div>
-        <p style={{ fontSize: 12, color: "#64748b" }}>연결은 이 별도 테이블에만 저장돼. 재고 수량·배송 상태·실판매 금액·매입 상태는 바뀌지 않아.</p>
+        <p style={{ fontSize: 12, color: "#64748b" }}>기존 연결은 차감하지 않아. 차감한 연결을 해제하면 그 수량만 복원돼. 배송·실매출 원본은 변경하지 않아.</p>
       </aside>
     </div>}
     {videoIds.length === 0 && <section style={{ ...panel, color: "#64748b" }}>방송을 하나 이상 추가하면 해당 방송의 실제 판매기록을 한 번에 불러와. 기존 매출관리 페이지는 추가 데이터를 불러오지 않아.</section>}
@@ -286,7 +309,7 @@ function FragmentGroup({ group, selected, expanded, onSelect, onToggle, onSelect
           <td style={td}><input type="checkbox" checked={Boolean(selected[row.id])} onChange={e => onSelectItem(row.id, e.target.checked)} /></td>
           <td style={td}>{row.item_name}</td><td style={td}>{row.buyer_nickname}</td><td style={td}>{row.video_id} · {kst(row.sold_at)}</td>
           <td style={td}>{row.links?.length ? <div style={{ display: "grid", gap: 4 }}>{row.links.map(link => <div key={link.id} style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "space-between" }}>
-            <span>{candidateNames.get(targetKey(link)) || "연결됨 · 재고 확인 필요"} × {link.quantity || 1}</span>
+            <span>{candidateNames.get(targetKey(link)) || "연결됨 · 재고 확인 필요"} × {link.quantity || 1} · {link.applied_units?`차감 ${link.applied_units}개`:"연결만"}</span>
             <button type="button" style={{ ...btn, color: "#991b1b", padding: "4px 7px" }} onClick={() => onUnlink(row.id, link)}>해제</button>
           </div>)}</div> : "미연결"}</td>
         </tr>)}</tbody></table>

@@ -18,7 +18,7 @@ function fail(message: string, status = 400) {
   return NextResponse.json({ ok: false, message }, { status });
 }
 function errorText(error: unknown) {
-  return error instanceof Error ? error.message : "매칭 데이터를 처리하지 못했어.";
+  return error instanceof Error ? error.message : error && typeof error === "object" && "message" in error ? String(error.message) : "매칭 데이터를 처리하지 못했어.";
 }
 function stockIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -84,7 +84,7 @@ async function getSales(videoIds: string[]) {
   for (let i = 0; i < sales.length; i += MAX_UPDATE) {
     const ids = sales.slice(i, i + MAX_UPDATE).map(row => String(row.wise_stock_id));
     const { data, error } = await sb.from("wise_sale_inventory_links")
-      .select("id,wise_stock_id,purchase_item_id,random_box_id,quantity,updated_at")
+      .select("id,wise_stock_id,purchase_item_id,random_box_id,quantity,applied_units,updated_at")
       .in("wise_stock_id", ids);
     if (error) throw error;
     links.push(...(data || []));
@@ -96,8 +96,10 @@ async function getSales(videoIds: string[]) {
     group.push(link);
     linkMap.set(key, group);
   }
+  const { data: settings, error: settingsError } = await sb.from("wise_inventory_automation_settings").select("enabled_at").eq("singleton", true).single();
+  if (settingsError) throw settingsError;
   return NextResponse.json({
-    ok: true, video_ids: videoIds,
+    ok: true, video_ids: videoIds, cutover: settings.enabled_at,
     sales: sales.map(row => ({
       id: String(row.wise_stock_id),
       video_id: row.video_id, wise_user_id: row.wise_user_id,
@@ -110,32 +112,47 @@ async function getSales(videoIds: string[]) {
 }
 async function getInventory() {
   const sb = createServiceRoleClient();
-  const [ordersResult, ledgerResult, boxesResult] = await Promise.all([
+  const [ordersResult, ledgerResult, boxesResult, membersResult, exclusionsResult, sourcingResult] = await Promise.all([
     sb.from("purchase_orders")
-      .select("id,order_number,ordered_at,currency,order_status,purchase_items(id,product_name,display_name_ko,option_text,image_url,series_name,item_type,unit_price,component_count,quantity)")
+      .select("id,order_number,ordered_at,currency,source_site,raw_data,order_status,purchase_items(id,product_name,display_name_ko,option_text,image_url,series_name,item_type,unit_price,component_count,quantity,received_quantity,sourcing_inventory_id)")
       .eq("order_status", "입고완료").order("ordered_at", { ascending: false }),
     sb.from("purchase_sale_inventory")
-      .select("purchase_item_id,display_name,image_url_override,component_count_override,purchase_price_override,sale_price,stock_status"),
+      .select("purchase_item_id,display_name,image_url_override,component_count_override,purchase_price_override,sale_price,stock_status,remaining_units,remaining_quantity,box_quantity_override"),
     sb.from("sale_random_boxes")
-      .select("id,title,image_url,component_count,purchase_quantity,total_cost_krw,sale_price,view_status,series_tags,created_at")
-      .order("created_at", { ascending: false })
+      .select("id,title,image_url,component_count,purchase_quantity,total_cost_krw,sale_price,view_status,series_tags,created_at,remaining_units")
+      .order("created_at", { ascending: false }),
+    sb.from("sale_random_box_members").select("purchase_item_id,random_box_id"),
+    sb.from("sale_inventory_exclusions").select("purchase_item_id"),
+    sb.from("inventory_items").select("id,component_count,item_name,series_name,item_type,image_url")
   ]);
   if (ordersResult.error) throw ordersResult.error;
   if (ledgerResult.error) throw ledgerResult.error;
   if (boxesResult.error) throw boxesResult.error;
+  if (membersResult.error) throw membersResult.error;
+  if (exclusionsResult.error) throw exclusionsResult.error;
+  if (sourcingResult.error) throw sourcingResult.error;
+  const sourcing = new Map((sourcingResult.data || []).map(x=>[String(x.id),x]));
+  const members = new Set((membersResult.data || []).map(x => String(x.purchase_item_id)));
+  const excluded = new Set((exclusionsResult.data || []).map(x => String(x.purchase_item_id)));
   const ledgerMap = new Map((ledgerResult.data || []).map((x: any) => [String(x.purchase_item_id), x]));
   const candidates: any[] = [];
   for (const order of ordersResult.data || []) {
     for (const item of (order.purchase_items || []) as any[]) {
       const ledger: any = ledgerMap.get(String(item.id));
+      if (excluded.has(String(item.id))) continue;
+      const source = sourcing.get(String(item.sourcing_inventory_id));
+      const meta = (Array.isArray(order.raw_data?.domestic_items)?order.raw_data.domestic_items:[]).find((m:any)=>String(m?.product_name||"")===String(item.product_name||"")&&String(m?.option_text||"")===String(item.option_text||""));
+      const components = [ledger?.component_count_override,item.component_count,meta?.component_count,source?.component_count].map(Number).find(x=>Number.isSafeInteger(x)&&x>0)??1;
+      const received=(order.currency==="KRW"||order.source_site==="Domestic")&&Number(item.received_quantity||0)===0?Number(item.quantity||0):Number(item.received_quantity||0);
+      const remaining = ledger?.stock_status === "soldout" ? 0 : Number(ledger?.remaining_units ?? (ledger?.remaining_quantity ?? ledger?.box_quantity_override ?? received) * components);
       candidates.push({
         type: "purchase_item", id: String(item.id),
-        name: ledger?.display_name || item.display_name_ko || item.product_name,
+        name: ledger?.display_name || item.display_name_ko || source?.item_name || item.product_name,
         option: item.option_text || "",
-        image_url: ledger?.image_url_override || item.image_url || null,
-        series: item.series_name || "",
+        image_url: ledger?.image_url_override || item.image_url || source?.image_url || null,
+        series: item.series_name || source?.series_name || "", item_type: item.item_type || source?.item_type || "", random_member: members.has(String(item.id)), remaining_units: remaining,
         unit_price: Number(ledger?.purchase_price_override ?? item.unit_price ?? 0),
-        currency: order.currency || "", component_count: Number(ledger?.component_count_override ?? item.component_count ?? 1),
+        currency: order.currency || "", component_count: components,
         sale_price: ledger?.sale_price == null ? null : Number(ledger.sale_price),
         stock_status: ledger?.stock_status || "active", order_number: order.order_number || "",
         purchase_date: order.ordered_at || ""
@@ -146,7 +163,8 @@ async function getInventory() {
     candidates.push({
       type: "random_box", id: String(box.id), name: box.title,
       option: "랜덤박스", image_url: box.image_url || null,
-      series: (box.series_tags || []).join(", "),
+      series: (box.series_tags || []).join(", "), item_type: "랜덤박스", random_member: false,
+      remaining_units: box.view_status === "completed" ? 0 : Number(box.remaining_units ?? Math.max(1, Number(box.component_count || 1)) * Number(box.purchase_quantity || 1)),
       unit_price: Number(box.total_cost_krw || 0),
       currency: "KRW", component_count: Number(box.component_count || 1),
       sale_price: box.sale_price == null ? null : Number(box.sale_price),
@@ -195,11 +213,11 @@ export async function POST(request: Request) {
           return fail("해제할 재고 연결이 올바르지 않아.");
         }
       }
-      let query = sb.from("wise_sale_inventory_links").delete().in("wise_stock_id", ids);
-      if (type) query = query.eq(type === "purchase_item" ? "purchase_item_id" : "random_box_id", targetId);
-      const { data, error } = await query.select("id");
+      const { data, error } = await sb.rpc("wise_save_inventory_links", {
+        p_action: "unlink", p_ids: ids, p_targets: type ? [{ target_type: type, target_id: targetId }] : [], p_mode: "link_only", p_remember: false
+      });
       if (error) throw error;
-      return NextResponse.json({ ok: true, count: (data || []).length });
+      return NextResponse.json({ ok: true, ...data });
     }
 
     const inputTargets: unknown[] = Array.isArray(body.targets) ? body.targets :
@@ -247,25 +265,12 @@ export async function POST(request: Request) {
       if ((boxes || []).length !== boxIds.length) return fail("선택한 랜덤박스 중 찾을 수 없는 상품이 있어.", 404);
     }
 
-    const now = new Date().toISOString();
-    let saved = 0;
-    for (const type of ["purchase_item", "random_box"] as const) {
-      const selectedTargets = targets.filter(t => t.target_type === type);
-      if (!selectedTargets.length) continue;
-      const rows = ids.flatMap(wise_stock_id => selectedTargets.map(t => ({
-        wise_stock_id, purchase_item_id: type === "purchase_item" ? t.target_id : null,
-        random_box_id: type === "random_box" ? t.target_id : null,
-        quantity: t.quantity, updated_at: now
-      })));
-      const conflict = type === "purchase_item" ? "wise_stock_id,purchase_item_id" : "wise_stock_id,random_box_id";
-      for (let start = 0; start < rows.length; start += 200) {
-        const { error } = await sb.from("wise_sale_inventory_links")
-          .upsert(rows.slice(start, start + 200), { onConflict: conflict });
-        if (error) throw error;
-      }
-      saved += rows.length;
-    }
-    return NextResponse.json({ ok: true, count: saved });
+    const mode = ["future", "historical", "link_only"].includes(body.deduction_mode) ? body.deduction_mode : "link_only";
+    const { data, error } = await sb.rpc("wise_save_inventory_links", {
+      p_action: "link", p_ids: ids, p_targets: targets, p_mode: mode, p_remember: body.remember === true
+    });
+    if (error) throw error;
+    return NextResponse.json({ ok: true, ...data });
   } catch (error) {
     return fail(errorText(error), 500);
   }
