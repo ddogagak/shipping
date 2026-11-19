@@ -403,6 +403,13 @@ export async function POST(req: Request) {
           converted_from_simple: true,
           converted_at: new Date().toISOString(),
           previous_simple_order_number: simpleOrder.order_number,
+          previous_simple_snapshot: {
+            ordered_at: simpleOrder.ordered_at,
+            shop_name: simpleOrder.shop_name,
+            paid_amount: simpleOrder.paid_amount,
+            local_shipping: simpleOrder.local_shipping,
+            memo: simpleOrder.memo,
+          },
           source_status: "주문완료",
           text_import_type: "korea",
           domestic_items: textItems,
