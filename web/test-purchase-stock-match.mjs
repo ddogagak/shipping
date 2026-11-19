@@ -1,0 +1,43 @@
+import { PGlite } from '@electric-sql/pglite';
+import { readFileSync } from 'node:fs';
+import assert from 'node:assert/strict';
+
+const db = new PGlite();
+const ids = Object.fromEntries(['order', 'incoming', 'old', 'new', 'other'].map((k, i) => [k, `00000000-0000-0000-0000-00000000000${i+1}`]));
+await db.exec(`
+create role anon; create role authenticated; create role service_role;
+create table purchase_orders(id uuid primary key, order_status text, raw_data jsonb, paid_amount numeric,local_shipping numeric,currency text);
+create table purchase_items(id uuid primary key,purchase_order_id uuid references purchase_orders(id),display_name_ko text,product_name text,unit_price numeric,line_total numeric,quantity integer,received_quantity integer,component_count integer);
+create table sale_inventory_groups(id uuid primary key default gen_random_uuid(),title text,active boolean default true);
+create table sale_inventory_group_members(purchase_item_id uuid primary key references purchase_items(id),group_id uuid references sale_inventory_groups(id));
+create table sale_inventory_exclusions(purchase_item_id uuid);
+create table sale_random_box_members(purchase_item_id uuid);
+create table purchase_sale_inventory(purchase_item_id uuid primary key,remaining_units integer,stock_status text);
+create table wise_inventory_match_rules(targets jsonb);
+insert into purchase_orders values ('${ids.order}','입고완료','{}',40000,3000,'KRW'),('${ids.incoming}','주문완료','{}',66000,5000,'KRW');
+insert into purchase_items values ('${ids.old}','${ids.order}','치이카와 카드','카드',23000,23000,1,1,10),('${ids.new}','${ids.incoming}','치이카와 카드','카드',33000,66000,2,2,10),('${ids.other}','${ids.order}','다른 카드','다른 카드',5000,5000,1,1,1);
+insert into purchase_sale_inventory values ('${ids.old}',5,'active');
+insert into wise_inventory_match_rules values ('[{"target_type":"purchase_item","target_id":"${ids.old}","quantity":1}]');
+`);
+await db.exec(readFileSync(new URL('../supabase/migrations/20261119_z_purchase_stock_manual_match.sql',import.meta.url),'utf8'));
+const rows = async sql => (await db.query(sql)).rows;
+const snapshot = async () => [await rows('select * from purchase_items order by id'),await rows('select * from purchase_orders order by id'),await rows('select * from purchase_sale_inventory order by purchase_item_id')];
+const original = await snapshot();
+async function match(action,item,type=null,target=null){return (await db.query('select match_purchase_stock($1,$2,$3,$4) as id',[action,item,type,target])).rows[0].id;}
+const group = await match('link',ids.new,'lot',ids.old);
+assert.ok(group);
+assert.deepEqual(await snapshot(),original,'link must not modify purchase unit price, quantity, totals or stock ledger');
+assert.deepEqual((await rows('select purchase_item_id from sale_inventory_group_members order by purchase_item_id')).map(r=>r.purchase_item_id),[ids.old,ids.new]);
+assert.equal((await rows("select count(*)::int as n from sale_inventory_group_members m join purchase_items i on i.id=m.purchase_item_id join purchase_orders o on o.id=i.purchase_order_id where o.order_status='입고완료'"))[0].n,1,'pending lot is not received stock');
+assert.equal(await match('link',ids.new,'group',group),group,'repeat match is idempotent');
+await assert.rejects(match('link',ids.new,'lot',ids.other),/이미 다른 재고/);
+assert.equal((await rows('select targets from wise_inventory_match_rules'))[0].targets[0].target_id,group);
+await match('unlink',ids.new);
+assert.deepEqual(await snapshot(),original,'unlink must not modify purchase or stock data');
+assert.equal((await rows('select count(*)::int as n from sale_inventory_group_members'))[0].n,1);
+await match('link',ids.new,'group',group);
+await db.query("update purchase_orders set order_status='입고완료' where id=$1",[ids.incoming]);
+assert.equal((await rows("select count(*)::int as n from sale_inventory_group_members m join purchase_items i on i.id=m.purchase_item_id join purchase_orders o on o.id=i.purchase_order_id where o.order_status='입고완료'"))[0].n,2);
+await assert.rejects(match('link',ids.other,'lot',ids.other),/같은 매입 상품/);
+console.log('purchase stock match: price/quantity/ledger immutable; pending, receipt, repeat and unlink passed');
+await db.close();
