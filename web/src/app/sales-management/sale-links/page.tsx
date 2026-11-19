@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { baseProductName, imageIdentity, normalizeProductName, recommendInventory } from "@/lib/wise-inventory-match";
 
 type LinkRow = { id: number; wise_stock_id: number | string; purchase_item_id: string | null; random_box_id: string | null; inventory_group_id: string | null; quantity: number; applied_units: number };
@@ -64,33 +64,45 @@ export default function WiseInventoryLinkPage() {
   const [cutover, setCutover] = useState("");
   const [deductionMode, setDeductionMode] = useState<"future"|"historical"|"link_only">("future");
   const [remember, setRemember] = useState(false);
+  const showsRequest = useRef(0);
+  const salesRequest = useRef(0);
 
   const loadShows = useCallback(async () => {
+    const requestId = ++showsRequest.current;
+    ++salesRequest.current;
     setLoadingShows(true); setError("");
+    setShows([]); setVideoId(""); setVideoIds([]); setSales([]); setSelected({});
     try {
       const data = await requestJson("/api/sales-management/sale-links?mode=shows&month=" + encodeURIComponent(month));
+      if (requestId !== showsRequest.current) return;
       setShows(data.shows || []);
-      setVideoId("");
-      setVideoIds([]);
-      setSales([]);
-      setSelected({});
-    } catch (e) { setError(e instanceof Error ? e.message : "방송 조회 실패"); }
-    finally { setLoadingShows(false); }
+    } catch (e) { if (requestId === showsRequest.current) setError(e instanceof Error ? e.message : "방송 조회 실패"); }
+    finally { if (requestId === showsRequest.current) setLoadingShows(false); }
   }, [month]);
   useEffect(() => { void loadShows(); }, [loadShows]);
 
   const loadSales = useCallback(async (ids: string[]) => {
-    if (!ids.length) { setSales([]); setSelected({}); return; }
+    const requestId = ++salesRequest.current;
+    setSales([]); setSelected({});
+    if (!ids.length) { setLoadingSales(false); return; }
     setLoadingSales(true); setError("");
     try {
-      const params = new URLSearchParams({ mode: "sales" });
-      ids.forEach(id => params.append("video_id", id));
-      const data = await requestJson("/api/sales-management/sale-links?" + params.toString());
-      setSales(data.sales || []);
-      setCutover(data.cutover || "");
-      setSelected({});
-    } catch (e) { setError(e instanceof Error ? e.message : "판매기록 조회 실패"); }
-    finally { setLoadingSales(false); }
+      // The existing endpoint accepts at most 80 broadcasts; split a large month
+      // into smaller requests without changing the backend or existing save limits.
+      const all = new Map<string, Sale>();
+      let cutoff = "";
+      for (let offset = 0; offset < ids.length; offset += 40) {
+        const params = new URLSearchParams({ mode: "sales" });
+        ids.slice(offset, offset + 40).forEach(id => params.append("video_id", id));
+        const data = await requestJson("/api/sales-management/sale-links?" + params.toString());
+        if (requestId !== salesRequest.current) return;
+        for (const row of data.sales || []) all.set(row.id, row);
+        cutoff = data.cutover || cutoff;
+      }
+      setSales([...all.values()].sort((a,b)=>String(a.sold_at||"").localeCompare(String(b.sold_at||"")) || a.id.localeCompare(b.id)));
+      setCutover(cutoff);
+    } catch (e) { if (requestId === salesRequest.current) setError(e instanceof Error ? e.message : "판매기록 조회 실패"); }
+    finally { if (requestId === salesRequest.current) setLoadingSales(false); }
   }, []);
   useEffect(() => { void loadSales(videoIds); }, [videoIds, loadSales]);
 
@@ -151,7 +163,7 @@ export default function WiseInventoryLinkPage() {
   };
   async function save(action: "link" | "unlink", single?: { saleId: string; target: LinkRow }) {
     const ids = single ? [single.saleId] : selectedIds;
-    if (!videoIds.length || !ids.length || busy) return;
+    if (!videoIds.length || !ids.length || busy || loadingSales || loadingShows) return;
     if (action === "link" && !selectedTargets.length) { setError("오른쪽에서 연결할 방송판매재고를 체크해줘."); return; }
     if(action==='link'&&selectedTargets.some(c=>c.type==='inventory_group')&&selectedTargets.length!==1){setError('동일상품 묶음은 한 번에 하나만 선택해줘.');return;}
     if(action==="link" && deductionMode==="historical" && !window.confirm("과거 판매도 실제 차감합니다. 이미 수동으로 차감한 판매는 중복될 수 있어. 미리보기 수량을 확인했나요?"))return;
@@ -195,22 +207,23 @@ export default function WiseInventoryLinkPage() {
 
     <section style={{ ...panel, marginBottom: 12 }}>
       <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
-        <label>조회 월 <input aria-label="조회 월" type="month" value={month} onChange={e => setMonth(e.target.value)} style={{ ...field, display: "block", marginTop: 6 }} /></label>
-        <button style={btn} disabled={loadingShows} onClick={() => void loadShows()}>{loadingShows ? "조회 중..." : "방송 새로고침"}</button>
+        <label>조회 월 <input aria-label="조회 월" type="month" value={month} disabled={busy} onChange={e => setMonth(e.target.value)} style={{ ...field, display: "block", marginTop: 6 }} /></label>
+        <button style={btn} disabled={loadingShows||busy} onClick={() => void loadShows()}>{loadingShows ? "조회 중..." : "방송 새로고침"}</button>
+        <button type="button" style={{...btn,background:"#eff6ff",borderColor:"#93c5fd",color:"#1d4ed8"}} disabled={busy||loadingShows||!shows.length||shows.every(s=>videoIds.includes(s.video_id))} onClick={()=>setVideoIds([...new Set(shows.map(s=>s.video_id))])}>월 전체 선택 ({shows.length}회)</button>
         <label style={{ flex: 1, minWidth: 260 }}>방송 선택
           <select aria-label="방송 선택" value={videoId} style={{ ...field, display: "block", marginTop: 6, width: "100%" }} onChange={e => setVideoId(e.target.value)}>
             <option value="">방송을 선택해줘 ({shows.length}회)</option>
             {shows.map(s => <option key={s.video_id} value={s.video_id}>{kst(s.first_sale)} · {won(s.revenue)} · {s.count}개 · {s.buyer_count}명</option>)}
           </select>
         </label>
-        <button style={btn} disabled={!videoId || videoIds.includes(videoId) || videoIds.length >= 80} onClick={() => setVideoIds(prev => [...prev, videoId])}>방송 추가</button>
-        <button style={btn} disabled={!videoIds.length || loadingSales} onClick={() => void loadSales(videoIds)}>{loadingSales ? "불러오는 중..." : "판매내역 갱신"}</button>
+        <button style={btn} disabled={busy||loadingShows||!videoId || videoIds.includes(videoId)} onClick={() => setVideoIds(prev => [...prev, videoId])}>방송 추가</button>
+        <button style={btn} disabled={busy||!videoIds.length || loadingSales} onClick={() => void loadSales(videoIds)}>{loadingSales ? "불러오는 중..." : "판매내역 갱신"}</button>
       </div>
       {videoIds.length > 0 && <div style={{ marginTop: 12 }}>
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>조회 방송 {videoIds.length}개 · 합산 매출 {won(totalShowRevenue)}</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-          {selectedShows.map(show => <button key={show.video_id} type="button" style={{ ...btn, background: "#eff6ff", borderColor: "#bfdbfe" }} onClick={() => setVideoIds(prev => prev.filter(id => id !== show.video_id))} title="조회 목록에서 제거">{kst(show.first_sale)} · {show.count}건 ×</button>)}
-          <button type="button" style={btn} onClick={() => setVideoIds([])}>전체 제거</button>
+          {selectedShows.map(show => <button key={show.video_id} type="button" disabled={busy} style={{ ...btn, background: "#eff6ff", borderColor: "#bfdbfe" }} onClick={() => setVideoIds(prev => prev.filter(id => id !== show.video_id))} title="조회 목록에서 제거">{kst(show.first_sale)} · {show.count}건 ×</button>)}
+          <button type="button" style={btn} disabled={busy} onClick={() => setVideoIds([])}>전체 제거</button>
         </div>
       </div>}
     </section>
@@ -281,7 +294,7 @@ export default function WiseInventoryLinkPage() {
         <p style={{ fontSize: 12, color: "#64748b" }}>기존 연결은 차감하지 않아. 차감한 연결을 해제하면 그 수량만 복원돼. 배송·실매출 원본은 변경하지 않아.</p>
       </aside>
     </div>}
-    {videoIds.length === 0 && <section style={{ ...panel, color: "#64748b" }}>방송을 하나 이상 추가하면 해당 방송의 실제 판매기록을 한 번에 불러와. 기존 매출관리 페이지는 추가 데이터를 불러오지 않아.</section>}
+    {videoIds.length === 0 && <section style={{ ...panel, color: "#64748b" }}>월 전체 선택 또는 개별 방송 추가로 실제 판매기록을 한 번에 불러와. 기존 매출관리 페이지는 추가 데이터를 불러오지 않아.</section>}
   </main>;
 }
 
