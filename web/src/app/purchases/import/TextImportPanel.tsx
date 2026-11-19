@@ -1,7 +1,10 @@
 "use client";
-import {useState} from "react";
+import { useEffect, useState } from "react";
+import InventoryMatchPicker, {
+  type InventoryMatch,
+} from "./InventoryMatchPicker";
 
-const KOREA_PROMPT=`아래 국내 거래처 명세서/영수증/주문내역을 모두 확인해서 DDOGA 매입관리 등록용 텍스트로 정리해줘.
+const KOREA_PROMPT = `아래 국내 거래처 명세서/영수증/주문내역을 모두 확인해서 DDOGA 매입관리 등록용 텍스트로 정리해줘.
 
 [기본 규칙]
 - 반드시 아래 출력 양식만 사용하고 양식 외 설명이나 검산 문장은 쓰지 않는다.
@@ -98,7 +101,7 @@ MEMO: 거래처명 및 기타사항
 
 상품 종류마다 === ITEM === 블록을 반복한다.`;
 
-const JAPAN_PROMPT=`아래 일본 구매대행 신청내역 페이지의 HTML/마크다운/텍스트 소스를 확인해서 매입관리 등록용 텍스트로 정리해줘.
+const JAPAN_PROMPT = `아래 일본 구매대행 신청내역 페이지의 HTML/마크다운/텍스트 소스를 확인해서 매입관리 등록용 텍스트로 정리해줘.
 
 [중요: 페이지 구조 확인]
 - 페이지 전체를 확인하고 상품 목록의 각 행을 기준으로 추출한다. 일부 보이는 부분만 보고 누락하지 않는다.
@@ -170,28 +173,869 @@ LINEUP_IMAGE: 라인업 이미지 URL
 PRODUCT_URL: 해당 상품의 원본 판매처 URL
 MEMO: 판매처 / 아이템번호 / 운송장 / 배송센터`;
 
-const seriesOptions=["헌터헌터","귀멸의칼날","나의히어로아카데미아","프리렌","진격의거인","치이카와","약사의혼잣말","나루토","기타"];
-const typeOptions=["아크릴","지류","뱃지","피규어","키링","기타"];
+const seriesOptions = [
+  "헌터헌터",
+  "귀멸의칼날",
+  "나의히어로아카데미아",
+  "프리렌",
+  "진격의거인",
+  "치이카와",
+  "약사의혼잣말",
+  "나루토",
+  "기타",
+];
+const typeOptions = ["아크릴", "지류", "뱃지", "피규어", "키링", "기타"];
 
-export default function TextImportPanel({mode,simpleEntry}:{mode:"korea"|"japan";simpleEntry?:any}){
- const[text,setText]=useState(""),[preview,setPreview]=useState<any>(null),[msg,setMsg]=useState(""),[busy,setBusy]=useState(false),[copied,setCopied]=useState(false);
- const prompt=mode==="japan"?JAPAN_PROMPT:KOREA_PROMPT;
- const runText=async(action:string)=>{if(action==="preview"&&!text.trim())return setMsg("GPT가 정리한 텍스트를 붙여넣어줘.");if(action==="save"&&!preview?.purchase)return setMsg("먼저 미리보기를 눌러 내용을 확인해줘.");if(action==="save"&&!(preview.purchase.items||[]).some((item:any)=>item._selected!==false))return setMsg("저장할 상품을 하나 이상 체크해줘.");if(action==="save"&&!(Number(preview.purchase.total_amount)>0))return setMsg("명세서 총금액을 반드시 입력해줘.");setBusy(true);setMsg(action==="preview"?"분석 중...":"매입관리에 등록 중...");try{const selectedPurchase=action==="save"?{...preview.purchase,items:(preview.purchase.items||[]).filter((item:any)=>item._selected!==false).map(({_selected,...item}:any)=>item)}:null;const payload=action==="save"?{mode:action,purchase:selectedPurchase,source_type:mode,...(simpleEntry?{simple_order_id:simpleEntry.id}:{})}:{mode:action,text,source_type:mode};const res=await fetch("/api/purchases/import",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),j=await res.json();if(!res.ok)throw new Error(j.message||"실패");if(action==="preview"){const purchase={...j.purchase,...(simpleEntry?{supplier:simpleEntry.shop_name||j.purchase.supplier||"",purchased_at:simpleEntry.ordered_at?new Intl.DateTimeFormat("sv-SE",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(simpleEntry.ordered_at)):j.purchase.purchased_at,total_amount:Number(simpleEntry.paid_amount),currency:"KRW",memo:[simpleEntry.memo,j.purchase.memo].filter(Boolean).join(" / "),invoice_number:j.purchase.invoice_number||""}:{}),currency:simpleEntry?"KRW":j.purchase.currency||(mode==="japan"?"JPY":"KRW"),items:(j.purchase.items||[]).map((item:any)=>({...item,_selected:true}))};setPreview({purchase});setMsg(`${purchase.items.length}개 상품을 확인했어. 저장할 상품만 체크해서 등록하면 돼.`)}else{setMsg(`${j.itemCount}개 상품 ${mode==="japan"?"일본":"한국"} 매입 등록 완료`);setPreview(null);if(simpleEntry)window.location.href="/purchases?country=KR"}}catch(e){setMsg(e instanceof Error?e.message:"실패")}finally{setBusy(false)}};
- const copyPrompt=async()=>{await navigator.clipboard.writeText(prompt);setCopied(true);setTimeout(()=>setCopied(false),1500)};
- return <>{simpleEntry&&<section style={box}><h2 style={h2}>간이 매입 전환 대상</h2><p style={sub}>거래처: <b>{simpleEntry.shop_name||"미입력"}</b> · 금액: <b>{Number(simpleEntry.paid_amount||0).toLocaleString("ko-KR")}원</b> · 분류: {simpleEntry.category||"매입"}</p><p style={sub}>명세서를 ChatGPT에 보내 상품별 텍스트를 만든 다음 아래에 붙여넣어줘. 미리보기에서 간이의 거래처·매입일·총금액을 우선 적용해.</p>{simpleEntry.images?.invoice&&<a href={simpleEntry.images.invoice} target="_blank" rel="noopener noreferrer">명세서 사진 보기</a>} {simpleEntry.images?.payment&&<a href={simpleEntry.images.payment} target="_blank" rel="noopener noreferrer">입금내역 사진 보기</a>}</section>}<section style={guide}><div style={guideHead}><div><h2 style={h2}>{mode==="japan"?"🇯🇵 일본 구매대행 변환 명령어":"🇰🇷 국내 명세서 변환 명령어"}</h2><p style={sub}>{mode==="japan"?"엘덱스 같은 구매대행 신청내역 페이지 소스를 올리고 이 명령어를 같이 넣으면 돼.":"합배송할 명세서 이미지를 한꺼번에 올리고 이 명령어를 같이 넣으면 돼."}</p></div><button style={copy} onClick={copyPrompt}>{copied?"복사됨":"명령어 복사"}</button></div><pre style={pre}>{prompt}</pre></section><section style={box}><h2 style={h2}>{mode==="japan"?"일본 구매대행 텍스트 붙여넣기":simpleEntry?"간이 매입 상품행 붙여넣기":"국내 명세서 텍스트 붙여넣기"}</h2><textarea value={text} onChange={e=>setText(e.target.value)} placeholder="=== PURCHASE ===부터 붙여넣어줘" style={textarea}/><div style={actions}><button style={button} disabled={busy} onClick={()=>runText("preview")}>미리보기</button><button style={primary} disabled={busy} onClick={()=>runText("save")}>매입관리에 등록</button></div></section>{msg&&<div style={notice}>{msg}</div>}{preview?.purchase&&<PurchasePreview purchase={preview.purchase} onChange={(purchase:any)=>setPreview({purchase})} currency={preview.purchase.currency|| (mode==="japan"?"JPY":"KRW")}/>}</>;
+export default function TextImportPanel({
+  mode,
+  simpleEntry,
+}: {
+  mode: "korea" | "japan";
+  simpleEntry?: any;
+}) {
+  const [text, setText] = useState(""),
+    [preview, setPreview] = useState<any>(null),
+    [msg, setMsg] = useState(""),
+    [busy, setBusy] = useState(false),
+    [copied, setCopied] = useState(false);
+  const basePrompt = mode === "japan" ? JAPAN_PROMPT : KOREA_PROMPT;
+  const invoiceUrl = simpleEntry?.images?.invoice as string | undefined;
+  const prompt = invoiceUrl
+    ? `${basePrompt}\n\n[이번 전환 대상 명세서]\n아래 외부 이미지 링크를 열어 모든 상품행을 확인해줘. 링크를 읽을 수 없다면 추측하지 말고 사진 첨부를 요청해줘.\n${invoiceUrl}`
+    : basePrompt;
+  const runText = async (action: string) => {
+    if (action === "preview" && !text.trim())
+      return setMsg("GPT가 정리한 텍스트를 붙여넣어줘.");
+    if (action === "save" && !preview?.purchase)
+      return setMsg("먼저 미리보기를 눌러 내용을 확인해줘.");
+    if (
+      action === "save" &&
+      !(preview.purchase.items || []).some(
+        (item: any) => item._selected !== false,
+      )
+    )
+      return setMsg("저장할 상품을 하나 이상 체크해줘.");
+    if (action === "save" && !(Number(preview.purchase.total_amount) > 0))
+      return setMsg("명세서 총금액을 반드시 입력해줘.");
+    setBusy(true);
+    setMsg(action === "preview" ? "분석 중..." : "매입관리에 등록 중...");
+    try {
+      const selectedPurchase =
+        action === "save"
+          ? {
+              ...preview.purchase,
+              items: (preview.purchase.items || [])
+                .filter((item: any) => item._selected !== false)
+                .map(({ _selected, ...item }: any) => item),
+            }
+          : null;
+      const payload =
+        action === "save"
+          ? {
+              mode: action,
+              purchase: selectedPurchase,
+              source_type: mode,
+              ...(simpleEntry ? { simple_order_id: simpleEntry.id } : {}),
+            }
+          : { mode: action, text, source_type: mode };
+      const res = await fetch("/api/purchases/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }),
+        j = await res.json();
+      if (!res.ok) throw new Error(j.message || "실패");
+      if (action === "preview") {
+        const purchase = {
+          ...j.purchase,
+          ...(simpleEntry
+            ? {
+                supplier: simpleEntry.shop_name || j.purchase.supplier || "",
+                purchased_at: simpleEntry.ordered_at
+                  ? new Intl.DateTimeFormat("sv-SE", {
+                      timeZone: "Asia/Seoul",
+                      year: "numeric",
+                      month: "2-digit",
+                      day: "2-digit",
+                    }).format(new Date(simpleEntry.ordered_at))
+                  : j.purchase.purchased_at,
+                total_amount: Number(simpleEntry.paid_amount),
+                currency: "KRW",
+                memo: [simpleEntry.memo, j.purchase.memo]
+                  .filter(Boolean)
+                  .join(" / "),
+                invoice_number: j.purchase.invoice_number || "",
+              }
+            : {}),
+          currency: simpleEntry
+            ? "KRW"
+            : j.purchase.currency || (mode === "japan" ? "JPY" : "KRW"),
+          items: (j.purchase.items || []).map((item: any) => ({
+            ...item,
+            _selected: true,
+          })),
+        };
+        setPreview({ purchase });
+        setMsg(
+          `${purchase.items.length}개 상품을 확인했어. 저장할 상품만 체크해서 등록하면 돼.`,
+        );
+      } else {
+        setMsg(
+          `${j.itemCount}개 상품 ${mode === "japan" ? "일본" : "한국"} 매입 등록 완료 · 인벤토리 매칭 ${j.matchedCount || 0}개`,
+        );
+        setPreview(null);
+        if (simpleEntry) window.location.href = "/purchases?country=KR";
+      }
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "실패");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const copyPrompt = async () => {
+    await navigator.clipboard.writeText(prompt);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <>
+      {simpleEntry && (
+        <section style={{ ...box, marginBottom: 14 }}>
+          <h2 style={h2}>간이 매입 전환 대상</h2>
+          <p style={sub}>
+            거래처: <b>{simpleEntry.shop_name || "미입력"}</b> · 금액:{" "}
+            <b>
+              {Number(simpleEntry.paid_amount || 0).toLocaleString("ko-KR")}원
+            </b>{" "}
+            · 분류: {simpleEntry.category || "매입"}
+          </p>
+          <p style={sub}>
+            명세서를 ChatGPT에 보내 상품별 텍스트를 만든 다음 아래에 붙여넣어줘.
+            미리보기에서 간이의 거래처·매입일·총금액을 우선 적용해.
+          </p>
+          {invoiceUrl ? (
+            <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
+              <a href={invoiceUrl} target="_blank" rel="noopener noreferrer">
+                <img
+                  src={invoiceUrl}
+                  alt="전환 대상 명세서"
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    maxHeight: 680,
+                    objectFit: "contain",
+                    background: "#f8fafc",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 10,
+                  }}
+                />
+              </a>
+              <div style={{ ...actions, marginTop: 0, flexWrap: "wrap" }}>
+                <a
+                  href={invoiceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={button}
+                >
+                  원본 명세서 열기
+                </a>
+                <button
+                  style={button}
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(invoiceUrl);
+                    setMsg("명세서 이미지 링크를 복사했어.");
+                  }}
+                >
+                  이미지 링크 복사
+                </button>
+              </div>
+              <input
+                aria-label="GPT용 명세서 이미지 외부 링크"
+                readOnly
+                value={invoiceUrl}
+                onFocus={(e) => e.target.select()}
+                style={{ ...editInput, width: "100%", boxSizing: "border-box" }}
+              />
+              <p style={sub}>
+                외부 링크는 조회 시점부터 1시간 동안 유효해. 명세서에 민감한
+                정보가 있으면 확인 후 공유해줘.
+              </p>
+            </div>
+          ) : (
+            <p style={sub}>첨부한 명세서 사진이 없어.</p>
+          )}
+          {simpleEntry.images?.payment && (
+            <a
+              href={simpleEntry.images.payment}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              입금내역 사진 보기
+            </a>
+          )}
+        </section>
+      )}
+      <section style={guide}>
+        <div style={guideHead}>
+          <div>
+            <h2 style={h2}>
+              {mode === "japan"
+                ? "🇯🇵 일본 구매대행 변환 명령어"
+                : "🇰🇷 국내 명세서 변환 명령어"}
+            </h2>
+            <p style={sub}>
+              {mode === "japan"
+                ? "엘덱스 같은 구매대행 신청내역 페이지 소스를 올리고 이 명령어를 같이 넣으면 돼."
+                : "합배송할 명세서 이미지를 한꺼번에 올리고 이 명령어를 같이 넣으면 돼."}
+            </p>
+          </div>
+          <button style={copy} onClick={copyPrompt}>
+            {copied
+              ? "복사됨"
+              : invoiceUrl
+                ? "명령어 + 명세서 링크 복사"
+                : "명령어 복사"}
+          </button>
+        </div>
+        <pre style={pre}>{prompt}</pre>
+      </section>
+      <section style={box}>
+        <h2 style={h2}>
+          {mode === "japan"
+            ? "일본 구매대행 텍스트 붙여넣기"
+            : simpleEntry
+              ? "간이 매입 상품행 붙여넣기"
+              : "국내 명세서 텍스트 붙여넣기"}
+        </h2>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="=== PURCHASE ===부터 붙여넣어줘"
+          style={textarea}
+        />
+        <div style={actions}>
+          <button
+            style={button}
+            disabled={busy}
+            onClick={() => runText("preview")}
+          >
+            미리보기
+          </button>
+          <button
+            style={primary}
+            disabled={busy || !preview?.purchase}
+            onClick={() => runText("save")}
+          >
+            매입관리에 등록
+          </button>
+        </div>
+      </section>
+      {msg && <div style={notice}>{msg}</div>}
+      {preview?.purchase && (
+        <PurchasePreview
+          purchase={preview.purchase}
+          onChange={(purchase: any) => setPreview({ purchase })}
+          currency={
+            preview.purchase.currency || (mode === "japan" ? "JPY" : "KRW")
+          }
+        />
+      )}
+    </>
+  );
 }
 
-function PurchasePreview({purchase,onChange,currency}:{purchase:any;onChange:(purchase:any)=>void;currency:string}){
- const[pastingIndex,setPastingIndex]=useState<number|null>(null),[pasteMsg,setPasteMsg]=useState("");
- const editHeader=(key:string,value:string)=>onChange({...purchase,[key]:["local_shipping","total_amount"].includes(key)?(value===""?null:Number(value)):value});
- const editItem=(index:number,key:string,value:any)=>onChange({...purchase,items:purchase.items.map((item:any,i:number)=>i!==index?item:{...item,[key]:["unit_price","quantity","component_count"].includes(key)?(value===""?null:Number(value)):value})});
- const setAllSelected=(checked:boolean)=>onChange({...purchase,items:purchase.items.map((item:any)=>({...item,_selected:checked}))});
- const selectedCount=(purchase.items||[]).filter((item:any)=>item._selected!==false).length;
-  const currencyName=currency==="JPY"?"엔":currency==="CNY"?"위안":"원";
-  const itemTotal=(purchase.items||[]).filter((item:any)=>item._selected!==false).reduce((sum:number,item:any)=>sum+Math.max(0,Number(item.unit_price||0))*Math.max(1,Number(item.quantity||1)),0);
- const pasteImage=async(index:number,e:React.ClipboardEvent<HTMLDivElement>)=>{const imageItem=Array.from(e.clipboardData.items).find(item=>item.kind==="file"&&item.type.startsWith("image/"));if(!imageItem)return;e.preventDefault();const file=imageItem.getAsFile();if(!file)return;setPastingIndex(index);setPasteMsg("이미지 업로드 중...");try{const fd=new FormData();const workId=`purchase-${String(purchase.invoice_number||purchase.supplier||purchase.purchased_at||"preview").replace(/[^a-zA-Z0-9가-힣_-]+/g,"-")}`;fd.append("file",file,file.name||`clipboard-${Date.now()}.png`);fd.append("work_id",workId);fd.append("image_id",`item-${index+1}-${Date.now()}`);const res=await fetch("/api/stock/import/image",{method:"POST",body:fd}),j=await res.json();if(!res.ok)throw new Error(j.detail||j.error||"이미지 업로드 실패");editItem(index,"image_url",j.image?.image_url||"");setPasteMsg(`상품 #${index+1} 대표 이미지 붙여넣기 완료`)}catch(error){setPasteMsg(error instanceof Error?error.message:"이미지 업로드 실패")}finally{setPastingIndex(null);setTimeout(()=>setPasteMsg(""),2200)}};
- return <section style={previewBox}><div style={previewTitleRow}><h2 style={h2}>미리보기 수정</h2><label style={selectAll}><input type="checkbox" checked={selectedCount===purchase.items.length&&purchase.items.length>0} onChange={e=>setAllSelected(e.target.checked)}/> 전체 선택 <b>{selectedCount}/{purchase.items.length}</b></label></div><p style={pasteGuide}>저장할 상품만 체크해. BAND/웹 이미지는 원하는 상품의 이미지 칸을 클릭하고 <b>Ctrl+V</b> 하면 대표 이미지로 들어가.</p>{pasteMsg&&<div style={pasteNotice}>{pasteMsg}</div>}<div style={editGrid}><Edit label="거래처명" value={purchase.supplier} onChange={v=>editHeader("supplier",v)}/><Edit label="매입일" type="date" value={purchase.purchased_at} onChange={v=>editHeader("purchased_at",v)}/><Edit label="명세서/주문번호" value={purchase.invoice_number} onChange={v=>editHeader("invoice_number",v)}/><SelectEdit label="통화" value={currency} options={["KRW","JPY","CNY"]} onChange={v=>editHeader("currency",v)}/><Edit label={`명세서 총금액(${currencyName}, 필수 · 배송비 포함 결제액)`} type="number" value={purchase.total_amount===null||purchase.total_amount===undefined?"":String(purchase.total_amount)} onChange={v=>editHeader("total_amount",v)}/><Edit label={`현지 배송비(${currencyName}, 총금액에 포함되면 중복 합산 안 함)`} type="number" value={String(purchase.local_shipping||0)} onChange={v=>editHeader("local_shipping",v)}/><Edit label="전체 메모" value={purchase.memo||""} onChange={v=>editHeader("memo",v)}/></div><p style={{fontSize:12,color:"#475569",margin:"8px 0 14px"}}>선택 상품 단가×수량 합계: {itemTotal.toLocaleString("ko-KR")}{currencyName} · 명세서 총금액은 실제 결제한 전체 금액으로 직접 확인해줘. 배송비는 총금액에 중복 가산되지 않아.</p>{purchase.items.map((item:any,index:number)=><article key={index} style={{...editCard,...(item._selected===false?unselectedCard:{})}}><div style={thumbColumn}><label style={itemCheck}><input type="checkbox" checked={item._selected!==false} onChange={e=>editItem(index,"_selected",e.target.checked)}/><span>저장</span></label><div role="button" tabIndex={0} title="클릭 후 Ctrl+V로 이미지 붙여넣기" onPaste={e=>void pasteImage(index,e)} style={{...pasteTarget,...(pastingIndex===index?pasteTargetBusy:{})}}>{pastingIndex===index?<div style={noImage}>업로드중</div>:item.image_url?<img src={item.image_url} alt="대표 이미지" style={thumb}/>:<div style={noImage}>클릭<br/>Ctrl+V</div>}<span style={pasteHint}>{item.image_url?"다시 붙여넣기":"이미지 붙여넣기"}</span></div></div><div style={itemEditor}><div style={itemTitle}>상품 #{index+1} {item._selected===false&&<span style={skipBadge}>저장 제외</span>}</div><div style={editGrid}><Edit label="상품명" value={item.product_name} onChange={v=>editItem(index,"product_name",v)}/><SelectEdit label="작품명" value={item.series_name} options={seriesOptions} onChange={v=>editItem(index,"series_name",v)}/><SelectEdit label="타입" value={item.item_type} options={typeOptions} onChange={v=>editItem(index,"item_type",v)}/><Edit label="옵션/종류" value={item.option_text||""} onChange={v=>editItem(index,"option_text",v)}/><Edit label={`매입 단가(${currencyName})`} type="number" value={String(item.unit_price??"")} onChange={v=>editItem(index,"unit_price",v)}/><Edit label="매입 수량" type="number" value={String(item.quantity??"")} onChange={v=>editItem(index,"quantity",v)}/><Edit label="박스당 구성품" type="number" value={String(item.component_count??"")} onChange={v=>editItem(index,"component_count",v)}/><Edit label="대표 이미지 URL" value={item.image_url||""} onChange={v=>editItem(index,"image_url",v)}/><Edit label="라인업 이미지 URL" value={item.lineup_image_url||""} onChange={v=>editItem(index,"lineup_image_url",v)}/><Edit label="상품 URL" value={item.product_url||""} onChange={v=>editItem(index,"product_url",v)}/><Edit label="메모" value={item.memo||""} onChange={v=>editItem(index,"memo",v)}/></div></div></article>)}</section>
+function PurchasePreview({
+  purchase,
+  onChange,
+  currency,
+}: {
+  purchase: any;
+  onChange: (purchase: any) => void;
+  currency: string;
+}) {
+  const [pastingIndex, setPastingIndex] = useState<number | null>(null),
+    [pasteMsg, setPasteMsg] = useState("");
+  const [inventory, setInventory] = useState<InventoryMatch[]>([]);
+  const [inventoryStatus, setInventoryStatus] =
+    useState("인벤토리 불러오는 중...");
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/purchases/import", {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || "인벤토리 조회 실패");
+        setInventory(data.items || []);
+        setInventoryStatus("");
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted)
+          setInventoryStatus(error.message || "인벤토리 조회 실패");
+      });
+    return () => controller.abort();
+  }, []);
+  const matchInventory = (index: number, match: InventoryMatch | null) => {
+    onChange({
+      ...purchase,
+      items: purchase.items.map((item: any, i: number) =>
+        i !== index
+          ? item
+          : match
+            ? {
+                ...item,
+                sourcing_inventory_id: match.id,
+                series_name: match.series_name || item.series_name,
+                item_type: match.item_type || item.item_type,
+                image_url: match.image_url || item.image_url,
+                lineup_image_url:
+                  match.lineup_image_url || item.lineup_image_url,
+                product_url: match.source_url || item.product_url,
+                component_count:
+                  item.component_count || match.component_count || null,
+              }
+            : { ...item, sourcing_inventory_id: null },
+      ),
+    });
+  };
+  const editHeader = (key: string, value: string) =>
+    onChange({
+      ...purchase,
+      [key]: ["local_shipping", "total_amount"].includes(key)
+        ? value === ""
+          ? null
+          : Number(value)
+        : value,
+    });
+  const editItem = (index: number, key: string, value: any) =>
+    onChange({
+      ...purchase,
+      items: purchase.items.map((item: any, i: number) =>
+        i !== index
+          ? item
+          : {
+              ...item,
+              [key]: ["unit_price", "quantity", "component_count"].includes(key)
+                ? value === ""
+                  ? null
+                  : Number(value)
+                : value,
+            },
+      ),
+    });
+  const setAllSelected = (checked: boolean) =>
+    onChange({
+      ...purchase,
+      items: purchase.items.map((item: any) => ({
+        ...item,
+        _selected: checked,
+      })),
+    });
+  const selectedCount = (purchase.items || []).filter(
+    (item: any) => item._selected !== false,
+  ).length;
+  const currencyName =
+    currency === "JPY" ? "엔" : currency === "CNY" ? "위안" : "원";
+  const itemTotal = (purchase.items || [])
+    .filter((item: any) => item._selected !== false)
+    .reduce(
+      (sum: number, item: any) =>
+        sum +
+        Math.max(0, Number(item.unit_price || 0)) *
+          Math.max(1, Number(item.quantity || 1)),
+      0,
+    );
+  const pasteImage = async (
+    index: number,
+    e: React.ClipboardEvent<HTMLDivElement>,
+  ) => {
+    const imageItem = Array.from(e.clipboardData.items).find(
+      (item) => item.kind === "file" && item.type.startsWith("image/"),
+    );
+    if (!imageItem) return;
+    e.preventDefault();
+    const file = imageItem.getAsFile();
+    if (!file) return;
+    setPastingIndex(index);
+    setPasteMsg("이미지 업로드 중...");
+    try {
+      const fd = new FormData();
+      const workId = `purchase-${String(purchase.invoice_number || purchase.supplier || purchase.purchased_at || "preview").replace(/[^a-zA-Z0-9가-힣_-]+/g, "-")}`;
+      fd.append("file", file, file.name || `clipboard-${Date.now()}.png`);
+      fd.append("work_id", workId);
+      fd.append("image_id", `item-${index + 1}-${Date.now()}`);
+      const res = await fetch("/api/stock/import/image", {
+          method: "POST",
+          body: fd,
+        }),
+        j = await res.json();
+      if (!res.ok) throw new Error(j.detail || j.error || "이미지 업로드 실패");
+      editItem(index, "image_url", j.image?.image_url || "");
+      setPasteMsg(`상품 #${index + 1} 대표 이미지 붙여넣기 완료`);
+    } catch (error) {
+      setPasteMsg(
+        error instanceof Error ? error.message : "이미지 업로드 실패",
+      );
+    } finally {
+      setPastingIndex(null);
+      setTimeout(() => setPasteMsg(""), 2200);
+    }
+  };
+  return (
+    <section style={previewBox}>
+      <div style={previewTitleRow}>
+        <h2 style={h2}>미리보기 수정</h2>
+        <label style={selectAll}>
+          <input
+            type="checkbox"
+            checked={
+              selectedCount === purchase.items.length &&
+              purchase.items.length > 0
+            }
+            onChange={(e) => setAllSelected(e.target.checked)}
+          />{" "}
+          전체 선택{" "}
+          <b>
+            {selectedCount}/{purchase.items.length}
+          </b>
+        </label>
+      </div>
+      <p style={pasteGuide}>
+        저장할 상품만 체크해. BAND/웹 이미지는 원하는 상품의 이미지 칸을
+        클릭하고 <b>Ctrl+V</b> 하면 대표 이미지로 들어가.
+      </p>
+      <p style={pasteGuide}>
+        재입고 상품은 아래 상품별 인벤토리 매칭에서 기존 제품을 선택해줘. 매입
+        단가·수량은 이번 명세서 값 그대로 유지돼. 신규 상품은 매칭하지 않아도
+        등록할 수 있어.
+      </p>
+      {inventoryStatus && <p style={sub}>{inventoryStatus}</p>}
+      {pasteMsg && <div style={pasteNotice}>{pasteMsg}</div>}
+      <div style={editGrid}>
+        <Edit
+          label="거래처명"
+          value={purchase.supplier}
+          onChange={(v) => editHeader("supplier", v)}
+        />
+        <Edit
+          label="매입일"
+          type="date"
+          value={purchase.purchased_at}
+          onChange={(v) => editHeader("purchased_at", v)}
+        />
+        <Edit
+          label="명세서/주문번호"
+          value={purchase.invoice_number}
+          onChange={(v) => editHeader("invoice_number", v)}
+        />
+        <SelectEdit
+          label="통화"
+          value={currency}
+          options={["KRW", "JPY", "CNY"]}
+          onChange={(v) => editHeader("currency", v)}
+        />
+        <Edit
+          label={`명세서 총금액(${currencyName}, 필수 · 배송비 포함 결제액)`}
+          type="number"
+          value={
+            purchase.total_amount === null ||
+            purchase.total_amount === undefined
+              ? ""
+              : String(purchase.total_amount)
+          }
+          onChange={(v) => editHeader("total_amount", v)}
+        />
+        <Edit
+          label={`현지 배송비(${currencyName}, 총금액에 포함되면 중복 합산 안 함)`}
+          type="number"
+          value={String(purchase.local_shipping || 0)}
+          onChange={(v) => editHeader("local_shipping", v)}
+        />
+        <Edit
+          label="전체 메모"
+          value={purchase.memo || ""}
+          onChange={(v) => editHeader("memo", v)}
+        />
+      </div>
+      <p style={{ fontSize: 12, color: "#475569", margin: "8px 0 14px" }}>
+        선택 상품 단가×수량 합계: {itemTotal.toLocaleString("ko-KR")}
+        {currencyName} · 명세서 총금액은 실제 결제한 전체 금액으로 직접
+        확인해줘. 배송비는 총금액에 중복 가산되지 않아.
+      </p>
+      {purchase.items.map((item: any, index: number) => (
+        <article
+          key={index}
+          style={{
+            ...editCard,
+            ...(item._selected === false ? unselectedCard : {}),
+          }}
+        >
+          <div style={thumbColumn}>
+            <label style={itemCheck}>
+              <input
+                type="checkbox"
+                checked={item._selected !== false}
+                onChange={(e) => editItem(index, "_selected", e.target.checked)}
+              />
+              <span>저장</span>
+            </label>
+            <div
+              role="button"
+              tabIndex={0}
+              title="클릭 후 Ctrl+V로 이미지 붙여넣기"
+              onPaste={(e) => void pasteImage(index, e)}
+              style={{
+                ...pasteTarget,
+                ...(pastingIndex === index ? pasteTargetBusy : {}),
+              }}
+            >
+              {pastingIndex === index ? (
+                <div style={noImage}>업로드중</div>
+              ) : item.image_url ? (
+                <img src={item.image_url} alt="대표 이미지" style={thumb} />
+              ) : (
+                <div style={noImage}>
+                  클릭
+                  <br />
+                  Ctrl+V
+                </div>
+              )}
+              <span style={pasteHint}>
+                {item.image_url ? "다시 붙여넣기" : "이미지 붙여넣기"}
+              </span>
+            </div>
+          </div>
+          <div style={itemEditor}>
+            <div style={itemTitle}>
+              상품 #{index + 1}{" "}
+              {item._selected === false && (
+                <span style={skipBadge}>저장 제외</span>
+              )}
+            </div>
+            <InventoryMatchPicker
+              item={item}
+              inventory={inventory}
+              onSelect={(match) => matchInventory(index, match)}
+            />
+            <div style={editGrid}>
+              <Edit
+                label="상품명"
+                value={item.product_name}
+                onChange={(v) => editItem(index, "product_name", v)}
+              />
+              <SelectEdit
+                label="작품명"
+                value={item.series_name}
+                options={seriesOptions}
+                onChange={(v) => editItem(index, "series_name", v)}
+              />
+              <SelectEdit
+                label="타입"
+                value={item.item_type}
+                options={typeOptions}
+                onChange={(v) => editItem(index, "item_type", v)}
+              />
+              <Edit
+                label="옵션/종류"
+                value={item.option_text || ""}
+                onChange={(v) => editItem(index, "option_text", v)}
+              />
+              <Edit
+                label={`매입 단가(${currencyName})`}
+                type="number"
+                value={String(item.unit_price ?? "")}
+                onChange={(v) => editItem(index, "unit_price", v)}
+              />
+              <Edit
+                label="매입 수량"
+                type="number"
+                value={String(item.quantity ?? "")}
+                onChange={(v) => editItem(index, "quantity", v)}
+              />
+              <Edit
+                label="박스당 구성품"
+                type="number"
+                value={String(item.component_count ?? "")}
+                onChange={(v) => editItem(index, "component_count", v)}
+              />
+              <Edit
+                label="대표 이미지 URL"
+                value={item.image_url || ""}
+                onChange={(v) => editItem(index, "image_url", v)}
+              />
+              <Edit
+                label="라인업 이미지 URL"
+                value={item.lineup_image_url || ""}
+                onChange={(v) => editItem(index, "lineup_image_url", v)}
+              />
+              <Edit
+                label="상품 URL"
+                value={item.product_url || ""}
+                onChange={(v) => editItem(index, "product_url", v)}
+              />
+              <Edit
+                label="메모"
+                value={item.memo || ""}
+                onChange={(v) => editItem(index, "memo", v)}
+              />
+            </div>
+          </div>
+        </article>
+      ))}
+    </section>
+  );
 }
-function Edit({label,value,onChange,type="text"}:{label:string;value:string;onChange:(value:string)=>void;type?:string}){return <label style={editLabel}><span>{label}</span><input type={type} value={value} onChange={e=>onChange(e.target.value)} style={editInput}/></label>}
-function SelectEdit({label,value,options,onChange}:{label:string;value:string;options:string[];onChange:(value:string)=>void}){return <label style={editLabel}><span>{label}</span><select value={value} onChange={e=>onChange(e.target.value)} style={editInput}>{options.map(option=><option key={option}>{option}</option>)}</select></label>}
-const sub={margin:"7px 0 0",color:"#6b7280",fontSize:14},box={border:"1px solid #d1d5db",borderRadius:14,padding:20,background:"#fff"},guide={border:"1px solid #d1d5db",borderRadius:14,padding:20,background:"#f8fafc",marginBottom:14},guideHead={display:"flex",justifyContent:"space-between",gap:12,alignItems:"start"},h2={margin:"0 0 14px",fontSize:20},copy={padding:"9px 13px",border:0,borderRadius:9,background:"#111827",color:"white",fontWeight:800,cursor:"pointer"},pre={whiteSpace:"pre-wrap" as const,maxHeight:310,overflow:"auto",background:"#111827",color:"#e5e7eb",padding:16,borderRadius:10,fontSize:12,lineHeight:1.55},textarea={width:"100%",minHeight:340,boxSizing:"border-box" as const,border:"1px solid #cbd5e1",borderRadius:10,padding:14,fontFamily:"monospace",fontSize:13,background:"#fff"},actions={display:"flex",gap:8,marginTop:14},button={padding:"10px 16px",borderRadius:10,border:"1px solid #111827",background:"white",fontWeight:800,cursor:"pointer"},primary={...button,background:"#111827",color:"white"},notice={marginTop:14,padding:13,borderRadius:10,background:"#eef2ff",fontWeight:700},previewBox={marginTop:16},previewTitleRow={display:"flex",justifyContent:"space-between",gap:12,alignItems:"center",flexWrap:"wrap" as const},selectAll={display:"flex",alignItems:"center",gap:7,fontSize:13,fontWeight:800,color:"#374151"},editGrid={display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))",gap:10},editCard={display:"grid",gridTemplateColumns:"96px 1fr",gap:14,border:"1px solid #d1d5db",borderRadius:14,padding:14,marginTop:12,background:"white"},unselectedCard={opacity:.58,background:"#f8fafc"},thumbColumn={paddingTop:4},itemCheck={display:"flex",alignItems:"center",justifyContent:"center",gap:5,fontSize:12,fontWeight:900,color:"#111827",marginBottom:8},thumb={width:72,height:72,objectFit:"cover" as const,borderRadius:9,border:"1px solid #e5e7eb",display:"block"},noImage={width:72,height:72,display:"grid",placeItems:"center",textAlign:"center" as const,background:"#f3f4f6",border:"1px dashed #cbd5e1",borderRadius:9,fontSize:10,color:"#64748b",lineHeight:1.3},pasteTarget={width:80,minHeight:98,padding:4,border:"2px dashed #cbd5e1",borderRadius:12,background:"#f8fafc",cursor:"pointer",outline:"none"},pasteTargetBusy={opacity:.65,cursor:"wait"},pasteHint={display:"block",fontSize:10,fontWeight:800,color:"#64748b",textAlign:"center" as const,marginTop:5,lineHeight:1.2},pasteGuide={margin:"-4px 0 12px",padding:"10px 12px",borderRadius:10,background:"#f0fdf4",color:"#166534",fontSize:13},pasteNotice={margin:"0 0 12px",padding:"9px 11px",borderRadius:9,background:"#eef2ff",fontSize:12,fontWeight:800,color:"#3730a3"},itemEditor={minWidth:0},itemTitle={fontWeight:900,fontSize:15,marginBottom:12,color:"#111827"},skipBadge={display:"inline-block",marginLeft:8,padding:"2px 7px",borderRadius:999,background:"#e5e7eb",color:"#6b7280",fontSize:10},editLabel={display:"flex",flexDirection:"column" as const,gap:5,fontSize:12,fontWeight:800,color:"#374151"},editInput={width:"100%",height:38,boxSizing:"border-box" as const,border:"1px solid #cbd5e1",borderRadius:8,padding:"0 9px",background:"white",fontSize:13};
+function Edit({
+  label,
+  value,
+  onChange,
+  type = "text",
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+}) {
+  return (
+    <label style={editLabel}>
+      <span>{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={editInput}
+      />
+    </label>
+  );
+}
+function SelectEdit({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label style={editLabel}>
+      <span>{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={editInput}
+      >
+        {options.map((option) => (
+          <option key={option}>{option}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+const sub = { margin: "7px 0 0", color: "#6b7280", fontSize: 14 },
+  box = {
+    border: "1px solid #d1d5db",
+    borderRadius: 14,
+    padding: 20,
+    background: "#fff",
+  },
+  guide = {
+    border: "1px solid #d1d5db",
+    borderRadius: 14,
+    padding: 20,
+    background: "#f8fafc",
+    marginBottom: 14,
+  },
+  guideHead = {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 12,
+    alignItems: "start",
+  },
+  h2 = { margin: "0 0 14px", fontSize: 20 },
+  copy = {
+    padding: "9px 13px",
+    border: 0,
+    borderRadius: 9,
+    background: "#111827",
+    color: "white",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  pre = {
+    whiteSpace: "pre-wrap" as const,
+    maxHeight: 310,
+    overflow: "auto",
+    background: "#111827",
+    color: "#e5e7eb",
+    padding: 16,
+    borderRadius: 10,
+    fontSize: 12,
+    lineHeight: 1.55,
+  },
+  textarea = {
+    width: "100%",
+    minHeight: 340,
+    boxSizing: "border-box" as const,
+    border: "1px solid #cbd5e1",
+    borderRadius: 10,
+    padding: 14,
+    fontFamily: "monospace",
+    fontSize: 13,
+    background: "#fff",
+  },
+  actions = { display: "flex", gap: 8, marginTop: 14 },
+  button = {
+    padding: "10px 16px",
+    borderRadius: 10,
+    border: "1px solid #111827",
+    background: "white",
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  primary = { ...button, background: "#111827", color: "white" },
+  notice = {
+    marginTop: 14,
+    padding: 13,
+    borderRadius: 10,
+    background: "#eef2ff",
+    fontWeight: 700,
+  },
+  previewBox = { marginTop: 16 },
+  previewTitleRow = {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 12,
+    alignItems: "center",
+    flexWrap: "wrap" as const,
+  },
+  selectAll = {
+    display: "flex",
+    alignItems: "center",
+    gap: 7,
+    fontSize: 13,
+    fontWeight: 800,
+    color: "#374151",
+  },
+  editGrid = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))",
+    gap: 10,
+  },
+  editCard = {
+    display: "grid",
+    gridTemplateColumns: "96px 1fr",
+    gap: 14,
+    border: "1px solid #d1d5db",
+    borderRadius: 14,
+    padding: 14,
+    marginTop: 12,
+    background: "white",
+  },
+  unselectedCard = { opacity: 0.58, background: "#f8fafc" },
+  thumbColumn = { paddingTop: 4 },
+  itemCheck = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    fontSize: 12,
+    fontWeight: 900,
+    color: "#111827",
+    marginBottom: 8,
+  },
+  thumb = {
+    width: 72,
+    height: 72,
+    objectFit: "cover" as const,
+    borderRadius: 9,
+    border: "1px solid #e5e7eb",
+    display: "block",
+  },
+  noImage = {
+    width: 72,
+    height: 72,
+    display: "grid",
+    placeItems: "center",
+    textAlign: "center" as const,
+    background: "#f3f4f6",
+    border: "1px dashed #cbd5e1",
+    borderRadius: 9,
+    fontSize: 10,
+    color: "#64748b",
+    lineHeight: 1.3,
+  },
+  pasteTarget = {
+    width: 80,
+    minHeight: 98,
+    padding: 4,
+    border: "2px dashed #cbd5e1",
+    borderRadius: 12,
+    background: "#f8fafc",
+    cursor: "pointer",
+    outline: "none",
+  },
+  pasteTargetBusy = { opacity: 0.65, cursor: "wait" },
+  pasteHint = {
+    display: "block",
+    fontSize: 10,
+    fontWeight: 800,
+    color: "#64748b",
+    textAlign: "center" as const,
+    marginTop: 5,
+    lineHeight: 1.2,
+  },
+  pasteGuide = {
+    margin: "-4px 0 12px",
+    padding: "10px 12px",
+    borderRadius: 10,
+    background: "#f0fdf4",
+    color: "#166534",
+    fontSize: 13,
+  },
+  pasteNotice = {
+    margin: "0 0 12px",
+    padding: "9px 11px",
+    borderRadius: 9,
+    background: "#eef2ff",
+    fontSize: 12,
+    fontWeight: 800,
+    color: "#3730a3",
+  },
+  itemEditor = { minWidth: 0 },
+  itemTitle = {
+    fontWeight: 900,
+    fontSize: 15,
+    marginBottom: 12,
+    color: "#111827",
+  },
+  skipBadge = {
+    display: "inline-block",
+    marginLeft: 8,
+    padding: "2px 7px",
+    borderRadius: 999,
+    background: "#e5e7eb",
+    color: "#6b7280",
+    fontSize: 10,
+  },
+  editLabel = {
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 5,
+    fontSize: 12,
+    fontWeight: 800,
+    color: "#374151",
+  },
+  editInput = {
+    width: "100%",
+    height: 38,
+    boxSizing: "border-box" as const,
+    border: "1px solid #cbd5e1",
+    borderRadius: 8,
+    padding: "0 9px",
+    background: "white",
+    fontSize: 13,
+  };

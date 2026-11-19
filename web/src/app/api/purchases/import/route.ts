@@ -2,10 +2,43 @@ import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { parseTaobaoWorkbook } from "@/lib/purchases/taobao";
 import { extractSourceProductId } from "@/lib/purchases/product-id";
-import { parseDomesticPurchaseText, type DomesticPurchase } from "@/lib/purchases/domestic-text";
+import {
+  parseDomesticPurchaseText,
+  type DomesticPurchase,
+} from "@/lib/purchases/domestic-text";
 import { normalizeSeriesName } from "@/lib/series";
 
 export const runtime = "nodejs";
+
+const inventoryMatchColumns =
+  "id,item_name,series_name,item_type,image_url,lineup_image_url,source_url,source_product_id,internal_sku,option_seq,component_count,order_number";
+
+export async function GET() {
+  try {
+    const sb = createServiceRoleClient();
+    const items: any[] = [];
+    const pageSize = 500;
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await sb
+        .from("inventory_items")
+        .select(inventoryMatchColumns)
+        .order("id")
+        .range(offset, offset + pageSize - 1);
+      if (error) throw error;
+      items.push(...(data ?? []));
+      if ((data?.length ?? 0) < pageSize) break;
+    }
+    return NextResponse.json({ ok: true, items });
+  } catch (e) {
+    return NextResponse.json(
+      {
+        ok: false,
+        message: e instanceof Error ? e.message : "인벤토리 조회 실패",
+      },
+      { status: 500 },
+    );
+  }
+}
 
 function isClosedOrder(sourceStatus: unknown) {
   return String(sourceStatus || "").trim() === "交易关闭";
@@ -36,22 +69,36 @@ export async function POST(req: Request) {
         body.purchase && typeof body.purchase === "object"
           ? (body.purchase as DomesticPurchase)
           : parseDomesticPurchaseText(String(body.text || ""));
-      const sourceType = String(body.source_type || "korea") === "japan" ? "japan" : "korea";
+      const sourceType =
+        String(body.source_type || "korea") === "japan" ? "japan" : "korea";
       const isJapan = sourceType === "japan";
       const sourceSite = isJapan ? "JapanProxy" : "Domestic";
       const country = isJapan ? "JP" : "KR";
       const defaultCurrency = isJapan ? "JPY" : "KRW";
-      const currency = ["KRW", "JPY", "CNY"].includes(String(purchase.currency || "").toUpperCase()) ? String(purchase.currency).toUpperCase() : defaultCurrency;
+      const currency = ["KRW", "JPY", "CNY"].includes(
+        String(purchase.currency || "").toUpperCase(),
+      )
+        ? String(purchase.currency).toUpperCase()
+        : defaultCurrency;
 
       if (!String(purchase.supplier || "").trim()) {
-        return NextResponse.json({ ok: false, message: "거래처명을 입력해줘." }, { status: 400 });
+        return NextResponse.json(
+          { ok: false, message: "거래처명을 입력해줘." },
+          { status: 400 },
+        );
       }
       if (!Array.isArray(purchase.items) || !purchase.items.length) {
-        return NextResponse.json({ ok: false, message: "상품이 없어." }, { status: 400 });
+        return NextResponse.json(
+          { ok: false, message: "상품이 없어." },
+          { status: 400 },
+        );
       }
       for (const item of purchase.items) {
         if (!String(item.product_name || "").trim()) {
-          return NextResponse.json({ ok: false, message: "상품명이 비어 있는 항목이 있어." }, { status: 400 });
+          return NextResponse.json(
+            { ok: false, message: "상품명이 비어 있는 항목이 있어." },
+            { status: 400 },
+          );
         }
       }
       if (String(body.mode || "preview") === "preview") {
@@ -59,22 +106,64 @@ export async function POST(req: Request) {
       }
 
       const sb = createServiceRoleClient();
-      const simpleId = typeof body.simple_order_id === "string" ? body.simple_order_id.trim() : "";
+      const simpleId =
+        typeof body.simple_order_id === "string"
+          ? body.simple_order_id.trim()
+          : "";
       let simpleOrder: any = null;
       if (simpleId) {
-        if (isJapan) return NextResponse.json({ok:false,message:"간이 매입은 한국 매입으로만 전환할 수 있어."},{status:400});
-        const {data,error} = await sb.from("purchase_orders").select("*").eq("id",simpleId).maybeSingle();
+        if (isJapan)
+          return NextResponse.json(
+            {
+              ok: false,
+              message: "간이 매입은 한국 매입으로만 전환할 수 있어.",
+            },
+            { status: 400 },
+          );
+        const { data, error } = await sb
+          .from("purchase_orders")
+          .select("*")
+          .eq("id", simpleId)
+          .maybeSingle();
         if (error) throw error;
-        if (!data || data.source_site!=="간이" || data.raw_data?.simple_purchase!==true) return NextResponse.json({ok:false,message:"전환 가능한 간이 매입을 찾을 수 없어."},{status:409});
-        if (data.raw_data?.purchase_registered === true) return NextResponse.json({ok:false,message:"이미 매입 등록 완료 Y인 간이 내역이야. 중복 전환할 수 없어."},{status:409});
-        simpleOrder=data;
-        if (Number(purchase.total_amount)!==Number(data.paid_amount)) return NextResponse.json({ok:false,message:"간이 등록된 총금액을 유지해야 해. 금액을 확인해줘."},{status:400});
-        if (currency!=="KRW") return NextResponse.json({ok:false,message:"간이 전환은 원화(KRW)만 지원해."},{status:400});
+        if (
+          !data ||
+          data.source_site !== "간이" ||
+          data.raw_data?.simple_purchase !== true
+        )
+          return NextResponse.json(
+            { ok: false, message: "전환 가능한 간이 매입을 찾을 수 없어." },
+            { status: 409 },
+          );
+        if (data.raw_data?.purchase_registered === true)
+          return NextResponse.json(
+            {
+              ok: false,
+              message:
+                "이미 매입 등록 완료 Y인 간이 내역이야. 중복 전환할 수 없어.",
+            },
+            { status: 409 },
+          );
+        simpleOrder = data;
+        if (Number(purchase.total_amount) !== Number(data.paid_amount))
+          return NextResponse.json(
+            {
+              ok: false,
+              message: "간이 등록된 총금액을 유지해야 해. 금액을 확인해줘.",
+            },
+            { status: 400 },
+          );
+        if (currency !== "KRW")
+          return NextResponse.json(
+            { ok: false, message: "간이 전환은 원화(KRW)만 지원해." },
+            { status: 400 },
+          );
       }
       const prefix = isJapan ? "JP" : "DOM";
       const orderNumber = simpleOrder
-        ? (purchase.invoice_number || `DOM-${simpleOrder.id.slice(0,8)}`)
-        : (purchase.invoice_number || `${prefix}-${purchase.purchased_at.replace(/-/g, "")}-${Date.now().toString().slice(-6)}`);
+        ? purchase.invoice_number || `DOM-${simpleOrder.id.slice(0, 8)}`
+        : purchase.invoice_number ||
+          `${prefix}-${purchase.purchased_at.replace(/-/g, "")}-${Date.now().toString().slice(-6)}`;
       const { data: existing, error: existingError } = await sb
         .from("purchase_orders")
         .select("id")
@@ -84,9 +173,39 @@ export async function POST(req: Request) {
       if (existingError) throw existingError;
       if (existing) {
         return NextResponse.json(
-          { ok: false, message: `이미 등록된 ${isJapan ? "일본" : "국내"} 매입번호야: ${orderNumber}` },
-          { status: 409 }
+          {
+            ok: false,
+            message: `이미 등록된 ${isJapan ? "일본" : "국내"} 매입번호야: ${orderNumber}`,
+          },
+          { status: 409 },
         );
+      }
+
+      // Validate explicitly selected inventory IDs before any purchase is written.
+      const matchIds = [
+        ...new Set(
+          purchase.items
+            .map((item) => String(item.sourcing_inventory_id || "").trim())
+            .filter(Boolean),
+        ),
+      ];
+      const manualMatches = new Map<string, any>();
+      if (matchIds.length) {
+        const { data, error } = await sb
+          .from("inventory_items")
+          .select(inventoryMatchColumns)
+          .in("id", matchIds);
+        if (error) throw error;
+        for (const row of data ?? []) manualMatches.set(String(row.id), row);
+        if (matchIds.some((id) => !manualMatches.has(id))) {
+          return NextResponse.json(
+            {
+              ok: false,
+              message: "연결한 인벤토리 상품이 없어졌어. 다시 매칭해줘.",
+            },
+            { status: 409 },
+          );
+        }
       }
 
       let sourcingByUrl = new Map<string, any[]>();
@@ -98,9 +217,20 @@ export async function POST(req: Request) {
         if (sourcingError) throw sourcingError;
         for (const row of sourcingRows ?? []) {
           const normalized = normalizeSourceUrl(row.source_url);
-          if (normalized) sourcingByUrl.set(normalized, [...(sourcingByUrl.get(normalized) || []), row]);
-          const productId = String(row.source_product_id || "").trim() || extractSourceProductId(row.source_url) || "";
-          if (productId) sourcingByProductId.set(productId, [...(sourcingByProductId.get(productId) || []), row]);
+          if (normalized)
+            sourcingByUrl.set(normalized, [
+              ...(sourcingByUrl.get(normalized) || []),
+              row,
+            ]);
+          const productId =
+            String(row.source_product_id || "").trim() ||
+            extractSourceProductId(row.source_url) ||
+            "";
+          if (productId)
+            sourcingByProductId.set(productId, [
+              ...(sourcingByProductId.get(productId) || []),
+              row,
+            ]);
         }
       }
 
@@ -117,46 +247,78 @@ export async function POST(req: Request) {
         memo: item.memo,
       }));
       const totalAmount = Number(purchase.total_amount);
-      if (purchase.total_amount === null || purchase.total_amount === undefined || !Number.isFinite(totalAmount) || totalAmount <= 0) {
-        return NextResponse.json({ok:false,message:"명세서 총금액을 입력해줘. 배송비를 포함한 실제 결제 총액 기준이야."},{status:400});
+      if (
+        purchase.total_amount === null ||
+        purchase.total_amount === undefined ||
+        !Number.isFinite(totalAmount) ||
+        totalAmount <= 0
+      ) {
+        return NextResponse.json(
+          {
+            ok: false,
+            message:
+              "명세서 총금액을 입력해줘. 배송비를 포함한 실제 결제 총액 기준이야.",
+          },
+          { status: 400 },
+        );
       }
       const paidAmount = totalAmount;
 
       // 간이 주문은 같은 DB 행을 정식 주문으로 전환한다. 금액 중복 및 증빙사진 유실을 방지한다.
       const { data: order, error } = simpleOrder
-        ? { data:{id:simpleOrder.id},error:null }
+        ? { data: { id: simpleOrder.id }, error: null }
         : await sb
-        .from("purchase_orders")
-        .insert({
-          country,
-          source_site: sourceSite,
-          order_number: orderNumber,
-          ordered_at: purchase.purchased_at,
-          shop_name: purchase.supplier,
-          paid_amount: paidAmount,
-          local_shipping: purchase.local_shipping,
-          currency,
-          order_status: "주문완료",
-          memo: purchase.memo || null,
-          raw_data: { source_status: "주문완료", text_import_type: sourceType, domestic_items: textItems, invoice_total_confirmed: true },
-        })
-        .select("id")
-        .single();
+            .from("purchase_orders")
+            .insert({
+              country,
+              source_site: sourceSite,
+              order_number: orderNumber,
+              ordered_at: purchase.purchased_at,
+              shop_name: purchase.supplier,
+              paid_amount: paidAmount,
+              local_shipping: purchase.local_shipping,
+              currency,
+              order_status: "주문완료",
+              memo: purchase.memo || null,
+              raw_data: {
+                source_status: "주문완료",
+                text_import_type: sourceType,
+                domestic_items: textItems,
+                invoice_total_confirmed: true,
+              },
+            })
+            .select("id")
+            .single();
       if (error) throw error;
 
       let matchedCount = 0;
       const rows = purchase.items.map((item) => {
         const quantity = Math.max(1, Math.trunc(Number(item.quantity || 1)));
         const unitPrice = Math.max(0, Math.round(Number(item.unit_price || 0)));
-        let sourcing: any = null;
+        const manualMatch = manualMatches.get(
+          String(item.sourcing_inventory_id || "").trim(),
+        );
+        let sourcing: any = manualMatch || null;
         let sourceProductId = "";
-        if (isJapan) {
+        if (manualMatch) {
+          sourceProductId =
+            String(manualMatch.source_product_id || "").trim() ||
+            extractSourceProductId(manualMatch.source_url) ||
+            "";
+          matchedCount++;
+        } else if (isJapan) {
           const normalized = normalizeSourceUrl(item.product_url);
-          const urlCandidates = normalized ? sourcingByUrl.get(normalized) || [] : [];
+          const urlCandidates = normalized
+            ? sourcingByUrl.get(normalized) || []
+            : [];
           if (urlCandidates.length === 1) sourcing = urlCandidates[0];
-          sourceProductId = extractSourceProductId(item.product_url) || String(sourcing?.source_product_id || "").trim() || "";
+          sourceProductId =
+            extractSourceProductId(item.product_url) ||
+            String(sourcing?.source_product_id || "").trim() ||
+            "";
           if (!sourcing && sourceProductId) {
-            const productCandidates = sourcingByProductId.get(sourceProductId) || [];
+            const productCandidates =
+              sourcingByProductId.get(sourceProductId) || [];
             if (productCandidates.length === 1) sourcing = productCandidates[0];
           }
           if (sourcing) matchedCount++;
@@ -164,58 +326,103 @@ export async function POST(req: Request) {
         return {
           purchase_order_id: order.id,
           product_name: item.product_name,
-          display_name_ko: item.product_name,
-          series_name: normalizeSeriesName(item.series_name, item.product_name, item.option_text, item.memo),
+          display_name_ko: manualMatch?.item_name || item.product_name,
+          series_name: normalizeSeriesName(
+            item.series_name,
+            item.product_name,
+            item.option_text,
+            item.memo,
+          ),
           option_text: item.option_text || null,
-          product_url: item.product_url || null,
+          product_url: manualMatch
+            ? manualMatch.source_url || null
+            : item.product_url || null,
           image_url: item.image_url || null,
           quantity,
           received_quantity: quantity,
           unit_price: unitPrice,
           line_total: unitPrice * quantity,
-          source_product_id: isJapan ? sourceProductId || null : null,
-          sourcing_inventory_id: isJapan ? sourcing?.id || null : null,
-          internal_sku: isJapan ? sourcing?.internal_sku || null : null,
+          source_product_id: sourceProductId || null,
+          sourcing_inventory_id: sourcing?.id || null,
+          internal_sku: sourcing?.internal_sku || null,
         };
       });
       const { error: itemError } = await sb.from("purchase_items").insert(rows);
       if (itemError) {
-        if (!simpleOrder) await sb.from("purchase_orders").delete().eq("id", order.id);
+        if (!simpleOrder)
+          await sb.from("purchase_orders").delete().eq("id", order.id);
         throw itemError;
       }
       if (simpleOrder) {
         const previousRaw = simpleOrder.raw_data ?? {};
-        const newRaw = { ...previousRaw, simple_purchase: false, purchase_registered: true, converted_from_simple: true,
-          converted_at: new Date().toISOString(), previous_simple_order_number: simpleOrder.order_number,
-          source_status: "주문완료", text_import_type: "korea", domestic_items: textItems,
-          invoice_total_confirmed: true };
-        const {error: conversionError} = await sb.from("purchase_orders")
-          .update({country:"KR",source_site:"Domestic",order_number:orderNumber,
-            shop_name:purchase.supplier,ordered_at:simpleOrder.ordered_at,
-            paid_amount:simpleOrder.paid_amount,currency:"KRW",local_shipping:0,
-            memo:purchase.memo || simpleOrder.memo || null,order_status:"주문완료",raw_data:newRaw})
-          .eq("id", simpleOrder.id).eq("source_site","간이");
+        const newRaw = {
+          ...previousRaw,
+          simple_purchase: false,
+          purchase_registered: true,
+          converted_from_simple: true,
+          converted_at: new Date().toISOString(),
+          previous_simple_order_number: simpleOrder.order_number,
+          source_status: "주문완료",
+          text_import_type: "korea",
+          domestic_items: textItems,
+          invoice_total_confirmed: true,
+        };
+        const { error: conversionError } = await sb
+          .from("purchase_orders")
+          .update({
+            country: "KR",
+            source_site: "Domestic",
+            order_number: orderNumber,
+            shop_name: purchase.supplier,
+            ordered_at: simpleOrder.ordered_at,
+            paid_amount: simpleOrder.paid_amount,
+            currency: "KRW",
+            local_shipping: 0,
+            memo: purchase.memo || simpleOrder.memo || null,
+            order_status: "주문완료",
+            raw_data: newRaw,
+          })
+          .eq("id", simpleOrder.id)
+          .eq("source_site", "간이");
         if (conversionError) {
-          await sb.from("purchase_items").delete().eq("purchase_order_id",simpleOrder.id);
+          await sb
+            .from("purchase_items")
+            .delete()
+            .eq("purchase_order_id", simpleOrder.id);
           throw conversionError;
         }
       }
-      return NextResponse.json({ ok: true, saved: 1, itemCount: rows.length, matchedCount, orderNumber, sourceType });
+      return NextResponse.json({
+        ok: true,
+        saved: 1,
+        itemCount: rows.length,
+        matchedCount,
+        orderNumber,
+        sourceType,
+      });
     }
 
     const form = await req.formData();
     const file = form.get("file");
     const mode = String(form.get("mode") || "preview");
     if (!(file instanceof File)) {
-      return NextResponse.json({ ok: false, message: "엑셀 파일이 없어." }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, message: "엑셀 파일이 없어." },
+        { status: 400 },
+      );
     }
 
     const parsedOrders = parseTaobaoWorkbook(await file.arrayBuffer());
-    const skippedClosed = parsedOrders.filter((o) => isClosedOrder(o.source_status)).length;
+    const skippedClosed = parsedOrders.filter((o) =>
+      isClosedOrder(o.source_status),
+    ).length;
     const orders = parsedOrders.filter((o) => !isClosedOrder(o.source_status));
     const sb = createServiceRoleClient();
 
-    const orderKeys = orders.map((o) => `and(source_site.eq.${o.source_site},order_number.eq.${o.order_number})`);
+    const orderKeys = orders.map(
+      (o) =>
+        `and(source_site.eq.${o.source_site},order_number.eq.${o.order_number})`,
+    );
     let existingKeys = new Set<string>();
     if (orderKeys.length) {
       const { data: existingRows, error: existingLookupError } = await sb
@@ -223,7 +430,11 @@ export async function POST(req: Request) {
         .select("source_site,order_number")
         .or(orderKeys.join(","));
       if (existingLookupError) throw existingLookupError;
-      existingKeys = new Set((existingRows ?? []).map((row: any) => `${row.source_site}::${row.order_number}`));
+      existingKeys = new Set(
+        (existingRows ?? []).map(
+          (row: any) => `${row.source_site}::${row.order_number}`,
+        ),
+      );
     }
 
     const previewOrders = orders.map((o) => ({
@@ -246,15 +457,26 @@ export async function POST(req: Request) {
     if (selectedRaw) {
       try {
         const parsed = JSON.parse(selectedRaw);
-        if (Array.isArray(parsed)) selectedOrderNumbers = parsed.map((v) => String(v));
+        if (Array.isArray(parsed))
+          selectedOrderNumbers = parsed.map((v) => String(v));
       } catch {
-        return NextResponse.json({ ok: false, message: "선택 주문 정보가 올바르지 않아." }, { status: 400 });
+        return NextResponse.json(
+          { ok: false, message: "선택 주문 정보가 올바르지 않아." },
+          { status: 400 },
+        );
       }
     }
-    const selectedSet = selectedOrderNumbers ? new Set(selectedOrderNumbers) : null;
-    const ordersToSave = selectedSet ? orders.filter((o) => selectedSet.has(String(o.order_number))) : orders;
+    const selectedSet = selectedOrderNumbers
+      ? new Set(selectedOrderNumbers)
+      : null;
+    const ordersToSave = selectedSet
+      ? orders.filter((o) => selectedSet.has(String(o.order_number)))
+      : orders;
     if (!ordersToSave.length) {
-      return NextResponse.json({ ok: false, message: "저장할 주문을 하나 이상 체크해줘." }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, message: "저장할 주문을 하나 이상 체크해줘." },
+        { status: 400 },
+      );
     }
 
     const { data: sourcingRows, error: sourcingError } = await sb
@@ -263,7 +485,10 @@ export async function POST(req: Request) {
     if (sourcingError) throw sourcingError;
     const byProductId = new Map<string, any[]>();
     for (const row of sourcingRows ?? []) {
-      const productId = String(row.source_product_id || "").trim() || extractSourceProductId(row.source_url) || "";
+      const productId =
+        String(row.source_product_id || "").trim() ||
+        extractSourceProductId(row.source_url) ||
+        "";
       if (!productId) continue;
       byProductId.set(productId, [...(byProductId.get(productId) || []), row]);
     }
@@ -283,7 +508,10 @@ export async function POST(req: Request) {
       if (existingOrder) {
         const { error: updateError } = await sb
           .from("purchase_orders")
-          .update({ tracking_company: o.tracking_company, tracking_number: o.tracking_number })
+          .update({
+            tracking_company: o.tracking_company,
+            tracking_number: o.tracking_number,
+          })
           .eq("id", existingOrder.id);
         if (updateError) throw updateError;
         updated++;
@@ -323,7 +551,9 @@ export async function POST(req: Request) {
             internal_sku: sourcing?.internal_sku || null,
           };
         });
-        const { error: itemError } = await sb.from("purchase_items").insert(rows);
+        const { error: itemError } = await sb
+          .from("purchase_items")
+          .insert(rows);
         if (itemError) throw itemError;
       }
       created++;
@@ -340,6 +570,9 @@ export async function POST(req: Request) {
       skippedUnchecked: orders.length - ordersToSave.length,
     });
   } catch (e) {
-    return NextResponse.json({ ok: false, message: e instanceof Error ? e.message : "저장 실패" }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, message: e instanceof Error ? e.message : "저장 실패" },
+      { status: 500 },
+    );
   }
 }
