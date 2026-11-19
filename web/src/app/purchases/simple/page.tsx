@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState, type CSSProperties } from "react";
+import SupplierAutocomplete from "./SupplierAutocomplete";
 
 type Entry = {
   id: string;
@@ -40,6 +41,7 @@ export default function SimplePurchasesPage() {
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const suppliers = Array.from(new Set(entries.map(entry=>entry.shop_name?.trim()).filter((name):name is string=>Boolean(name)))).sort((a,b)=>a.localeCompare(b,"ko"));
   const selected = entries.filter(e=>selectedIds.includes(e.id));
   const mergeable = (e: Entry) => !e.converted && !e.purchase_registered && e.category === "매입" && !!e.shop_name.trim() && !!e.ordered_at;
   const selectedSupplier = selected[0]?.shop_name.trim();
@@ -197,12 +199,11 @@ export default function SimplePurchasesPage() {
       {[{name:"전체",href:"/purchases"},{name:"🇨🇳 중국",href:"/purchases?country=CN"},{name:"🇯🇵 일본",href:"/purchases?country=JP"},{name:"🇰🇷 한국",href:"/purchases?country=KR"}].map(t=><Link key={t.name} href={t.href} style={{padding:"9px 13px",border:"1px solid #d1d5db",borderRadius:9,color:"#374151",background:"#fff",textDecoration:"none",fontWeight:700,fontSize:13}}>{t.name}</Link>)}
       <span style={{...button,padding:"9px 14px",fontSize:13}}>🧾 간이</span>
     </nav>
-    <datalist id="simple-suppliers">{Array.from(new Set(entries.map(entry=>entry.shop_name?.trim()).filter((name):name is string=>Boolean(name)))).sort((a,b)=>a.localeCompare(b,"ko")).map(name=><option key={name} value={name}/>)}</datalist>
     <form onSubmit={submit} style={{...card,display:"grid",gap:16}}>
       <h2 style={{fontSize:18,margin:0}}>간이 매입 등록</h2>
-      <label style={{display:"grid",gap:6,fontWeight:700,fontSize:14}}>거래처 (선택 · 기존 간이 매입 거래처 자동완성)
-        <input style={field} list="simple-suppliers" autoComplete="off" placeholder="예: 한스지몰" value={shopName} onChange={e=>setShopName(e.target.value)}/>
-      </label>
+      <div style={{display:"grid",gap:6,fontWeight:700,fontSize:14}}>거래처 (선택 · 기존 간이 매입 거래처 자동완성)
+        <SupplierAutocomplete label="거래처" style={field} placeholder="거래처 선택 또는 직접 입력" value={shopName} onChange={setShopName} suppliers={suppliers} loading={loading} disabled={busy}/>
+      </div>
       <label style={{display:"grid",gap:6,fontWeight:700,fontSize:14}}>분류 (선택 · 기본 매입)
         <select style={field} value={category} onChange={e=>setCategory(e.target.value as "매입" | "비용" | "세금")}>
           <option value="매입">매입</option><option value="비용">비용</option><option value="세금">세금</option>
@@ -253,7 +254,7 @@ export default function SimplePurchasesPage() {
           <button disabled={busy || entry.converted || (entry.merged_count||1)>1} onClick={()=>void remove(entry.id)} style={{padding:"6px 9px",border:"1px solid #fecdd3",background:"#fff1f2",color:"#be123c",borderRadius:7,cursor:"pointer"}}>삭제</button>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap",marginTop:12}}>
-          <input list="simple-suppliers" aria-label="거래처 수정" value={editingSuppliers[entry.id] ?? entry.shop_name ?? ""} onChange={e=>setEditingSuppliers(prev=>({...prev,[entry.id]:e.target.value}))} placeholder="거래처 없음" style={{...field,width:"min(100%,240px)",fontSize:13,padding:"8px 10px"}}/>
+          <SupplierAutocomplete label="거래처 수정" value={editingSuppliers[entry.id] ?? entry.shop_name ?? ""} onChange={value=>setEditingSuppliers(prev=>({...prev,[entry.id]:value}))} placeholder="거래처 없음" suppliers={suppliers} loading={loading} disabled={busy} style={{...field,width:"min(100%,240px)",fontSize:13,padding:"8px 10px"}}/>
           <button type="button" disabled={busy || (editingSuppliers[entry.id] ?? entry.shop_name ?? "") === (entry.shop_name ?? "")} onClick={()=>void saveSupplier(entry)} style={{...button,padding:"9px 12px",fontSize:12}}>거래처 저장</button>
         </div>
         <label style={{display:"flex",alignItems:"center",gap:9,marginTop:12,fontSize:13,fontWeight:700}}>
