@@ -199,9 +199,10 @@ export default function TextImportPanel({
     [busy, setBusy] = useState(false),
     [copied, setCopied] = useState(false);
   const basePrompt = mode === "japan" ? JAPAN_PROMPT : KOREA_PROMPT;
-  const invoiceUrl = simpleEntry?.images?.invoice as string | undefined;
-  const prompt = invoiceUrl
-    ? `${basePrompt}\n\n[이번 전환 대상 명세서]\n아래 외부 이미지 링크를 열어 모든 상품행을 확인해줘. 링크를 읽을 수 없다면 추측하지 말고 사진 첨부를 요청해줘.\n${invoiceUrl}`
+  const invoiceUrls: string[] = simpleEntry?.image_lists?.invoice || (simpleEntry?.images?.invoice ? [simpleEntry.images.invoice] : []);
+  const paymentUrls: string[] = simpleEntry?.image_lists?.payment || (simpleEntry?.images?.payment ? [simpleEntry.images.payment] : []);
+  const prompt = invoiceUrls.length
+    ? `${basePrompt}\n\n[이번 전환 대상 명세서]\n아래 외부 이미지 링크를 모두 열어 모든 상품행을 확인해줘. 링크를 읽을 수 없다면 추측하지 말고 사진 첨부를 요청해줘.\n${invoiceUrls.join("\n")}`
     : basePrompt;
   const runText = async (action: string) => {
     if (action === "preview" && !text.trim())
@@ -313,8 +314,9 @@ export default function TextImportPanel({
             명세서를 ChatGPT에 보내 상품별 텍스트를 만든 다음 아래에 붙여넣어줘.
             미리보기에서 간이의 거래처·매입일·총금액을 우선 적용해.
           </p>
-          {invoiceUrl ? (
-            <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
+          {invoiceUrls.length ? invoiceUrls.map((invoiceUrl,index) => (
+            <div key={invoiceUrl} style={{ marginTop: 14, display: "grid", gap: 8 }}>
+              <b>명세서 {index+1} / {invoiceUrls.length}</b>
               <a href={invoiceUrl} target="_blank" rel="noopener noreferrer">
                 <img
                   src={invoiceUrl}
@@ -361,18 +363,20 @@ export default function TextImportPanel({
                 정보가 있으면 확인 후 공유해줘.
               </p>
             </div>
-          ) : (
+          )) : (
             <p style={sub}>첨부한 명세서 사진이 없어.</p>
           )}
-          {simpleEntry.images?.payment && (
+          {paymentUrls.map((url,index) => (
             <a
-              href={simpleEntry.images.payment}
+              key={url}
+              href={url}
+              style={{display:"block",marginTop:8}}
               target="_blank"
               rel="noopener noreferrer"
             >
-              입금내역 사진 보기
+              입금내역 사진 {index+1} 보기
             </a>
-          )}
+          ))}
         </section>
       )}
       <section style={guide}>
@@ -392,7 +396,7 @@ export default function TextImportPanel({
           <button style={copy} onClick={copyPrompt}>
             {copied
               ? "복사됨"
-              : invoiceUrl
+              : invoiceUrls.length
                 ? "명령어 + 명세서 링크 복사"
                 : "명령어 복사"}
           </button>

@@ -162,7 +162,7 @@ export async function POST(req: Request) {
             { ok: false, message: "전환 가능한 간이 매입을 찾을 수 없어." },
             { status: 409 },
           );
-        if (data.raw_data?.purchase_registered === true)
+        if (data.raw_data?.purchase_registered === true || data.raw_data?.simple_merged_into)
           return NextResponse.json(
             {
               ok: false,
@@ -388,7 +388,7 @@ export async function POST(req: Request) {
           internal_sku: saleMatch?.internal_sku || sourcing?.internal_sku || null,
         };
       });
-      const { error: itemError } = await sb.from("purchase_items").insert(rows);
+      const { data: insertedItems, error: itemError } = await sb.from("purchase_items").insert(rows).select("id");
       if (itemError) {
         if (!simpleOrder)
           await sb.from("purchase_orders").delete().eq("id", order.id);
@@ -408,7 +408,7 @@ export async function POST(req: Request) {
           domestic_items: textItems,
           invoice_total_confirmed: true,
         };
-        const { error: conversionError } = await sb
+        const { data: convertedOrder, error: conversionError } = await sb
           .from("purchase_orders")
           .update({
             country: "KR",
@@ -418,19 +418,22 @@ export async function POST(req: Request) {
             ordered_at: simpleOrder.ordered_at,
             paid_amount: simpleOrder.paid_amount,
             currency: "KRW",
-            local_shipping: 0,
+            local_shipping: Number(purchase.local_shipping || simpleOrder.local_shipping || 0),
             memo: purchase.memo || simpleOrder.memo || null,
             order_status: "주문완료",
             raw_data: newRaw,
+            updated_at: new Date().toISOString(),
           })
           .eq("id", simpleOrder.id)
-          .eq("source_site", "간이");
-        if (conversionError) {
+          .eq("source_site", "간이")
+          .eq("updated_at", simpleOrder.updated_at)
+          .select("id").maybeSingle();
+        if (conversionError || !convertedOrder) {
           await sb
             .from("purchase_items")
             .delete()
-            .eq("purchase_order_id", simpleOrder.id);
-          throw conversionError;
+            .in("id", (insertedItems || []).map(item => item.id));
+          throw conversionError || new Error("간이 내역이 변경됐어. 새로고침 후 다시 전환해줘.");
         }
       }
       return NextResponse.json({

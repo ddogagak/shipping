@@ -14,6 +14,9 @@ type Entry = {
   purchase_registered: boolean;
   converted: boolean;
   images: { invoice: string | null; payment: string | null };
+  image_lists?: { invoice: string[]; payment: string[] };
+  merged_count?: number;
+  local_shipping?: number;
 };
 
 const field: CSSProperties = { padding: "11px 12px", border: "1px solid #d7dce2", borderRadius: 9, background: "#fff", color: "#171717", fontSize: 15, width: "100%", boxSizing: "border-box" };
@@ -36,6 +39,12 @@ export default function SimplePurchasesPage() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const selected = entries.filter(e=>selectedIds.includes(e.id));
+  const mergeable = (e: Entry) => !e.converted && !e.purchase_registered && e.category === "매입" && !!e.shop_name.trim() && !!e.ordered_at;
+  const selectedSupplier = selected[0]?.shop_name.trim();
+  const total = selected.reduce((sum,e)=>sum+Number(e.paid_amount||0),0);
+  const canMerge = selected.length >= 2 && selected.every(e=>mergeable(e)&&e.shop_name.trim()===selectedSupplier);
 
   async function load() {
     setLoading(true);
@@ -44,6 +53,7 @@ export default function SimplePurchasesPage() {
       const body = await res.json();
       if (!res.ok) throw new Error(body.message || "조회 실패");
       setEntries(body.entries || []);
+      setSelectedIds([]);
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "조회 실패");
     } finally {
@@ -51,6 +61,20 @@ export default function SimplePurchasesPage() {
     }
   }
   useEffect(() => { void load(); }, []);
+
+  async function mergeSelected() {
+    if (!canMerge) return;
+    if (!confirm(`${selectedSupplier} 간이 매입 ${selected.length}건을 ${money(total)}원으로 합칠까? 원본 입금 날짜와 사진은 보존돼.`)) return;
+    setBusy(true); setMessage("");
+    try {
+      const res = await fetch("/api/purchases/simple", {method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"merge",ids:selected.map(e=>e.id)})});
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message || "합치기 실패");
+      await load();
+      setMessage(`${selected.length}건 합치기 완료 · ${money(total)}원 · 모든 증빙사진과 입금 이력 보존`);
+    } catch(e) { setMessage(e instanceof Error ? e.message : "합치기 실패"); }
+    finally { setBusy(false); }
+  }
 
   async function upload(id: string, kind: "invoice" | "payment", file: File) {
     const fd = new FormData();
@@ -215,13 +239,18 @@ export default function SimplePurchasesPage() {
     {message&&<div role="status" style={{...card,marginTop:12,fontSize:13,whiteSpace:"pre-wrap"}}>{message}</div>}
     <section style={{marginTop:24}}>
       <h2 style={{fontSize:19}}>등록 내역 ({entries.length}건)</h2>
+      <div style={{...card,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:12}}>
+        <button type="button" disabled={busy || !canMerge} onClick={()=>void mergeSelected()} style={{...button,opacity:!canMerge?0.5:1}}>선택한 간이 합치기 ({selected.length})</button>
+        <span style={{fontSize:13,color:"#374151"}}>{selected.length?`${selectedSupplier} · ${money(total)}원`:"같은 거래처의 미등록 매입을 체크해줘."}</span>
+        {selected.length>0&&<button type="button" disabled={busy} onClick={()=>setSelectedIds([])} style={{...field,width:"auto",padding:"7px 10px",cursor:"pointer"}}>선택 해제</button>}
+      </div>
       {loading&&<p style={{fontSize:13,color:"#6b7280"}}>불러오는 중...</p>}
       {!loading&&!entries.length&&<p style={{fontSize:13,color:"#6b7280"}}>아직 등록된 간이 매입이 없어.</p>}
       <div style={{display:"grid",gap:12}}>
       {entries.map(entry=><article key={entry.id} style={card}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",gap:12}}>
-          <div><strong style={{fontSize:20}}>{money(entry.paid_amount)}원</strong><p style={{fontSize:13,color:"#6b7280",margin:"5px 0 0"}}>{entry.ordered_at ? new Intl.DateTimeFormat("ko-KR",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(entry.ordered_at)) : "날짜 없음"}</p></div>
-          <button disabled={busy || entry.converted} onClick={()=>void remove(entry.id)} style={{padding:"6px 9px",border:"1px solid #fecdd3",background:"#fff1f2",color:"#be123c",borderRadius:7,cursor:"pointer"}}>삭제</button>
+          <div style={{display:"flex",gap:10,alignItems:"start"}}><input type="checkbox" aria-label="합칠 간이 매입 선택" checked={selectedIds.includes(entry.id)} disabled={busy || !mergeable(entry) || (!!selectedSupplier && entry.shop_name.trim()!==selectedSupplier)} onChange={e=>setSelectedIds(prev=>e.target.checked?[...prev,entry.id]:prev.filter(id=>id!==entry.id))} style={{width:19,height:19}}/><div><strong style={{fontSize:20}}>{money(entry.paid_amount)}원</strong>{(entry.merged_count||1)>1&&<span style={{marginLeft:8,fontSize:12,color:"#047857",fontWeight:700}}>합친 매입 {entry.merged_count}건</span>}<p style={{fontSize:13,color:"#6b7280",margin:"5px 0 0"}}>{entry.ordered_at ? new Intl.DateTimeFormat("ko-KR",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(entry.ordered_at)) : "날짜 없음"}</p></div></div>
+          <button disabled={busy || entry.converted || (entry.merged_count||1)>1} onClick={()=>void remove(entry.id)} style={{padding:"6px 9px",border:"1px solid #fecdd3",background:"#fff1f2",color:"#be123c",borderRadius:7,cursor:"pointer"}}>삭제</button>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap",marginTop:12}}>
           <input list="simple-suppliers" aria-label="거래처 수정" value={editingSuppliers[entry.id] ?? entry.shop_name ?? ""} onChange={e=>setEditingSuppliers(prev=>({...prev,[entry.id]:e.target.value}))} placeholder="거래처 없음" style={{...field,width:"min(100%,240px)",fontSize:13,padding:"8px 10px"}}/>
@@ -248,7 +277,8 @@ export default function SimplePurchasesPage() {
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:12,marginTop:12}}>
           {(["invoice","payment"] as const).map(kind=><div key={kind} style={{display:"grid",gap:7}}>
             <b style={{fontSize:13}}>{kind==="invoice"?"명세서":"입금내역"}</b>
-            {entry.images[kind]?<a href={entry.images[kind]!} target="_blank" rel="noopener noreferrer"><img src={entry.images[kind]!} alt={kind==="invoice"?"명세서 사진":"입금내역 사진"} style={{width:"100%",maxHeight:200,objectFit:"contain",borderRadius:8,border:"1px solid #e5e7eb"}}/></a>:<span style={{fontSize:12,color:"#9ca3af"}}>사진 없음</span>}
+            {(entry.image_lists?.[kind] || (entry.images[kind]?[entry.images[kind]!]:[])).map((url,index)=><a key={url} href={url} target="_blank" rel="noopener noreferrer"><img src={url} alt={`${kind==="invoice"?"명세서 사진":"입금내역 사진"} ${index+1}`} style={{width:"100%",maxHeight:200,objectFit:"contain",borderRadius:8,border:"1px solid #e5e7eb"}}/></a>)}
+            {!entry.images[kind]&&<span style={{fontSize:12,color:"#9ca3af"}}>사진 없음</span>}
             <input type="file" accept="image/*" disabled={busy} aria-label={kind==="invoice"?"명세서 사진 첨부":"입금내역 사진 첨부"} onChange={e=>{void replaceImage(entry.id,kind,e.target.files?.[0]);e.target.value="";}} style={{maxWidth:"100%",fontSize:12}}/>
           </div>)}
         </div>

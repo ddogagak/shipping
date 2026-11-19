@@ -18,7 +18,11 @@ function isConverted(row: any) {
   return row?.raw_data?.converted_from_simple === true;
 }
 function isSimpleHistory(row: any) {
-  return isSimple(row) || isConverted(row);
+  return !row?.raw_data?.simple_merged_into && (isSimple(row) || isConverted(row));
+}
+function photoPaths(row: any, kind: typeof allowedKinds[number]): string[] {
+  const extra = row.raw_data?.simple_merged_images?.[kind];
+  return [...new Set([row.raw_data?.simple_images?.[kind], ...(Array.isArray(extra) ? extra : [])].filter((p): p is string => typeof p === "string" && p.length > 0))];
 }
 function parseAmount(value: unknown) {
   const amount = Number(String(value ?? "").replace(/,/g, "").trim());
@@ -35,7 +39,7 @@ function parseDate(value: unknown) {
 export async function GET() {
   try {
     const sb = createServiceRoleClient();
-    const columns = "id,order_number,ordered_at,paid_amount,memo,shop_name,raw_data,created_at,source_site";
+    const columns = "id,order_number,ordered_at,paid_amount,local_shipping,memo,shop_name,raw_data,created_at,source_site";
     const [{data: simpleRows,error: simpleError},{data: convertedRows,error: convertedError}] = await Promise.all([
       sb.from("purchase_orders").select(columns).eq("source_site","간이").order("created_at",{ascending:false}),
       sb.from("purchase_orders").select(columns).eq("source_site","Domestic").contains("raw_data",{converted_from_simple:true}).order("created_at",{ascending:false})
@@ -46,14 +50,16 @@ export async function GET() {
       .sort((a:any,b:any)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime());
     const entries = await Promise.all(rows.map(async (row: any) => {
       const images: Record<string, string | null> = { invoice: null, payment: null };
+      const image_lists: Record<string, string[]> = { invoice: [], payment: [] };
       await Promise.all(allowedKinds.map(async kind => {
-        const path = row.raw_data?.simple_images?.[kind];
-        if (typeof path === "string" && path) {
+        const signedUrls = await Promise.all(photoPaths(row, kind).map(async path => {
           const { data: signed, error: signError } = await sb.storage.from(BUCKET).createSignedUrl(path, 3600);
-          if (!signError) images[kind] = signed?.signedUrl ?? null;
-        }
+          return signError ? null : signed?.signedUrl ?? null;
+        }));
+        image_lists[kind] = signedUrls.filter((url): url is string => !!url);
+        images[kind] = image_lists[kind][0] ?? null;
       }));
-      return { id: row.id, order_number: row.order_number, ordered_at: row.ordered_at, paid_amount: row.paid_amount, memo: row.memo, shop_name: row.shop_name === "간이 매입" ? "" : (row.shop_name || ""), invoice_check_needed: row.raw_data?.invoice_check_needed === true, purchase_registered: isConverted(row) || row.raw_data?.purchase_registered === true, converted: isConverted(row), category: validCategory(row.raw_data?.purchase_category) ? row.raw_data.purchase_category : "매입", images };
+      return { id: row.id, order_number: row.order_number, ordered_at: row.ordered_at, paid_amount: row.paid_amount, local_shipping: row.local_shipping, memo: row.memo, shop_name: row.shop_name === "간이 매입" ? "" : (row.shop_name || ""), invoice_check_needed: row.raw_data?.invoice_check_needed === true, purchase_registered: isConverted(row) || row.raw_data?.purchase_registered === true, converted: isConverted(row), category: validCategory(row.raw_data?.purchase_category) ? row.raw_data.purchase_category : "매입", images, image_lists, merged_count: Array.isArray(row.raw_data?.simple_merge_payments) ? row.raw_data.simple_merge_payments.length : 1 };
     }));
     return NextResponse.json({ ok: true, entries });
   } catch(e) {
@@ -90,10 +96,17 @@ export async function PATCH(req: Request) {
     const sb = createServiceRoleClient();
     if (req.headers.get("content-type")?.includes("application/json")) {
       const body = await req.json();
+      if (body.action === "merge") {
+        const ids = Array.isArray(body.ids) ? body.ids : [];
+        if (ids.length < 2 || ids.length > 100 || new Set(ids).size !== ids.length || !ids.every((id: unknown) => typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))) return bad("합칠 간이 매입을 2~100건 선택해줘.");
+        const { data, error } = await sb.rpc("merge_simple_purchases", { p_ids: ids });
+        if (error) return bad(error.message, 409);
+        return NextResponse.json({ ok: true, id: data });
+      }
       const id = String(body.id ?? "");
       if (body.category !== undefined && !validCategory(body.category)) return bad("분류는 매입, 비용, 세금 중 하나여야 해.");
       if (!id || (typeof body.invoice_check_needed !== "boolean" && typeof body.shop_name !== "string" && body.category === undefined && typeof body.purchase_registered !== "boolean")) return bad("수정할 정보를 확인해줘.");
-      const { data: row, error: readError } = await sb.from("purchase_orders").select("id,raw_data").eq("id", id).single();
+      const { data: row, error: readError } = await sb.from("purchase_orders").select("id,raw_data,updated_at").eq("id", id).single();
       if (readError || !isSimpleHistory(row)) return bad("간이 매입을 찾을 수 없어.", 404);
       if (isConverted(row) && body.purchase_registered === false) return bad("정식 매입으로 전환된 건은 N으로 되돌릴 수 없어.", 409);
       const update: Record<string, unknown> = {};
@@ -109,8 +122,9 @@ export async function PATCH(req: Request) {
       if (typeof body.shop_name === "string") {
         update.shop_name = body.shop_name.trim().slice(0, 200) || null;
       }
-      const { error } = await sb.from("purchase_orders").update(update).eq("id", id);
+      const { data: updated, error } = await sb.from("purchase_orders").update({...update, updated_at: new Date().toISOString()}).eq("id", id).eq("updated_at", row.updated_at).select("id").maybeSingle();
       if (error) throw error;
+      if (!updated) return bad("다른 변경사항이 있어. 새로고침 후 다시 수정해줘.",409);
       return NextResponse.json({ ok: true });
     }
     const fd = await req.formData();
@@ -120,20 +134,21 @@ export async function PATCH(req: Request) {
     if (!id || !allowedKinds.some(x=>x===kind)) return bad("매입 ID 또는 사진 유형이 잘못됐어.");
     if (!(file instanceof File) || !file.type.startsWith("image/")) return bad("사진 파일만 첨부할 수 있어.");
     if (file.size > MAX_IMAGE_BYTES) return bad("사진은 12MB 이하만 첨부할 수 있어.");
-    const { data: row, error: readError } = await sb.from("purchase_orders").select("id,raw_data").eq("id", id).single();
+    const { data: row, error: readError } = await sb.from("purchase_orders").select("id,raw_data,updated_at").eq("id", id).single();
     if (readError || !isSimpleHistory(row)) return bad("간이 매입을 찾을 수 없어.",404);
     const suffix = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g,"").slice(0,8) || "jpg";
     const path = `simple/${id}/${kind}-${crypto.randomUUID()}.${suffix}`;
     const { error: uploadError } = await sb.storage.from(BUCKET).upload(path, file, { contentType:file.type, upsert: false });
     if (uploadError) throw uploadError;
     const oldPath = row.raw_data?.simple_images?.[kind];
-    const rawData = { ...row.raw_data, simple_images: { ...(row.raw_data?.simple_images ?? {}), [kind]: path } };
-    const { error: updateError } = await sb.from("purchase_orders").update({ raw_data:rawData }).eq("id",id);
-    if (updateError) {
+    const merged = Array.isArray(row.raw_data?.simple_merge_payments);
+    const rawData = merged ? { ...row.raw_data, simple_merged_images: { ...row.raw_data.simple_merged_images, [kind]: [...photoPaths(row, kind as typeof allowedKinds[number]), path] } } : { ...row.raw_data, simple_images: { ...(row.raw_data?.simple_images ?? {}), [kind]: path } };
+    const { data: updated, error: updateError } = await sb.from("purchase_orders").update({ raw_data:rawData, updated_at: new Date().toISOString() }).eq("id",id).eq("updated_at",row.updated_at).select("id").maybeSingle();
+    if (updateError || !updated) {
       await sb.storage.from(BUCKET).remove([path]);
-      throw updateError;
+      return bad(updateError?.message || "다른 변경사항이 있어. 새로고침 후 다시 첨부해줘.",409);
     }
-    if (oldPath && oldPath !== path) await sb.storage.from(BUCKET).remove([oldPath]);
+    if (!merged && oldPath && oldPath !== path) await sb.storage.from(BUCKET).remove([oldPath]);
     return NextResponse.json({ ok: true });
   } catch(e) {
     return bad(e instanceof Error ? e.message : "사진 업로드 실패",500);
@@ -144,11 +159,13 @@ export async function DELETE(req: Request) {
   try {
     const { id } = await req.json();
     const sb = createServiceRoleClient();
-    const { data: row, error } = await sb.from("purchase_orders").select("id,raw_data").eq("id", id).single();
+    const { data: row, error } = await sb.from("purchase_orders").select("id,raw_data,updated_at").eq("id", id).single();
     if (error || !isSimpleHistory(row)) return bad("간이 매입을 찾을 수 없어.",404);
     if (isConverted(row)) return bad("전환 완료된 간이 기록은 정식 매입과 같은 주문이라 여기서 삭제할 수 없어.",409);
-    const { error: delError } = await sb.from("purchase_orders").delete().eq("id",id);
+    if (Array.isArray(row.raw_data?.simple_merge_payments)) return bad("합친 매입은 원본 이력 보존을 위해 삭제할 수 없어.",409);
+    const { data: deleted, error: delError } = await sb.from("purchase_orders").delete().eq("id",id).eq("updated_at",row.updated_at).select("id").maybeSingle();
     if (delError) throw delError;
+    if (!deleted) return bad("다른 변경사항이 있어. 새로고침 후 다시 확인해줘.",409);
     const paths = allowedKinds.map(k=>row.raw_data?.simple_images?.[k]).filter((p):p is string=>typeof p==="string"&&p.length>0);
     if (paths.length) await sb.storage.from(BUCKET).remove(paths);
     return NextResponse.json({ok:true});

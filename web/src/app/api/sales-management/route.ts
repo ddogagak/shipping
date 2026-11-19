@@ -19,7 +19,7 @@ async function purchaseTotals() {
   for (const order of orders) {
     // 간이 기록이 별도로 정식 매입에 등록되었다고 표시된 경우 중복 매입비용에서 제외한다.
     // 같은 주문행을 정식 매입으로 전환한 건(simple_purchase=false)은 정상 집계한다.
-    if (order.raw_data?.simple_purchase === true && order.raw_data?.purchase_registered === true) continue;
+    if (order.raw_data?.simple_merged_into || (order.raw_data?.simple_purchase === true && order.raw_data?.purchase_registered === true)) continue;
     // 상품 표시 통화(currency)와 실제 결제 통화(payment_currency)는 다를 수 있다.
     // 예: 일본 구매대행 상품은 JPY이지만 1·2차금은 KRW로 결제한다.
     const currency = String(order.raw_data?.payment_currency || order.currency || "").toUpperCase().trim();
@@ -56,12 +56,20 @@ async function purchaseTotals() {
     includedOrders++;
     // 매출관리의 매입 집계는 등록일(created_at)이 아닌 실제 매입일(ordered_at) 기준이다.
     // 과거 명세서를 오늘 등록하더라도 해당 과거 월/분기에만 반영한다.
-    const day = purchaseDateKey(order.ordered_at);
-    if (!day) continue;
-    const month = day.slice(0, 7);
-    const quarter = day.slice(0, 4) + "-Q" + (Math.floor((Number(day.slice(5, 7)) - 1) / 3) + 1);
-    monthly[month] = (monthly[month] || 0) + won + secondWon;
-    quarterly[quarter] = (quarterly[quarter] || 0) + won + secondWon;
+    const payments = Array.isArray(order.raw_data?.simple_merge_payments) ? order.raw_data.simple_merge_payments : [];
+    const paymentTotal = payments.reduce((sum: number, p: any) => sum + Number(p.paid_amount || 0), 0);
+    // Preserve original payment months even when the merged order is later split on receipt.
+    const allocations = currency === "KRW" && paymentTotal > 0
+      ? payments.map((p: any) => ({ day: purchaseDateKey(p.ordered_at), amount: (won + secondWon) * Number(p.paid_amount || 0) / paymentTotal }))
+      : [{ day: purchaseDateKey(order.ordered_at), amount: won + secondWon }];
+    for (const allocation of allocations) {
+      const day = allocation.day;
+      if (!day) continue;
+      const month = day.slice(0, 7);
+      const quarter = day.slice(0, 4) + "-Q" + (Math.floor((Number(day.slice(5, 7)) - 1) / 3) + 1);
+      monthly[month] = (monthly[month] || 0) + allocation.amount;
+      quarterly[quarter] = (quarterly[quarter] || 0) + allocation.amount;
+    }
   }
   return { monthly, quarterly, cumulative, included_orders: includedOrders, unsupported_currencies: Array.from(unsupportedCurrencies), exchange_rates: PURCHASE_EXCHANGE_RATE, overseas_tax_multiplier: OVERSEAS_TAX_MULTIPLIER, overseas_shipping_per_order_krw: OVERSEAS_SHIPPING_PER_ORDER_KRW };
 }
