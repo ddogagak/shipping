@@ -16,6 +16,18 @@ const btn: CSSProperties = { ...field, cursor: "pointer", fontWeight: 750, fontS
 const th: CSSProperties = { textAlign: "left", padding: "9px 10px", fontSize: 12, color: "#64748b", borderBottom: "1px solid #cbd5e1", whiteSpace: "nowrap" };
 const td: CSSProperties = { padding: "9px 10px", borderBottom: "1px solid #e2e8f0", fontSize: 13, verticalAlign: "middle" };
 const won = (n: number) => Math.round(n || 0).toLocaleString("ko-KR") + "원";
+// Exact KRW price searches accept both typed numbers and copied currency labels.
+function parsePriceSearch(value:string):number|null {
+  const raw=value.normalize('NFKC').trim().replace(/^₩\s*/, '').replace(/\s*원$/, '').replace(/[\s,]/g,'');
+  if(!/^\d+$/.test(raw))return null;
+  const price=Number(raw);
+  return Number.isSafeInteger(price)?price:null;
+}
+function matchesPriceSearch(query:string,prices:Array<number|null|undefined>):boolean {
+  if(!query.trim())return true;
+  const price=parsePriceSearch(query);
+  return price!==null && prices.some(p=>typeof p==='number'&&Number.isFinite(p)&&p===price);
+}
 const kst = (s: string | null) => s ? new Date(s).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }) : "—";
 function familyOf(row: Sale) {
   const name = baseProductName(row.item_name);
@@ -50,8 +62,10 @@ export default function WiseInventoryLinkPage() {
   const [inventoryNames,setInventoryNames]=useState<Record<string,string>>({});
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [groupSearch, setGroupSearch] = useState("");
+  const [salePriceSearch,setSalePriceSearch]=useState("");
   const [saleSort,setSaleSort]=useState<"quantity"|"price_desc"|"price_asc">("quantity");
   const [candidateSearch, setCandidateSearch] = useState("");
+  const [candidatePriceSearch,setCandidatePriceSearch]=useState("");
   const [candidateType, setCandidateType] = useState("all");
   const [targets, setTargets] = useState<Record<string, number>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -133,18 +147,18 @@ export default function WiseInventoryLinkPage() {
     return [...map.values()].sort((a, b) => b.count - a.count || a.title.localeCompare(b.title));
   }, [sales]);
   const filteredGroups = useMemo(() => familyGroups.filter(g =>
-    (!onlyUnlinked || g.linked < g.count) && (!groupSearch || g.title.toLowerCase().includes(groupSearch.trim().toLowerCase()))
-  ).sort((a,b)=>(saleSort==='price_desc'?b.price-a.price:saleSort==='price_asc'?a.price-b.price:0)||b.count-a.count||a.title.localeCompare(b.title)), [familyGroups, groupSearch, onlyUnlinked,saleSort]);
+    (!onlyUnlinked || g.linked < g.count) && (!groupSearch || g.title.toLowerCase().includes(groupSearch.trim().toLowerCase()) || (parsePriceSearch(groupSearch)!==null&&matchesPriceSearch(groupSearch,[g.price]))) && matchesPriceSearch(salePriceSearch,[g.price])
+  ).sort((a,b)=>(saleSort==='price_desc'?b.price-a.price:saleSort==='price_asc'?a.price-b.price:0)||b.count-a.count||a.title.localeCompare(b.title)), [familyGroups, groupSearch, onlyUnlinked,saleSort,salePriceSearch]);
   const filteredCandidates = useMemo(() => {
     const query = normalizeProductName(candidateSearch);
     const chosen = sales.filter(row => selected[row.id]);
     // Compare distinct selected families rather than every identical sale row.
     const samples = [...new Map(chosen.map(row=>[familyOf(row).key,row])).values()];
     return candidates.filter(c => (candidateType === "all" || c.type === candidateType) &&
-      (!query || [c.name, c.option, c.series, c.purchase_date, c.item_type].some(v => normalizeProductName(v).includes(query))))
+      (!query || [c.name, c.option, c.series, c.purchase_date, c.item_type].some(v => normalizeProductName(v).includes(query)) || (parsePriceSearch(candidateSearch)!==null&&matchesPriceSearch(candidateSearch,[c.sale_price,...(c.reference_prices||[])]))) && matchesPriceSearch(candidatePriceSearch,[c.sale_price,...(c.reference_prices||[])]))
       .map(c=>({...c, recommendation:samples.map(s=>recommendInventory(s,c)).sort((a,b)=>b.score-a.score)[0]||{score:0,reason:""}}))
       .sort((a,b)=>b.recommendation.score-a.recommendation.score).slice(0,150);
-  }, [candidateSearch, candidates, candidateType, sales, selected]);
+  }, [candidateSearch, candidatePriceSearch, candidates, candidateType, sales, selected]);
   const candidateNames = useMemo(() => new Map([...Object.entries(inventoryNames),...candidates.map(c => [c.type + "|" + c.id, c.name + (c.option ? " · " + c.option : "")] as [string,string])]), [candidates,inventoryNames]);
   const selectedIds = useMemo(() => sales.filter(s => selected[s.id]).map(s => s.id), [sales, selected]);
   const selectedSales = useMemo(()=>sales.filter(s=>selected[s.id]),[sales,selected]);
@@ -233,7 +247,8 @@ export default function WiseInventoryLinkPage() {
       <section style={panel}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <div><b style={{ fontSize: 17 }}>실제 판매기록</b><div style={{ fontSize: 12, color: "#64748b" }}>전체 {sales.length}개 · 연결 {linkedCount}개 · 미연결 {sales.length - linkedCount}개</div></div>
-          <input aria-label="판매상품 검색" placeholder="판매상품 이름 검색" value={groupSearch} onChange={e => setGroupSearch(e.target.value)} style={field} />
+          <input aria-label="판매상품 검색" placeholder="상품명 / 판매가 검색" value={groupSearch} onChange={e => setGroupSearch(e.target.value)} style={field} />
+          <input aria-label="실제 판매가 검색" inputMode="numeric" placeholder="판매가 (예: 3700)" value={salePriceSearch} onChange={e=>setSalePriceSearch(e.target.value)} style={{...field,width:140}} />
           <select aria-label="판매목록 정렬" value={saleSort} onChange={e=>setSaleSort(e.target.value as typeof saleSort)} style={field}><option value="quantity">판매수량 많은순</option><option value="price_desc">판매가 높은순</option><option value="price_asc">판매가 낮은순</option></select>
           <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}><input type="checkbox" checked={onlyUnlinked} onChange={e => setOnlyUnlinked(e.target.checked)} />미연결 포함만</label>
         </div>
@@ -254,7 +269,8 @@ export default function WiseInventoryLinkPage() {
       <aside style={{ ...panel, position: "sticky", top: 10 }}>
         <h2 style={{ fontSize: 17, margin: "0 0 8px" }}>연결할 방송판매재고</h2>
         <p style={{ fontSize: 12, color: "#64748b" }}>추천 순서: ① 동일 작품 → ② 동일 상품 종류 → ③ 판매가 ±10% 근접. 완판 상품도 과거 연결을 위해 유지해.</p>
-        <input aria-label="재고 검색" placeholder="재고명·작품명·매입일 검색" value={candidateSearch} onChange={e => setCandidateSearch(e.target.value)} style={{ ...field, width: "100%", boxSizing: "border-box" }} />
+        <input aria-label="재고 검색" placeholder="재고명·작품명·매입일·판매가 검색" value={candidateSearch} onChange={e => setCandidateSearch(e.target.value)} style={{ ...field, width: "100%", boxSizing: "border-box" }} />
+        <input aria-label="재고 등록 판매가 검색" inputMode="numeric" placeholder="등록 판매가 (예: 3700)" value={candidatePriceSearch} onChange={e=>setCandidatePriceSearch(e.target.value)} style={{...field,width:"100%",boxSizing:"border-box",marginTop:6}} />
         <div style={{ display: "flex", gap: 8, margin: "9px 0" }}>
           <select aria-label="재고 구분" value={candidateType} onChange={e => setCandidateType(e.target.value)} style={{ ...field, flex: 1 }}>
             <option value="all">전체 재고</option><option value="purchase_item">매입상품</option><option value="inventory_group">동일상품 묶음</option><option value="random_box">랜덤박스</option>
