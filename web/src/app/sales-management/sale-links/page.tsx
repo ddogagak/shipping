@@ -4,10 +4,10 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { baseProductName, imageIdentity, normalizeProductName, recommendInventory } from "@/lib/wise-inventory-match";
 
-type LinkRow = { id: number; wise_stock_id: number | string; purchase_item_id: string | null; random_box_id: string | null; quantity: number; applied_units: number };
+type LinkRow = { id: number; wise_stock_id: number | string; purchase_item_id: string | null; random_box_id: string | null; inventory_group_id: string | null; quantity: number; applied_units: number };
 type Sale = { id: string; video_id: string; wise_user_id: string | null; buyer_nickname: string; item_name: string; item_price: number; image_url: string | null; sold_at: string | null; links: LinkRow[] };
 type Show = { video_id: string; first_sale: string; last_sale: string; revenue: number; count: number; buyer_count: number };
-type Candidate = { type: "purchase_item" | "random_box"; id: string; name: string; option: string; image_url: string | null; series: string; unit_price: number; currency: string; component_count: number; sale_price: number | null; stock_status: string; purchase_date: string; item_type: string; remaining_units: number; random_member: boolean };
+type Candidate = { type: "purchase_item" | "random_box" | "inventory_group"; id: string; name: string; option: string; image_url: string | null; series: string; unit_price: number; currency: string; component_count: number; sale_price: number | null; stock_status: string; purchase_date: string; item_type: string; remaining_units: number; random_member: boolean };
 type Family = { key: string; title: string; count: number; revenue: number; linked: number; image: string | null; items: Sale[] };
 
 const panel: CSSProperties = { border: "1px solid #e2e8f0", borderRadius: 13, padding: 16, background: "#fff" };
@@ -38,7 +38,7 @@ function monthNow() {
   return (parts.find(x => x.type === "year")?.value || "") + "-" + (parts.find(x => x.type === "month")?.value || "");
 }
 function targetKey(row: LinkRow) {
-  return row.purchase_item_id ? "purchase_item|" + row.purchase_item_id : row.random_box_id ? "random_box|" + row.random_box_id : "";
+  return row.inventory_group_id ? "inventory_group|"+row.inventory_group_id : row.purchase_item_id ? "purchase_item|" + row.purchase_item_id : row.random_box_id ? "random_box|" + row.random_box_id : "";
 }
 export default function WiseInventoryLinkPage() {
   const [month, setMonth] = useState(monthNow);
@@ -47,6 +47,7 @@ export default function WiseInventoryLinkPage() {
   const [videoIds, setVideoIds] = useState<string[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [inventoryNames,setInventoryNames]=useState<Record<string,string>>({});
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [groupSearch, setGroupSearch] = useState("");
   const [candidateSearch, setCandidateSearch] = useState("");
@@ -98,6 +99,7 @@ export default function WiseInventoryLinkPage() {
     try {
       const data = await requestJson("/api/sales-management/sale-links?mode=inventory");
       setCandidates(data.candidates || []);
+      setInventoryNames(data.names||{});
     } catch (e) { setError(e instanceof Error ? e.message : "재고 조회 실패"); }
     finally { setLoadingInventory(false); }
   }, []);
@@ -130,7 +132,7 @@ export default function WiseInventoryLinkPage() {
       .map(c=>({...c, recommendation:samples.map(s=>recommendInventory(s,c)).sort((a,b)=>b.score-a.score)[0]||{score:0,reason:""}}))
       .sort((a,b)=>b.recommendation.score-a.recommendation.score).slice(0,150);
   }, [candidateSearch, candidates, candidateType, sales, selected]);
-  const candidateNames = useMemo(() => new Map(candidates.map(c => [c.type + "|" + c.id, c.name + (c.option ? " · " + c.option : "")])), [candidates]);
+  const candidateNames = useMemo(() => new Map([...Object.entries(inventoryNames),...candidates.map(c => [c.type + "|" + c.id, c.name + (c.option ? " · " + c.option : "")] as [string,string])]), [candidates,inventoryNames]);
   const selectedIds = useMemo(() => sales.filter(s => selected[s.id]).map(s => s.id), [sales, selected]);
   const selectedSales = useMemo(()=>sales.filter(s=>selected[s.id]),[sales,selected]);
   const applicableSales = selectedSales.filter(s=>deductionMode==="historical" || deductionMode==="future" && cutover && s.sold_at && new Date(s.sold_at)>=new Date(cutover));
@@ -151,6 +153,7 @@ export default function WiseInventoryLinkPage() {
     const ids = single ? [single.saleId] : selectedIds;
     if (!videoIds.length || !ids.length || busy) return;
     if (action === "link" && !selectedTargets.length) { setError("오른쪽에서 연결할 방송판매재고를 체크해줘."); return; }
+    if(action==='link'&&selectedTargets.some(c=>c.type==='inventory_group')&&selectedTargets.length!==1){setError('동일상품 묶음은 한 번에 하나만 선택해줘.');return;}
     if(action==="link" && deductionMode==="historical" && !window.confirm("과거 판매도 실제 차감합니다. 이미 수동으로 차감한 판매는 중복될 수 있어. 미리보기 수량을 확인했나요?"))return;
     setBusy(true); setError(""); setMessage("");
     try {
@@ -161,8 +164,8 @@ export default function WiseInventoryLinkPage() {
         targets: action === "link" ? selectedTargets.map(row => ({
           target_type: row.type, target_id: row.id, quantity: row.quantity
         })) : undefined,
-        target_type: target ? (target.purchase_item_id ? "purchase_item" : "random_box") : undefined,
-        target_id: target ? (target.purchase_item_id || target.random_box_id) : undefined
+        target_type: target ? (target.inventory_group_id?'inventory_group':target.purchase_item_id ? "purchase_item" : "random_box") : undefined,
+        target_id: target ? (target.inventory_group_id||target.purchase_item_id || target.random_box_id) : undefined
       };
       const data = await requestJson("/api/sales-management/sale-links", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
@@ -239,7 +242,7 @@ export default function WiseInventoryLinkPage() {
         <input aria-label="재고 검색" placeholder="재고명·작품명·매입일 검색" value={candidateSearch} onChange={e => setCandidateSearch(e.target.value)} style={{ ...field, width: "100%", boxSizing: "border-box" }} />
         <div style={{ display: "flex", gap: 8, margin: "9px 0" }}>
           <select aria-label="재고 구분" value={candidateType} onChange={e => setCandidateType(e.target.value)} style={{ ...field, flex: 1 }}>
-            <option value="all">전체 재고</option><option value="purchase_item">매입상품</option><option value="random_box">랜덤박스</option>
+            <option value="all">전체 재고</option><option value="purchase_item">매입상품</option><option value="inventory_group">동일상품 묶음</option><option value="random_box">랜덤박스</option>
           </select>
           <button style={btn} onClick={() => void loadInventory()} disabled={loadingInventory}>{loadingInventory ? "조회 중" : "재고 갱신"}</button>
         </div>
@@ -249,7 +252,7 @@ export default function WiseInventoryLinkPage() {
             <input type="checkbox" checked={Boolean(targets[c.type + "|" + c.id])} onChange={event => { const key = c.type + "|" + c.id; setTargets(prev => { const next = {...prev}; if (event.target.checked) next[key] = 1; else delete next[key]; return next; }); }} />
             {c.image_url ? <img src={c.image_url} alt="" loading="lazy" style={{ width: 48, height: 48, objectFit: "contain", borderRadius: 5 }} /> : <span style={{ width: 48, height: 48, display: "grid", placeItems: "center", background: "#f1f5f9", borderRadius: 5, fontSize: 10 }}>사진 없음</span>}
             <span style={{ flex: 1, minWidth: 0, fontSize: 12 }}><b>{c.name}</b><br />
-              <span style={{ color: "#64748b" }}>{c.type === "random_box" ? "랜덤박스" : "매입상품"} · {c.option || c.series || "옵션 없음"}<br />{c.sale_price != null ? "판매가 " + won(c.sale_price) + " · " : ""}{c.component_count}개 구성 · 잔여 {c.remaining_units}개 {c.random_member?"· 랜덤박스 구성품(연결만 가능)":""}</span>{c.recommendation.reason&&<span style={{display:"block",color:"#166534",fontWeight:700}}>{c.recommendation.reason}</span>}
+              <span style={{ color: "#64748b" }}>{c.type === "random_box" ? "랜덤박스" : c.type==='inventory_group'?'묶음 재고':"매입상품"} · {c.option || c.series || "옵션 없음"}<br />{c.sale_price != null ? "판매가 " + won(c.sale_price) + " · " : ""}{c.type==='inventory_group'?'오래된 입고부터 차감':`${c.component_count}개 구성`} · 잔여 {c.remaining_units}개 {c.random_member?"· 랜덤박스 구성품(연결만 가능)":""}</span>{c.recommendation.reason&&<span style={{display:"block",color:"#166534",fontWeight:700}}>{c.recommendation.reason}</span>}
             </span>
           </label>)}
           {!filteredCandidates.length && <p style={{ fontSize: 13, color: "#64748b", padding: 12 }}>검색 결과가 없어.</p>}

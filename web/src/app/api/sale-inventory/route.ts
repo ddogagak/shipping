@@ -250,7 +250,7 @@ export async function GET(req: Request) {
     );
 
     if (completedRepairs.length) await Promise.all(completedRepairs);
-    return NextResponse.json({ ok: true, items });
+    return NextResponse.json({ ok: true, items, group_sales:(actualSales||[]).filter((row:any)=>row.target_type==='inventory_group') });
   } catch (e) {
     return NextResponse.json(
       { ok: false, message: errorMessage(e, "판매재고 조회 실패") },

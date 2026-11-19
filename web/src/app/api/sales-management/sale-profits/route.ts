@@ -5,7 +5,7 @@ import { calculatePricing, calculateDomesticSalePricing } from "@/lib/pricing";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type Link = { wise_stock_id: number | string; purchase_item_id: string | null; random_box_id: string | null; quantity: number };
+type Link = { wise_stock_id: number | string; purchase_item_id: string | null; random_box_id: string | null; inventory_group_id:string|null; group_allocations:Array<{lot_id:string;units:number}>; quantity: number };
 type CostTarget = { name: string; unit_cost: number | null; kind: "purchase" | "random_box" };
 const BATCH = 300;
 
@@ -26,7 +26,7 @@ async function getAllLinks(sb: ReturnType<typeof createServiceRoleClient>): Prom
   const all: Link[] = [];
   for (let offset = 0; ; offset += 1000) {
     const { data, error } = await sb.from("wise_sale_inventory_links")
-      .select("wise_stock_id,purchase_item_id,random_box_id,quantity")
+      .select("wise_stock_id,purchase_item_id,random_box_id,inventory_group_id,group_allocations,quantity")
       .order("wise_stock_id", { ascending: true }).range(offset, offset + 999);
     if (error) throw error;
     const rows = (data || []) as Link[];
@@ -49,13 +49,15 @@ export async function GET() {
   try {
     const sb = createServiceRoleClient();
     const links = await getAllLinks(sb);
-    const purchaseIds = [...new Set(links.map(row => row.purchase_item_id).filter((id): id is string => Boolean(id)))];
+    const purchaseIds = [...new Set(links.flatMap(row => [row.purchase_item_id,...(row.group_allocations||[]).map(a=>a.lot_id)]).filter((id): id is string => Boolean(id)))];
     const randomBoxIds = [...new Set(links.map(row => row.random_box_id).filter((id): id is string => Boolean(id)))];
+    const groupIds=[...new Set(links.map(row=>row.inventory_group_id).filter((id):id is string=>Boolean(id)))];
 
-    const [purchaseItems, ledgers, randomBoxes] = await Promise.all([
+    const [purchaseItems, ledgers, randomBoxes, inventoryGroups] = await Promise.all([
       fetchInBatches(sb, "purchase_items", "id,purchase_order_id,product_name,display_name_ko,option_text,unit_price,component_count,sourcing_inventory_id", "id", purchaseIds),
       fetchInBatches(sb, "purchase_sale_inventory", "purchase_item_id,display_name,purchase_price_override,component_count_override", "purchase_item_id", purchaseIds),
-      fetchInBatches(sb, "sale_random_boxes", "id,title,total_cost_krw,component_count", "id", randomBoxIds)
+      fetchInBatches(sb, "sale_random_boxes", "id,title,total_cost_krw,component_count", "id", randomBoxIds),
+      fetchInBatches(sb,"sale_inventory_groups","id,title","id",groupIds)
     ]);
     const orderIds = [...new Set(purchaseItems.map(row => String(row.purchase_order_id || "")).filter(Boolean))];
     const sourcingIds = [...new Set(purchaseItems.map(row => String(row.sourcing_inventory_id || "")).filter(Boolean))];
@@ -68,6 +70,7 @@ export async function GET() {
     const ledgerById = new Map(ledgers.map(row => [String(row.purchase_item_id), row]));
     const sourcingById = new Map(sourcing.map(row => [String(row.id), row]));
     const targetById = new Map<string, CostTarget>();
+    const groupNames=new Map(inventoryGroups.map(g=>[String(g.id),String(g.title)]));
 
     for (const item of purchaseItems) {
       const ledger = ledgerById.get(String(item.id));
@@ -106,6 +109,16 @@ export async function GET() {
     }>();
     for (const row of links) {
       const stockId = String(row.wise_stock_id);
+      if(row.inventory_group_id){
+        const name=groupNames.get(row.inventory_group_id)||'동일상품 묶음',quantity=firstCount(row.quantity),alloc=row.group_allocations||[];
+        const group=grouped.get(stockId)||{wise_stock_id:stockId,name:[],total_cost:0,unknown_cost:false,parts:[]};
+        const units=alloc.reduce((s,a)=>s+Number(a.units),0);
+        const known=units===quantity&&alloc.every(a=>targetById.get('purchase:'+a.lot_id)?.unit_cost!=null);
+        const cost=known?alloc.reduce((s,a)=>s+Number(targetById.get('purchase:'+a.lot_id)?.unit_cost)*Number(a.units),0):null;
+        group.name.push(name);if(cost==null)group.unknown_cost=true;else group.total_cost+=cost;
+        group.parts.push({target_id:row.inventory_group_id,target_type:'purchase',name,quantity,unit_cost:cost==null?null:cost/quantity});
+        grouped.set(stockId,group);continue;
+      }
       const key = row.purchase_item_id ? "purchase:" + row.purchase_item_id : "random_box:" + row.random_box_id;
       const target = targetById.get(key);
       const quantity = firstCount(row.quantity);

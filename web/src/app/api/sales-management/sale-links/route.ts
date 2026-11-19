@@ -84,7 +84,7 @@ async function getSales(videoIds: string[]) {
   for (let i = 0; i < sales.length; i += MAX_UPDATE) {
     const ids = sales.slice(i, i + MAX_UPDATE).map(row => String(row.wise_stock_id));
     const { data, error } = await sb.from("wise_sale_inventory_links")
-      .select("id,wise_stock_id,purchase_item_id,random_box_id,quantity,applied_units,updated_at")
+      .select("id,wise_stock_id,purchase_item_id,random_box_id,inventory_group_id,quantity,applied_units,updated_at")
       .in("wise_stock_id", ids);
     if (error) throw error;
     links.push(...(data || []));
@@ -112,7 +112,7 @@ async function getSales(videoIds: string[]) {
 }
 async function getInventory() {
   const sb = createServiceRoleClient();
-  const [ordersResult, ledgerResult, boxesResult, membersResult, exclusionsResult, sourcingResult] = await Promise.all([
+  const [ordersResult, ledgerResult, boxesResult, membersResult, exclusionsResult, sourcingResult, groupsResult] = await Promise.all([
     sb.from("purchase_orders")
       .select("id,order_number,ordered_at,currency,source_site,raw_data,order_status,purchase_items(id,product_name,display_name_ko,option_text,image_url,series_name,item_type,unit_price,component_count,quantity,received_quantity,sourcing_inventory_id)")
       .eq("order_status", "입고완료").order("ordered_at", { ascending: false }),
@@ -123,7 +123,8 @@ async function getInventory() {
       .order("created_at", { ascending: false }),
     sb.from("sale_random_box_members").select("purchase_item_id,random_box_id"),
     sb.from("sale_inventory_exclusions").select("purchase_item_id"),
-    sb.from("inventory_items").select("id,component_count,item_name,series_name,item_type,image_url")
+    sb.from("inventory_items").select("id,component_count,item_name,series_name,item_type,image_url"),
+    sb.from("sale_inventory_groups").select("id,title,active,sale_inventory_group_members(purchase_item_id)")
   ]);
   if (ordersResult.error) throw ordersResult.error;
   if (ledgerResult.error) throw ledgerResult.error;
@@ -131,6 +132,7 @@ async function getInventory() {
   if (membersResult.error) throw membersResult.error;
   if (exclusionsResult.error) throw exclusionsResult.error;
   if (sourcingResult.error) throw sourcingResult.error;
+  if (groupsResult.error) throw groupsResult.error;
   const sourcing = new Map((sourcingResult.data || []).map(x=>[String(x.id),x]));
   const members = new Set((membersResult.data || []).map(x => String(x.purchase_item_id)));
   const excluded = new Set((exclusionsResult.data || []).map(x => String(x.purchase_item_id)));
@@ -172,7 +174,21 @@ async function getInventory() {
       purchase_date: box.created_at || ""
     });
   }
-  return NextResponse.json({ ok: true, candidates });
+  const hiddenIds=new Set<string>();
+  const groupCandidates:any[]=[];
+  const names:Record<string,string>={};
+  for(const c of candidates) names[c.type+'|'+c.id]=c.name;
+  for(const group of groupsResult.data||[]){
+    names['inventory_group|'+group.id]=group.title;
+    if(!group.active)continue;
+    const ids=new Set((group.sale_inventory_group_members||[]).map(m=>String(m.purchase_item_id)));
+    const lots=candidates.filter(c=>c.type==='purchase_item'&&ids.has(c.id));
+    if(!lots.length)continue;
+    lots.forEach(c=>hiddenIds.add(c.id));
+    const first=lots[0],remaining=lots.reduce((s,c)=>s+c.remaining_units,0);
+    groupCandidates.push({...first,id:group.id,type:'inventory_group',name:group.title,option:`동일상품 묶음 · ${lots.length}차수`,remaining_units:remaining,stock_status:remaining?'active':'soldout',sale_price:null,random_member:false});
+  }
+  return NextResponse.json({ ok: true, candidates:[...groupCandidates,...candidates.filter(c=>!hiddenIds.has(c.id))], names });
 }
 
 export async function GET(request: Request) {
@@ -208,7 +224,7 @@ export async function POST(request: Request) {
       const type = String(body.target_type || "");
       const targetId = String(body.target_id || "");
       if (type || targetId) {
-        if (!["purchase_item", "random_box"].includes(type) ||
+        if (!["purchase_item", "random_box", "inventory_group"].includes(type) ||
           !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId)) {
           return fail("해제할 재고 연결이 올바르지 않아.");
         }
@@ -223,7 +239,7 @@ export async function POST(request: Request) {
     const inputTargets: unknown[] = Array.isArray(body.targets) ? body.targets :
       [{ target_type: body.target_type, target_id: body.target_id, quantity: body.quantity ?? 1 }];
     if (inputTargets.length < 1 || inputTargets.length > 16) return fail("방송판매재고를 1~16개 선택해줘.");
-    const targets: Array<{target_type: "purchase_item" | "random_box"; target_id: string; quantity: number}> = [];
+    const targets: Array<{target_type: "purchase_item" | "random_box" | "inventory_group"; target_id: string; quantity: number}> = [];
     const seen = new Set<string>();
     for (const input of inputTargets) {
       if (!input || typeof input !== "object") return fail("재고 선택 정보가 올바르지 않아.");
@@ -231,7 +247,7 @@ export async function POST(request: Request) {
       const type = String(row.target_type || "");
       const targetId = String(row.target_id || "");
       const quantity = Number(row.quantity);
-      if (!["purchase_item", "random_box"].includes(type) ||
+      if (!["purchase_item", "random_box", "inventory_group"].includes(type) ||
         !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId) ||
         !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 9999) {
         return fail("재고 종류·ID 또는 연결 수량(1~9999)을 확인해줘.");
@@ -239,7 +255,7 @@ export async function POST(request: Request) {
       const key = type + "|" + targetId;
       if (seen.has(key)) return fail("중복 선택된 방송판매재고가 있어.");
       seen.add(key);
-      targets.push({target_type: type as "purchase_item" | "random_box", target_id: targetId, quantity});
+      targets.push({target_type: type as "purchase_item" | "random_box" | "inventory_group", target_id: targetId, quantity});
     }
     if (ids.length * targets.length > 1200) return fail("한 번에 최대 1,200개 연결을 저장할 수 있어.");
 
