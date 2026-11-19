@@ -14,7 +14,7 @@ export default async function DomesticInventoryPage() {
   if (error) {
     return (
       <main style={{ padding: 24 }}>
-        <h1>인벤토리</h1>
+        <h1>소싱 DB</h1>
         <p>DB 조회 실패: {error.message}</p>
       </main>
     );

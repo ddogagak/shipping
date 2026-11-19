@@ -51,11 +51,11 @@ export default async function HomePage() {
           <Link href="/archive" style={cardStyle()}><div style={titleStyle}>보관소</div><p style={descStyle}>PDF / 엑셀 파일을 업로드하고 내려받습니다.</p></Link>
         </div>
 
-        <h2 style={sectionTitleMarginStyle}>Inventory</h2>
+        <h2 style={sectionTitleMarginStyle}>Inventory · 소싱</h2>
         <div style={gridStyle}>
-          <Link href="/domestic-inventory-input" style={cardStyle()}><div style={titleStyle}>Inventory Input</div><p style={descStyle}>주문내역 / 이미지 URL 기반 재고 등록</p></Link>
-          <Link href="/domestic-inventory-cards" style={cardStyle()}><div style={titleStyle}>Inventory Cards</div><p style={descStyle}>카드형 이미지 기반 재고 관리</p></Link>
-          <Link href="/domestic-inventory" style={cardStyle()}><div style={titleStyle}>Inventory DB</div><p style={descStyle}>DB 테이블 형태 전체 재고 관리</p></Link>
+          <Link href="/domestic-inventory-input" style={cardStyle()}><div style={titleStyle}>소싱 등록</div><p style={descStyle}>상품 정보 / 이미지 URL 기반 소싱 상품 등록</p></Link>
+          <Link href="/domestic-inventory-cards" style={cardStyle()}><div style={titleStyle}>소싱 카드</div><p style={descStyle}>카드형 이미지 기반 소싱 상품 관리</p></Link>
+          <Link href="/domestic-inventory" style={cardStyle()}><div style={titleStyle}>소싱 DB</div><p style={descStyle}>전체 소싱 상품 조회 · 원가 · 예상판매가 관리</p></Link>
           <Link href="/sourcing-research" style={cardStyle()}><div style={titleStyle}>Sourcing Research</div><p style={descStyle}>사입 전 상품 링크, 원가, 예상 판매가를 저장하고 이윤을 계산합니다.</p></Link>
         </div>
 

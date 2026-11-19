@@ -15,7 +15,7 @@ export default async function DomesticInventoryCardsPage() {
   if (error) {
     return (
       <main style={{ padding: 24 }}>
-        <h1>국내 재고 카드 관리</h1>
+        <h1>소싱 카드</h1>
         <pre>{error.message}</pre>
       </main>
     );

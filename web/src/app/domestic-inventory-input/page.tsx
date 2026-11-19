@@ -354,16 +354,16 @@ export default function DomesticInventoryInputPage() {
     <main style={pageStyle}>
       <div style={topBarStyle}>
         <div>
-          <h1 style={titleStyle}>국내 재고 입력</h1>
+          <h1 style={titleStyle}>소싱 등록</h1>
           <p style={subTextStyle}>
-            직접 입력 / GPT 정리 텍스트 붙여넣기로 재고를 등록합니다.
+            직접 입력 / GPT 정리 텍스트로 소싱 상품을 등록합니다. 실제 매입·입고 재고는 매입관리에서 관리합니다.
           </p>
         </div>
 
         <div style={{ display: "flex", gap: 8 }}>
           <Link href="/" style={linkButtonStyle}>메인</Link>
-          <Link href="/domestic-inventory-cards" style={linkButtonStyle}>카드형 보기</Link>
-          <Link href="/domestic-inventory" style={linkButtonStyle}>인벤토리</Link>
+          <Link href="/domestic-inventory-cards" style={linkButtonStyle}>소싱 카드</Link>
+          <Link href="/domestic-inventory" style={linkButtonStyle}>소싱 DB</Link>
         </div>
       </div>
 
@@ -420,7 +420,7 @@ export default function DomesticInventoryInputPage() {
           </>
         ) : inputMode === "text" ? (
           <>
-            <h2 style={panelTitleStyle}>재고 입력 텍스트 붙여넣기</h2>
+            <h2 style={panelTitleStyle}>소싱 등록 텍스트 붙여넣기</h2>
             <textarea
               value={rawText}
               onChange={(e) => setRawText(e.target.value)}
