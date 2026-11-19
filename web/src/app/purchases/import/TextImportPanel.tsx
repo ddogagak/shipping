@@ -485,7 +485,8 @@ function PurchasePreview({
           : match
             ? {
                 ...item,
-                sourcing_inventory_id: match.id,
+                sourcing_inventory_id: match.match_source === "sale" ? null : match.id,
+                matched_sale_purchase_item_id: match.match_source === "sale" ? match.id : null,
                 series_name: match.series_name || item.series_name,
                 item_type: match.item_type || item.item_type,
                 image_url: match.image_url || item.image_url,
@@ -495,7 +496,7 @@ function PurchasePreview({
                 component_count:
                   item.component_count || match.component_count || null,
               }
-            : { ...item, sourcing_inventory_id: null },
+            : { ...item, sourcing_inventory_id: null, matched_sale_purchase_item_id: null },
       ),
     });
   };
@@ -606,7 +607,7 @@ function PurchasePreview({
         클릭하고 <b>Ctrl+V</b> 하면 대표 이미지로 들어가.
       </p>
       <p style={pasteGuide}>
-        재입고 상품은 아래 상품별 인벤토리 매칭에서 기존 제품을 선택해줘. 매입
+        재입고 상품은 아래 상품별 매칭에서 소싱 인벤토리 또는 방송판매재고의 기존 제품을 선택해줘. 매입
         단가·수량은 이번 명세서 값 그대로 유지돼. 신규 상품은 매칭하지 않아도
         등록할 수 있어.
       </p>

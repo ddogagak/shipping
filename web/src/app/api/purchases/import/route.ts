@@ -7,13 +7,39 @@ import {
   type DomesticPurchase,
 } from "@/lib/purchases/domestic-text";
 import { normalizeSeriesName } from "@/lib/series";
+import { GET as getSaleInventory } from "@/app/api/sale-inventory/route";
 
 export const runtime = "nodejs";
 
 const inventoryMatchColumns =
   "id,item_name,series_name,item_type,image_url,lineup_image_url,source_url,source_product_id,internal_sku,option_seq,component_count,order_number";
 
-export async function GET() {
+async function saleMatches(req: Request) {
+  const response = await getSaleInventory(new Request(new URL("/api/sale-inventory?read_only=1", req.url)));
+  const result = await response.json();
+  if (!response.ok || !result.ok) throw new Error(result.message || "방송판매재고 조회 실패");
+  return (result.items ?? []).map((row: any) => ({
+    id: String(row.id),
+    match_source: "sale" as const,
+    item_name: row.display_name || row.product_name,
+    original_name: row.product_name,
+    option_text: row.option_text,
+    series_name: row.series_name,
+    item_type: row.item_type,
+    image_url: row.image_url,
+    lineup_image_url: row.lineup_image_url,
+    source_url: row.source_url || row.product_url,
+    source_product_id: row.source_product_id,
+    internal_sku: row.internal_sku,
+    sourcing_inventory_id: row.resolved_sourcing_inventory_id,
+    option_seq: row.option_seq,
+    component_count: row.component_count,
+    order_number: row.order_number,
+    view_status: row.view_status,
+  }));
+}
+
+export async function GET(req: Request) {
   try {
     const sb = createServiceRoleClient();
     const items: any[] = [];
@@ -28,7 +54,8 @@ export async function GET() {
       items.push(...(data ?? []));
       if ((data?.length ?? 0) < pageSize) break;
     }
-    return NextResponse.json({ ok: true, items });
+    const sales = await saleMatches(req);
+    return NextResponse.json({ ok: true, items: [...items, ...sales] });
   } catch (e) {
     return NextResponse.json(
       {
@@ -190,6 +217,14 @@ export async function POST(req: Request) {
         ),
       ];
       const manualMatches = new Map<string, any>();
+      const saleIds = [...new Set(purchase.items.map((item) => String(item.matched_sale_purchase_item_id || "").trim()).filter(Boolean))];
+      const manualSaleMatches = new Map<string, any>();
+      if (saleIds.length) {
+        for (const row of await saleMatches(req)) manualSaleMatches.set(row.id, row);
+        if (saleIds.some((id) => !manualSaleMatches.has(id))) {
+          return NextResponse.json({ ok: false, message: "선택한 방송판매재고가 없어졌어. 다시 매칭해줘." }, { status: 409 });
+        }
+      }
       if (matchIds.length) {
         const { data, error } = await sb
           .from("inventory_items")
@@ -245,6 +280,7 @@ export async function POST(req: Request) {
         component_count: item.component_count,
         quantity: item.quantity,
         memo: item.memo,
+        matched_sale_purchase_item_id: item.matched_sale_purchase_item_id || null,
       }));
       const totalAmount = Number(purchase.total_amount);
       if (
@@ -295,12 +331,17 @@ export async function POST(req: Request) {
       const rows = purchase.items.map((item) => {
         const quantity = Math.max(1, Math.trunc(Number(item.quantity || 1)));
         const unitPrice = Math.max(0, Math.round(Number(item.unit_price || 0)));
+        const saleMatch = manualSaleMatches.get(String(item.matched_sale_purchase_item_id || "").trim());
         const manualMatch = manualMatches.get(
           String(item.sourcing_inventory_id || "").trim(),
         );
         let sourcing: any = manualMatch || null;
         let sourceProductId = "";
-        if (manualMatch) {
+        if (saleMatch) {
+          sourcing = saleMatch.sourcing_inventory_id ? { id: saleMatch.sourcing_inventory_id, internal_sku: saleMatch.internal_sku } : null;
+          sourceProductId = String(saleMatch.source_product_id || "").trim() || extractSourceProductId(saleMatch.source_url) || "";
+          matchedCount++;
+        } else if (manualMatch) {
           sourceProductId =
             String(manualMatch.source_product_id || "").trim() ||
             extractSourceProductId(manualMatch.source_url) ||
@@ -326,7 +367,7 @@ export async function POST(req: Request) {
         return {
           purchase_order_id: order.id,
           product_name: item.product_name,
-          display_name_ko: manualMatch?.item_name || item.product_name,
+          display_name_ko: saleMatch?.item_name || manualMatch?.item_name || item.product_name,
           series_name: normalizeSeriesName(
             item.series_name,
             item.product_name,
@@ -334,7 +375,7 @@ export async function POST(req: Request) {
             item.memo,
           ),
           option_text: item.option_text || null,
-          product_url: manualMatch
+          product_url: saleMatch ? saleMatch.source_url || item.product_url || null : manualMatch
             ? manualMatch.source_url || null
             : item.product_url || null,
           image_url: item.image_url || null,
@@ -344,7 +385,7 @@ export async function POST(req: Request) {
           line_total: unitPrice * quantity,
           source_product_id: sourceProductId || null,
           sourcing_inventory_id: sourcing?.id || null,
-          internal_sku: sourcing?.internal_sku || null,
+          internal_sku: saleMatch?.internal_sku || sourcing?.internal_sku || null,
         };
       });
       const { error: itemError } = await sb.from("purchase_items").insert(rows);

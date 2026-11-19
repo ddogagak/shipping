@@ -4,6 +4,10 @@ import { useMemo, useState, type CSSProperties } from "react";
 
 export type InventoryMatch = {
   id: string;
+  match_source?: "sale";
+  original_name?: string | null;
+  option_text?: string | null;
+  view_status?: string | null;
   item_name: string;
   series_name: string | null;
   item_type: string | null;
@@ -47,14 +51,16 @@ export default function InventoryMatchPicker({
     option_text?: string;
     series_name?: string;
     sourcing_inventory_id?: string;
+    matched_sale_purchase_item_id?: string;
   };
   inventory: InventoryMatch[];
   onSelect: (match: InventoryMatch | null) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [source, setSource] = useState<"all" | "inventory" | "sale">("all");
   const selected = inventory.find(
-    (row) => row.id === item.sourcing_inventory_id,
+    (row) => row.match_source === "sale" ? row.id === item.matched_sale_purchase_item_id : row.id === item.sourcing_inventory_id,
   );
   const candidates = useMemo(() => {
     if (!open) return [];
@@ -64,10 +70,14 @@ export default function InventoryMatchPicker({
     const option = normalize(item.option_text);
     return inventory
       .map((row) => {
+        if (source !== "all" && (row.match_source || "inventory") !== source) return null;
         const rowName = normalize(row.item_name);
+        const originalName = normalize(row.original_name);
         const haystack = normalize(
           [
             row.item_name,
+            row.original_name,
+            row.option_text,
             row.series_name,
             row.item_type,
             row.internal_sku,
@@ -79,7 +89,7 @@ export default function InventoryMatchPicker({
         if (typed.length && !typed.every((word) => haystack.includes(word)))
           return null;
         let score = 0;
-        if (name && rowName === name) score += 100;
+        if (name && (rowName === name || originalName === name)) score += 100;
         else if (
           name &&
           rowName &&
@@ -87,7 +97,7 @@ export default function InventoryMatchPicker({
         )
           score += 50;
         score +=
-          nameWords.filter((word) => word.length >= 2 && rowName.includes(word))
+          nameWords.filter((word) => word.length >= 2 && (rowName.includes(word) || originalName.includes(word)))
             .length * 8;
         if (!typed.length && score === 0) return null;
         if (option && rowName.includes(option)) score += 12;
@@ -116,6 +126,7 @@ export default function InventoryMatchPicker({
     item.series_name,
     open,
     query,
+    source,
   ]);
 
   return (
@@ -138,7 +149,7 @@ export default function InventoryMatchPicker({
           flexWrap: "wrap",
         }}
       >
-        <b style={{ fontSize: 13 }}>인벤토리 매칭</b>
+        <b style={{ fontSize: 13 }}>기존 상품 매칭</b>
         <span
           style={{
             fontSize: 12,
@@ -168,6 +179,11 @@ export default function InventoryMatchPicker({
       {selected && <MatchRow row={selected} />}
       {open && (
         <>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {([ ["all", "전체"], ["inventory", "소싱 인벤토리"], ["sale", "방송판매재고"] ] as const).map(([value, label]) => (
+              <button key={value} type="button" aria-pressed={source === value} style={{ ...smallButton, background: source === value ? "#dbeafe" : "white" }} onClick={() => setSource(value)}>{label}</button>
+            ))}
+          </div>
           <input
             aria-label="인벤토리 검색"
             autoFocus
@@ -199,7 +215,7 @@ export default function InventoryMatchPicker({
           >
             {candidates.map((row) => (
               <button
-                key={row.id}
+                key={`${row.match_source || "inventory"}:${row.id}`}
                 type="button"
                 onClick={() => {
                   onSelect(row);
@@ -208,7 +224,7 @@ export default function InventoryMatchPicker({
                 style={{
                   ...smallButton,
                   textAlign: "left",
-                  background: row.id === selected?.id ? "#ecfdf5" : "white",
+                  background: row.id === selected?.id && row.match_source === selected?.match_source ? "#ecfdf5" : "white",
                 }}
               >
                 <MatchRow row={row} />
@@ -244,8 +260,10 @@ function MatchRow({ row }: { row: InventoryMatch }) {
         </strong>
         <div style={{ fontSize: 11, color: "#64748b", marginTop: 3 }}>
           {[
+            row.match_source === "sale" ? `방송판매재고${row.view_status === "completed" ? " · 판매완료" : row.view_status === "hidden" ? " · 숨김" : ""}` : "소싱 인벤토리",
             row.series_name,
             row.item_type,
+            row.option_text,
             row.option_seq != null ? `옵션 ${row.option_seq}` : null,
             row.component_count ? `${row.component_count}개입` : null,
           ]

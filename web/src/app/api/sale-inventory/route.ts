@@ -62,8 +62,9 @@ function resolvedSku(row: any) {
   });
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const readOnly = new URL(req.url).searchParams.get("read_only") === "1";
     const sb = createServiceRoleClient();
     const [
       { data: orders, error },
@@ -154,7 +155,7 @@ export async function GET() {
         const pricing = pricingFromPurchase(actualPurchaseUnitPrice,purchaseCurrency,actualComponentCount);
         // For a uniquely matched SKU, sourcing owns the canonical image.
         // Unmatched/duplicate SKU and no-SKU items keep their currently stored image.
-        const imageUrl = ledger?.image_url_override ?? (fixedSku && sourcing?.image_url
+        const imageUrl = ledger?.image_url_override ?? (domesticMeta?.matched_sale_purchase_item_id && item.image_url ? item.image_url : fixedSku && sourcing?.image_url
           ? sourcing.image_url
           : item.image_url || domesticMeta?.image_url || (!fixedSku ? sourcing?.image_url : null) || null);
         const defaultViewStatus = imageUrl ? "display" : "hidden";
@@ -166,7 +167,7 @@ export async function GET() {
         ) {
           ledger.sold_quantity = boxQuantity;
           ledger.remaining_quantity = 0;
-          completedRepairs.push(
+          if (!readOnly) completedRepairs.push(
             sb.from("purchase_sale_inventory")
               .update({ sold_quantity: boxQuantity, remaining_quantity: 0 })
               .eq("purchase_item_id", item.id)
@@ -183,7 +184,10 @@ export async function GET() {
           ordered_at: order.ordered_at,
           shop_name: order.shop_name,
           product_name: item.product_name,
-          display_name: ledger?.display_name ?? sourcing?.item_name ?? item.display_name_ko ?? item.product_name,
+          display_name: ledger?.display_name ?? (domesticMeta?.matched_sale_purchase_item_id ? item.display_name_ko : sourcing?.item_name) ?? item.display_name_ko ?? item.product_name,
+          source_product_id: sourcing?.source_product_id || item.source_product_id || null,
+          source_url: sourcing?.source_url || item.product_url || null,
+          option_seq: sourcing?.option_seq ?? null,
           internal_sku: fixedSku || sourcing?.resolved_internal_sku || null,
           option_text: item.option_text,
           product_url: item.product_url,
@@ -198,10 +202,11 @@ export async function GET() {
           order_paid_amount: Number(order.paid_amount || 0),
           order_local_shipping: Number(order.local_shipping || 0),
           sourcing_inventory_id: sourcing?.id || (fixedSku ? item.sourcing_inventory_id : null) || null,
+          resolved_sourcing_inventory_id: sourcing?.id || null,
           image_url: imageUrl,
-          lineup_image_url: sourcing?.lineup_image_url || domesticMeta?.lineup_image_url || null,
-          series_name: sourcing?.series_name || domesticMeta?.series_name || null,
-          item_type: sourcing?.item_type || domesticMeta?.item_type || null,
+          lineup_image_url: (domesticMeta?.matched_sale_purchase_item_id && domesticMeta?.lineup_image_url) || sourcing?.lineup_image_url || domesticMeta?.lineup_image_url || null,
+          series_name: (domesticMeta?.matched_sale_purchase_item_id && domesticMeta?.series_name) || sourcing?.series_name || domesticMeta?.series_name || item.series_name || null,
+          item_type: (domesticMeta?.matched_sale_purchase_item_id && domesticMeta?.item_type) || sourcing?.item_type || domesticMeta?.item_type || null,
           memo: sourcing?.memo || domesticMeta?.memo || null,
           sourcing_currency: sourcing?.currency || null,
           sourcing_purchase_price: Number(sourcing?.purchase_price || 0),

@@ -14,6 +14,7 @@ export type DomesticPurchaseItem = {
   lineup_image_url: string;
   memo: string;
   sourcing_inventory_id?: string | null;
+  matched_sale_purchase_item_id?: string | null;
 };
 
 export type DomesticPurchase = {
