@@ -31,9 +31,13 @@ export function analysisOverrideKey(name:string,image:string|null|undefined):str
  for(let i=0;i<url.length;i++){const c=url.charCodeAt(i);h1=Math.imul(h1^c,16777619);h2=Math.imul(h2^c,2246822519);}
  return "photo:"+normalized.slice(0,370)+":"+(h1>>>0).toString(36)+":"+(h2>>>0).toString(36);
 }
-export function analysisSeriesForSale(name:string,image:string|null|undefined,rules:SeriesKeywordRule[],overrides:Record<string,string>):string{
+export function manualSeriesForSale(name:string,image:string|null|undefined,overrides:Record<string,string>):string|null{
  const manual=overrides[analysisOverrideKey(name,image)]||overrides[normalizedKeywordText(name)];
- if(manual)return manual==="야생"?"쿠지":manual;
+ return manual?(manual==="야생"?"쿠지":manual):null;
+}
+export function analysisSeriesForSale(name:string,image:string|null|undefined,rules:SeriesKeywordRule[],overrides:Record<string,string>):string{
+ const manual=manualSeriesForSale(name,image,overrides);
+ if(manual)return manual;
  const result=classifySeriesByKeywords(name,rules);
  if(result.matches.length>1)return "키워드 충돌";
  return result.series||"미분류";

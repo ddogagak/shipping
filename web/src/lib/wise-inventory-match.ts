@@ -19,6 +19,8 @@ const series = [
   ["리락쿠마", /리락쿠마|rilakkuma|リラックマ/i],
   ["하이큐", /하이큐|haikyu|ハイキュー/i],
   ["코난", /코난|conan|コナン/i],
+  ["드래곤볼", /드래곤\s*볼|dragon\s*ball|ドラゴンボール|七龙珠/i],
+  ["디즈니", /디즈니|disney|ディズニー/i],
 ] as const;
 const types = [
   ["카드", /포카|카드|card|トレカ|カード|收藏卡/i],
@@ -56,6 +58,22 @@ export function productKeywords(name:string):string[] {
 function keywordText(candidate:KeywordCandidate){
   return normalizeProductName([candidate.name,candidate.option].join(" "));
 }
+// Use the recorded series tag (including custom series not in the regex
+// dictionary) and normalize aliases such as 나히아/나의히어로아카데미아.
+function canonicalSeries(value:string):string {
+  const key=normalizeProductName(value).replace(/[\p{P}\p{S}]/gu,"");
+  if(!key||["기타","미분류","키워드충돌","미분류키워드충돌","unknown","other"].includes(key))return "";
+  const exact=series.find(([label])=>normalizeProductName(label)===key);
+  return exact?.[0]||found(value,series)[0]||key;
+}
+function manualSeriesMatches(manual:string,candidate:{name:string;option:string;series:string}):boolean{
+  const wanted=canonicalSeries(manual);
+  if(!wanted)return false;
+  const recorded=String(candidate.series||"").split(/[,/|·]/).map(canonicalSeries).filter(Boolean);
+  if(recorded.length)return recorded.includes(wanted);
+  const text=[candidate.name,candidate.option].join(" ");
+  return found(text,series).includes(wanted)||normalizeProductName(text).replace(/[\p{P}\p{S}]/gu,"").includes(wanted);
+}
 // Count distinct product names/options so identical purchase lots do not make
 // a distinctive character or collection name look more common than it is.
 export function inventoryKeywordFrequency(saleName:string,candidates:readonly KeywordCandidate[]):Map<string,number>{
@@ -64,10 +82,12 @@ export function inventoryKeywordFrequency(saleName:string,candidates:readonly Ke
   for(const keyword of productKeywords(saleName))result.set(keyword,names.filter(name=>name.includes(keyword)).length);
   return result;
 }
-export function recommendInventory(sale:{item_name:string; image_url:string|null;item_price:number}, candidate:{name:string;option:string;series:string;item_type?:string;image_url:string|null;sale_price:number|null;reference_prices?:number[];stock_status:string;random_member?:boolean}, frequency?:ReadonlyMap<string,number>) {
+export function recommendInventory(sale:{item_name:string; image_url:string|null;item_price:number;manual_series?:string|null}, candidate:{name:string;option:string;series:string;item_type?:string;image_url:string|null;sale_price:number|null;reference_prices?:number[];stock_status:string;random_member?:boolean}, frequency?:ReadonlyMap<string,number>) {
   const a = sale.item_name, b = [candidate.name,candidate.option,candidate.series,candidate.item_type].join(" ");
   const sa=found(a,series), sb=found(b,series), ta=found(a,types), tb=found(b,types);
-  const sameSeries=intersection(sa,sb), sameType=intersection(ta,tb), nearType=related(ta,tb);
+  const manualSeries=String(sale.manual_series||"").trim();
+  const manualMatch=Boolean(manualSeries)&&manualSeriesMatches(manualSeries,candidate);
+  const sameSeries=!manualSeries&&intersection(sa,sb), sameType=intersection(ta,tb), nearType=related(ta,tb);
   const sameImage=Boolean(imageIdentity(sale.image_url))&&imageIdentity(sale.image_url)===imageIdentity(candidate.image_url);
   const sameName=normalizeProductName(a)===normalizeProductName(candidate.name);
   const matches=(frequency?[...frequency.keys()]:productKeywords(a)).filter(word=>keywordText(candidate).includes(word))
@@ -82,8 +102,8 @@ export function recommendInventory(sale:{item_name:string; image_url:string|null
   const nearPrice=diff!==null&&diff<=0.1000000001;
   const priceTier=nearPrice?2:diff!==null?1:0;
   const closeness=diff===null?0:Math.round(999/(1+diff))*10;
-  const score=(sameSeries?10_000_000:0)+keywordScore+(sameType?200_000:nearType?100_000:0)+priceTier*10_000+closeness+(sameImage?4:0)+(sameName?2:0)+(candidate.random_member?0:1);
-  const reasons=[sameSeries?"동일 작품":"",matches.length?"상품 키워드: "+matches.slice(0,3).join(", ")+(frequency?" (최소 "+rarity+"종 일치)":""):"",sameType?"동일 종류":nearType?"유사 종류":"",nearPrice?`판매가 ±10% (${(diff!*100).toFixed(1)}% 차이)`:"",sameImage?"동일 이미지":""].filter(Boolean);
+  const score=(manualMatch?100_000_000:sameSeries?10_000_000:0)+keywordScore+(sameType?200_000:nearType?100_000:0)+priceTier*10_000+closeness+(sameImage?4:0)+(sameName?2:0)+(candidate.random_member?0:1);
+  const reasons=[manualMatch?"수동분류 작품 일치: "+manualSeries:sameSeries?"동일 작품":"",matches.length?"상품 키워드: "+matches.slice(0,3).join(", ")+(frequency?" (최소 "+rarity+"종 일치)":""):"",sameType?"동일 종류":nearType?"유사 종류":"",nearPrice?`판매가 ±10% (${(diff!*100).toFixed(1)}% 차이)`:"",sameImage?"동일 이미지":""].filter(Boolean);
   const reason=reasons.join(" · ");
   return {score,reason};
 }

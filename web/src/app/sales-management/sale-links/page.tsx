@@ -5,9 +5,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { baseProductName, imageIdentity, normalizeProductName, recommendInventory, inventoryKeywordFrequency } from "@/lib/wise-inventory-match";
 import SaleUnitsEditor, {saveSaleUnits} from "../SaleUnitsEditor";
 import {saleUnits} from "@/lib/sale-units";
+import {manualSeriesForSale} from "@/lib/item-analysis-series";
 
 type LinkRow = { id: number; wise_stock_id: number | string; purchase_item_id: string | null; random_box_id: string | null; inventory_group_id: string | null; quantity: number; applied_units: number };
-type Sale = { id: string; video_id: string; wise_user_id: string | null; buyer_nickname: string; item_name: string; item_price: number; sale_units: number; image_url: string | null; sold_at: string | null; links: LinkRow[] };
+type Sale = { id: string; video_id: string; wise_user_id: string | null; buyer_nickname: string; item_name: string; item_price: number; sale_units: number; image_url: string | null; sold_at: string | null; links: LinkRow[]; manual_series?:string|null };
 type Show = { video_id: string; first_sale: string; last_sale: string; revenue: number; count: number; buyer_count: number };
 type Candidate = { type: "purchase_item" | "random_box" | "inventory_group"; id: string; name: string; option: string; image_url: string | null; series: string; unit_price: number; currency: string; component_count: number; sale_price: number | null; reference_prices?:number[]; stock_status: string; purchase_date: string; item_type: string; remaining_units: number; random_member: boolean };
 type Family = { key: string; title: string; count: number; price:number; revenue: number; linked: number; image: string | null; items: Sale[] };
@@ -104,6 +105,7 @@ export default function WiseInventoryLinkPage() {
     if (!ids.length) { setLoadingSales(false); return; }
     setLoadingSales(true); setError("");
     try {
+      const manualRequest=requestJson("/api/sales-management/item-series-overrides").then(data=>({overrides:Object.fromEntries((data.overrides||[]).map((row:{item_key:string;series_name:string})=>[row.item_key,row.series_name])) as Record<string,string>,failed:false})).catch(()=>({overrides:{},failed:true}));
       // The existing endpoint accepts at most 80 broadcasts; split a large month
       // into smaller requests without changing the backend or existing save limits.
       const all = new Map<string, Sale>();
@@ -116,7 +118,10 @@ export default function WiseInventoryLinkPage() {
         for (const row of data.sales || []) all.set(row.id, row);
         cutoff = data.cutover || cutoff;
       }
-      setSales([...all.values()].sort((a,b)=>String(a.sold_at||"").localeCompare(String(b.sold_at||"")) || a.id.localeCompare(b.id)));
+      const manual=await manualRequest;
+      if(requestId!==salesRequest.current)return;
+      if(manual.failed)setError("수동 작품 분류를 불러오지 못했어. 판매내역 갱신으로 다시 시도해줘.");
+      setSales([...all.values()].map(row=>({...row,manual_series:manualSeriesForSale(row.item_name,row.image_url,manual.overrides)})).sort((a,b)=>String(a.sold_at||"").localeCompare(String(b.sold_at||"")) || a.id.localeCompare(b.id)));
       setCutover(cutoff);
     } catch (e) { if (requestId === salesRequest.current) setError(e instanceof Error ? e.message : "판매기록 조회 실패"); }
     finally { if (requestId === salesRequest.current) setLoadingSales(false); }
@@ -155,7 +160,7 @@ export default function WiseInventoryLinkPage() {
     const query = normalizeProductName(candidateSearch);
     const chosen = sales.filter(row => selected[row.id]);
     // Compare distinct selected families rather than every identical sale row.
-    const samples = [...new Map(chosen.map(row=>[familyOf(row).key,row])).values()].map(s=>({sale:s,frequency:inventoryKeywordFrequency(s.item_name,candidates)}));
+    const samples = [...new Map(chosen.map(row=>[familyOf(row).key+"|"+(row.manual_series||""),row])).values()].map(s=>({sale:s,frequency:inventoryKeywordFrequency(s.item_name,candidates)}));
     return candidates.filter(c => (candidateType === "all" || c.type === candidateType) &&
       (!query || [c.name, c.option, c.series, c.purchase_date, c.item_type].some(v => normalizeProductName(v).includes(query)) || (parsePriceSearch(candidateSearch)!==null&&matchesPriceSearch(candidateSearch,[c.sale_price,...(c.reference_prices||[])]))) && matchesPriceSearch(candidatePriceSearch,[c.sale_price,...(c.reference_prices||[])]))
       .map(c=>({...c, recommendation:samples.map(s=>recommendInventory(s.sale,c,s.frequency)).sort((a,b)=>b.score-a.score)[0]||{score:0,reason:""}}))
@@ -285,7 +290,7 @@ export default function WiseInventoryLinkPage() {
 
       <aside style={{ ...panel, position: "sticky", top: 10 }}>
         <h2 style={{ fontSize: 17, margin: "0 0 8px" }}>연결할 방송판매재고</h2>
-        <p style={{ fontSize: 12, color: "#64748b" }}>재고 보유 우선 · 추천 순서: ① 동일 작품 → ② 특징적인 상품명 키워드 (희소한 키워드 우선) → ③ 동일 상품 종류 → ④ 판매가 ±10% 근접. 완판 상품도 과거 연결을 위해 유지해.</p>
+        <p style={{ fontSize: 12, color: "#64748b" }}>재고 보유 우선 · 추천 순서: ① 수동분류 작품 (없으면 상품명 작품 추론) → ② 특징적인 상품명 키워드 (희소한 키워드 우선) → ③ 동일 상품 종류 → ④ 판매가 ±10% 근접. 완판 상품도 과거 연결을 위해 유지해.</p>
         <input aria-label="재고 검색" placeholder="재고명·작품명·매입일·판매가 검색" value={candidateSearch} onChange={e => setCandidateSearch(e.target.value)} style={{ ...field, width: "100%", boxSizing: "border-box" }} />
         <input aria-label="재고 등록 판매가 검색" inputMode="numeric" placeholder="등록 판매가 (예: 3700)" value={candidatePriceSearch} onChange={e=>setCandidatePriceSearch(e.target.value)} style={{...field,width:"100%",boxSizing:"border-box",marginTop:6}} />
         <div style={{ display: "flex", gap: 8, margin: "9px 0" }}>
@@ -351,7 +356,7 @@ function FragmentGroup({ group, selected, expanded, onSelect, onToggle, onSelect
       <td style={td}><input type="checkbox" aria-label={group.title + " 선택"} checked={checkedCount === group.count} ref={element => { if (element) element.indeterminate = checkedCount > 0 && checkedCount < group.count; }} onChange={e => onSelect(e.target.checked)} /></td>
       <td style={td}><div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         {group.image ? <img src={group.image} alt="" loading="lazy" style={{ width: 42, height: 42, objectFit: "contain" }} /> : null}
-        <span style={{ fontWeight: 700 }}>{group.title}</span>
+        <span style={{ fontWeight: 700 }}>{group.title}{[...new Set(group.items.map(row=>row.manual_series).filter(Boolean))].map(series=><span key={series} style={{display:"block",fontSize:11,color:"#166534",fontWeight:700}}>수동 작품: {series}</span>)}</span>
       </div></td>
       <td style={td}>{group.count}건 · {group.items.reduce((n,s)=>n+saleUnits(s.sale_units),0)}개</td>
       <td style={{ ...td, color: group.linked === group.count ? "#15803d" : "#64748b" }}>{group.linked}/{group.count}</td>
