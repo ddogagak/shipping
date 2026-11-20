@@ -246,6 +246,7 @@ async function buildReport(excludedKeywords: string[]) {
   const monthly = new Map<string, any>();
   const quarterly = new Map<string, any>();
   const allTimeSalesRows: any[] = [];
+  const excludedSaleRows: any[] = [];
   let excludedItemCount = 0;
   let includedOrderCount = 0;
   let includedItemCount = 0;
@@ -255,7 +256,11 @@ async function buildReport(excludedKeywords: string[]) {
     const items = order.items.filter((item: any) => {
       const haystack = item.item_name.normalize("NFKC").toLowerCase();
       const excluded = terms.some(term => haystack.includes(term));
-      if (excluded) excludedItemCount+=saleUnits(item.sale_units);
+      if (excluded) {
+        excludedItemCount+=saleUnits(item.sale_units);
+        const itemTime=item.sold_at||order.ordered_at;
+        if(kstDate(itemTime))excludedSaleRows.push({id:String(item.id),order_id:String(order.id),item_name:item.item_name,item_price:money(item.item_price),sale_units:saleUnits(item.sale_units),buyer_nickname:String(order.buyer_nickname||"").trim()||"(닉네임 없음)",ordered_at:itemTime,image_url:item.image_url||null,video_id:item.video_id||null,sold_at:item.sold_at||null,excluded:true});
+      }
       return !excluded;
     });
     if (!items.length) continue;
@@ -278,6 +283,7 @@ async function buildReport(excludedKeywords: string[]) {
     monthly: serialize(monthly),
     quarterly: serialize(quarterly),
     all_time_sales_rows: allTimeSalesRows.sort((a, b) => String(b.ordered_at).localeCompare(String(a.ordered_at))),
+    excluded_sale_rows: excludedSaleRows,
     same_item_counts: sameItemCounts,
     excluded_item_count: excludedItemCount,
     included_order_count: includedOrderCount,

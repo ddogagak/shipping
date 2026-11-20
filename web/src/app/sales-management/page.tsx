@@ -7,13 +7,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 
 type SortKey = "ordered_at" | "buyer_nickname" | "item_name" | "item_price";
 type SortDirection = "asc" | "desc";
-type SaleRow = { id: string; order_id: string; item_name: string; item_price: number; sale_units?:number; buyer_nickname: string; ordered_at: string; image_url?: string | null; video_id?: string | null; sold_at?: string | null };
+type SaleRow = { id: string; order_id: string; item_name: string; item_price: number; sale_units?:number; buyer_nickname: string; ordered_at: string; image_url?: string | null; video_id?: string | null; sold_at?: string | null; excluded?:boolean };
 type Buyer = { buyer_nickname: string; sales: number; order_count: number; item_count: number };
 type Period = { key: string; sales: number; order_count: number; item_count: number; sales_rows: SaleRow[] };
 type ItemPref = { includeCost: boolean; memo: string; deleted?: boolean };
 type ItemSettings = { id: string; includeCost: boolean; memo: string; deleted: boolean };
 type PurchaseTotals = { monthly: Record<string, number>; quarterly: Record<string, number>; cumulative: number; included_orders: number; unsupported_currencies: string[]; exchange_rates: Record<string, number>; overseas_tax_multiplier: number; overseas_shipping_per_order_krw: number };
-type Report = { same_item_counts?: Record<string, number>; purchases?: PurchaseTotals; monthly: Period[]; quarterly: Period[]; all_time_sales_rows: SaleRow[]; excluded_item_count: number; included_order_count: number; included_item_count: number; imported_order_count: number; last_imported_at: string | null; wise_gross_total: number; settings: { cumulative_settled_amount: number; excluded_keywords: string[]; item_settings: ItemSettings[] } };
+type Report = { same_item_counts?: Record<string, number>; purchases?: PurchaseTotals; monthly: Period[]; quarterly: Period[]; all_time_sales_rows: SaleRow[]; excluded_sale_rows?:SaleRow[]; excluded_item_count: number; included_order_count: number; included_item_count: number; imported_order_count: number; last_imported_at: string | null; wise_gross_total: number; settings: { cumulative_settled_amount: number; excluded_keywords: string[]; item_settings: ItemSettings[] } };
 type StockItem = { display_name?: string; product_name?: string; option_text?: string; ordered_at?: string; purchase_quantity?: number; component_count?: number; unit_cost_price?: number; box_cost_price?: number };
 type ItemPrefs = Record<string, ItemPref>;
 const money = (value: number) => Math.round(Number(value || 0)).toLocaleString("ko-KR");
@@ -156,6 +156,7 @@ export default function SalesManagementPage() {
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [productSearch, setProductSearch] = useState("");
   const [buyerSearch, setBuyerSearch] = useState("");
+  const [includeExcluded, setIncludeExcluded] = useState(false);
   const [expandedImage, setExpandedImage] = useState<{ url: string; name: string } | null>(null);
   const [saleSort, setSaleSort] = useState<{ key: SortKey; direction: SortDirection }>({ key: "ordered_at", direction: "desc" });
   const [granularity, setGranularity] = useState<"month" | "quarter">("month");
@@ -260,7 +261,7 @@ export default function SalesManagementPage() {
   const periods = useMemo(() => granularity === "month" ? report?.monthly || [] : report?.quarterly || [], [granularity, report]);
   const selectedKey = periods.some(p => p.key === selectedPeriod) ? selectedPeriod : periods[0]?.key || "";
   const rawCurrent = periods.find(p => p.key === selectedKey);
-  const currentRows = useMemo(() => visibleRows(rawCurrent?.sales_rows || [], savedPrefs), [rawCurrent, savedPrefs]);
+  const currentRows = useMemo(() => visibleRows([...(rawCurrent?.sales_rows || []),...(includeExcluded?(report?.excluded_sale_rows||[]).filter(row=>{const day=kstDate(row.ordered_at);return granularity==="month"?day.slice(0,7)===selectedKey:day.slice(0,4)+"-Q"+(Math.floor((Number(day.slice(5,7))-1)/3)+1)===selectedKey;}):[])], savedPrefs), [rawCurrent, savedPrefs,includeExcluded,report,granularity,selectedKey]);
   // Prefer the API's per-sale count, but calculate it from the complete sales rows
   // when an older deployment or cached response does not yet supply the new field.
   // This also prevents the column from displaying only dashes during a rolling deploy.
@@ -325,12 +326,12 @@ export default function SalesManagementPage() {
     style={{ border: 0, padding: 0, background: "transparent", font: "inherit", color: saleSort.key === key ? "#1d4ed8" : "inherit", fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}>
     {title} <span aria-hidden="true">{saleSort.key === key ? (saleSort.direction === "desc" ? "▼" : "▲") : "↕"}</span>
   </button>;
-  const filteredSales = filteredItemRows.reduce((sum, row) => sum + Number(row.item_price || 0), 0);
+  const filteredSales = filteredItemRows.reduce((sum, row) => sum + (row.excluded?0:Number(row.item_price || 0)), 0);
   const selectedPurchaseAmount = Number((granularity === "month" ? report?.purchases?.monthly : report?.purchases?.quarterly)?.[selectedKey] || 0);
   const cumulativePurchaseAmount = Number(report?.purchases?.cumulative || 0);
   const grossAfterPurchases = currentSummary.sales * 0.84 - selectedPurchaseAmount;
   const cumulativeGrossAfterPurchases = Number(report?.wise_gross_total || 0) * 0.84 - cumulativePurchaseAmount;
-  const allRowsById = useMemo(() => new Map((report?.all_time_sales_rows || []).map(row => [row.id, row])), [report]);
+  const allRowsById = useMemo(() => new Map([...(report?.all_time_sales_rows || []),...(report?.excluded_sale_rows||[])].map(row => [row.id, row])), [report]);
   const deletedItems = Object.entries(savedPrefs).filter(([, pref]) => pref.deleted);
   const hasUnsaved = JSON.stringify(savedPrefs) !== JSON.stringify(draftPrefs);
   async function editUnits(ids:string[],units:number){
@@ -435,7 +436,7 @@ export default function SalesManagementPage() {
       </div>
     </div>}
     <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 20 }}>
-      <div><h1 style={{ margin: 0, fontSize: 30 }}>매출관리</h1><p style={{ color: "#6b7280", margin: "6px 0 0" }}>와이스 판매와 방송판매재고 원가를 월별·분기별로 확인합니다.</p></div>
+      <div><h1 style={{ margin: 0, fontSize: 30 }}>매출관리</h1><p style={{ color: "#6b7280", margin: "6px 0 0" }}>와이스 판매와 방송판매재고 원가를 월별·분기별로 확인합니다.</p><Link href="/sales-management/investment" style={{...button,display:"inline-block",marginTop:8,background:"#f5f3ff",borderColor:"#c4b5fd",color:"#6d28d9"}}>재고 투자성과 분석</Link></div>
       <nav style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <Link href="/" style={button}>메인</Link><Link href="/sales-management/broadcast-trends" style={{...button,background:"#eef2ff",borderColor:"#c7d2fe",color:"#3730a3"}}>📈 방송 트렌드</Link><Link href="/sales-management/customers" style={{...button,background:"#ecfdf5",borderColor:"#a7f3d0",color:"#065f46"}}>👥 고객 분석</Link><Link href="/sales-management/items" style={{...button,background:"#fff7ed",borderColor:"#fed7aa",color:"#9a3412"}}>📦 아이템 분석</Link><Link href="/sales-management/wise-items" style={{...button,background:"#eff6ff",borderColor:"#93c5fd",color:"#1d4ed8"}}>🛍️ 실판매 아이템 분석</Link><Link href="/sales-management/sale-links" style={{...button,background:"#f0fdf4",borderColor:"#86efac",color:"#166534"}}>🔗 실판매·재고 연결</Link><Link href="/purchases" style={button}>매입관리</Link><Link href="/sale-inventory" style={button}>방송판매재고</Link><Link href="/domestic-upload" style={button}>와이스 주문 동기화</Link>
       </nav>
@@ -543,6 +544,7 @@ export default function SalesManagementPage() {
           </div>
         </div>
         <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><input aria-label="상품명 검색" type="search" value={productSearch} onChange={e => setProductSearch(e.target.value)} placeholder="상품명 검색" style={{ height: 36, padding: "0 10px", border: "1px solid #d1d5db", borderRadius: 8, flex: "1 1 220px", maxWidth: 400 }} /><input aria-label="구매자 닉네임 검색" type="search" value={buyerSearch} onChange={e => setBuyerSearch(e.target.value)} placeholder="구매자 닉네임 검색" style={{ height: 36, padding: "0 10px", border: "1px solid #d1d5db", borderRadius: 8, flex: "1 1 220px", maxWidth: 400 }} /><span style={{ color: "#6b7280", fontSize: 12 }}>검색 결과 {filteredItemRows.length}건</span></div>
+        <label style={{display:"flex",alignItems:"center",gap:6,padding:"0 14px 10px",fontSize:12,color:"#475569"}}><input type="checkbox" checked={includeExcluded} onChange={e=>setIncludeExcluded(e.target.checked)}/> 양도 등 집계 제외건도 조회 (매출 합계에는 미포함)</label>
         {hasUnsaved && <div style={{ padding: "8px 14px", background: "#fffbeb", color: "#92400e", fontSize: 12 }}>저장되지 않은 판매원가 포함·삭제·메모 변경사항이 있습니다.</div>}
         {!filteredItemRows.length ? <div style={{ padding: 24, color: "#6b7280" }}>{productSearch.trim() || buyerSearch.trim() ? "검색 결과가 없습니다." : "이 기간의 판매 내역이 없습니다."}</div> :
           <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1080, fontSize: 13 }}>
@@ -557,10 +559,10 @@ export default function SalesManagementPage() {
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={row.image_url} alt="" loading="lazy" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
                   </button> : <span aria-label="사진 없음" title="사진 없음" style={{ display: "inline-flex", width: 44, height: 44, justifyContent: "center", alignItems: "center", border: "1px solid #e5e7eb", borderRadius: 7, background: "#f9fafb", color: "#9ca3af", fontSize: 11, flexShrink: 0 }}>사진 없음</span>}
-                  <div><b>{row.item_name}</b>{pendingDelete && <div style={{ color: "#b45309", fontSize: 11 }}>저장하면 삭제</div>}</div>
+                  <div><b>{row.item_name}</b>{row.excluded&&<small style={{display:"block",color:"#64748b",fontSize:11}}>집계 제외</small>}{pendingDelete && <div style={{ color: "#b45309", fontSize: 11 }}>저장하면 삭제</div>}</div>
                 </div></td>
                 <td style={td}><span style={{...chip,whiteSpace:"nowrap"}}>{row.series}</span></td>
-                <td style={td}><b>{money(row.item_price)}원</b><div style={{fontSize:12,color:"#475569",margin:"4px 0"}}>실제 {saleUnits(row.sale_units)}개 · 개당 {money(row.item_price/saleUnits(row.sale_units))}원</div><SaleUnitsEditor key={row.id+"-"+row.sale_units} units={saleUnits(row.sale_units)} disabled={saving||hasUnsaved} onSave={n=>editUnits([row.id],n)}/></td>
+                <td style={td}><b>{money(row.item_price)}원</b>{saleUnits(row.sale_units)>1&&<small style={{display:"block",fontSize:11,color:"#64748b",marginTop:2}}>실제 {saleUnits(row.sale_units)}개</small>}</td>
                 <td style={td}><button onClick={() => updateDraft(row.key, { includeCost: !draft.includeCost })} aria-label="판매원가 포함 여부 전환" style={{ ...button, minWidth: 44, padding: "5px 10px", background: draft.includeCost ? "#dcfce7" : "#f3f4f6", borderColor: draft.includeCost ? "#86efac" : "#d1d5db", color: draft.includeCost ? "#166534" : "#6b7280" }}>{draft.includeCost ? "Y" : "N"}</button></td>
                 <td style={td} title={`같은 와이스 주문에서 동일한 상품명 수량 (#번호 제외): ${row.sameItemCount ?? "확인 불가"}개`}><b style={{ color: Number(row.sameItemCount || 0) > 1 ? "#1d4ed8" : "#475569" }}>{row.sameItemCount == null ? "—" : row.sameItemCount + "개"}</b></td>
                 <td style={td}><input value={draft.memo} onChange={e => updateDraft(row.key, { memo: e.target.value })} placeholder="메모 입력" style={{ width: 220, maxWidth: "45vw", height: 32, padding: "0 8px", border: "1px solid #d1d5db", borderRadius: 6 }} /></td>
