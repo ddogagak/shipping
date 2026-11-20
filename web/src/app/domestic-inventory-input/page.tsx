@@ -63,7 +63,7 @@ const seriesList = [
   "기타",
 ];
 
-const currencyList = ["JPY", "CNY"];
+const currencyList = ["JPY", "CNY", "KRW"];
 
 const initialManualForm = {
   item_name: "",
@@ -428,7 +428,7 @@ export default function DomesticInventoryInputPage() {
 NAME:
 SERIES:
 TYPE:
-CURRENCY: JPY
+CURRENCY: JPY / CNY / KRW
 PRICE:
 QTY: 1
 BOX_COUNT:
@@ -642,6 +642,8 @@ function toNumber(value: string) {
         .replace(/[¥￥元,\s]/g, "")
         .replace(/CNY/gi, "")
         .replace(/JPY/gi, "")
+        .replace(/KRW/gi, "")
+        .replace(/원/g, "")
     ) || 0
   );
 }
