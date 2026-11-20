@@ -113,6 +113,10 @@ export function calculatePricing(
   boxCount: number | null,
   settings: PricingSettings = DEFAULT_PRICING_SETTINGS
 ) {
+  if (currency === "KRW") {
+    return calculateDomesticSalePricing(purchasePrice, Number(boxCount) || 1);
+  }
+
   const rate =
     currency === "CNY" ? settings.cnyRate :
     currency === "JPY" ? settings.jpyRate :
