@@ -244,7 +244,14 @@ export default function WiseInventoryLinkPage() {
 
     <section style={{ ...panel, marginBottom: 12 }}>
       <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
-        <label>조회 월 <input aria-label="조회 월" type="month" value={month} disabled={busy} onChange={e => setMonth(e.target.value)} style={{ ...field, display: "block", marginTop: 6 }} /></label>
+        <div><div style={{marginBottom:6}}>조회 월</div><div style={{display:"flex",gap:5,alignItems:"center"}}>
+          <select aria-label="조회 연도" value={month.slice(0,4)} disabled={busy} onChange={e=>setMonth(e.target.value+month.slice(4))} style={field}>
+            {Array.from({length:12},(_,i)=>Number(monthNow().slice(0,4))-i).map(year=><option key={year} value={year}>{year}년</option>)}
+          </select>
+          <select aria-label="조회 월" value={month.slice(5)} disabled={busy} onChange={e=>setMonth(month.slice(0,5)+e.target.value)} style={field}>
+            {Array.from({length:12},(_,i)=>i+1).map(m=><option key={m} value={String(m).padStart(2,"0")}>{m}월</option>)}
+          </select>
+        </div></div>
         <button style={btn} disabled={loadingShows||busy} onClick={() => void loadShows()}>{loadingShows ? "조회 중..." : "방송 새로고침"}</button>
         <button type="button" style={{...btn,background:"#eff6ff",borderColor:"#93c5fd",color:"#1d4ed8"}} disabled={busy||loadingShows||!shows.length||shows.every(s=>videoIds.includes(s.video_id))} onClick={()=>setVideoIds([...new Set(shows.map(s=>s.video_id))])}>월 전체 선택 ({shows.length}회)</button>
         <label style={{ flex: 1, minWidth: 260 }}>방송 선택
