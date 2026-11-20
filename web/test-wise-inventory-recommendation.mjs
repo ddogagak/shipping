@@ -4,7 +4,7 @@ import ts from 'typescript';
 
 const src=readFileSync(new URL('./src/lib/wise-inventory-match.ts',import.meta.url),'utf8');
 const code=ts.transpileModule(src,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
-const {recommendInventory,inventoryKeywordFrequency,productKeywords,saleBroadcastGroupKey,saleProductKey}=await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+const {recommendInventory,inventoryKeywordFrequency,productKeywords,saleBroadcastGroupKey,saleProductKey,compareInventoryRecommendations}=await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
 const badge={id:'1',video_id:'broadcast-a',item_name:'캔뱃지 #1',item_price:4700,image_url:'https://example.com/badge.png',manual_series:'나의히어로아카데미아'};
 assert.equal(saleBroadcastGroupKey(badge,'49864144'),saleBroadcastGroupKey({...badge,id:'2',item_name:'캔뱃지 #2',image_url:'https://example.com/new.png'},'49864144'),'same broadcast and listing group together even if photo changes');
 assert.notEqual(saleBroadcastGroupKey(badge,'49864144'),saleBroadcastGroupKey({...badge,video_id:'broadcast-b'},'49864144'),'different broadcasts never group together');
@@ -17,6 +17,11 @@ assert.equal(saleProductKey(badge),saleProductKey({...badge,video_id:'broadcast-
 const sale={item_name:'치이카와 클리어카드 #1',image_url:'https://example.com/a.png',item_price:10000};
 const candidate=(name,price,extra={})=>({name,option:'',series:'',item_type:'',image_url:null,sale_price:price,stock_status:'active',...extra});
 const rec=(name,price,extra)=>recommendInventory(sale,candidate(name,price,extra));
+const badgeSale={item_name:'약사의혼잣말 캔뱃지',image_url:null,item_price:8700};
+const ranked=(name,price,remaining_units)=>({name,remaining_units,recommendation:recommendInventory(badgeSale,candidate(name,price))});
+const soldBadge=ranked('약사의 혼잣말 캔배지',8700,0),stockCard=ranked('약사의 혼잣말 카드',6300,1),stockBadgeFar=ranked('약사의 혼잣말 캔배지',12000,5),stockBadgeExact=ranked('약사의 혼잣말 캔배지',8700,5);
+assert.deepEqual([stockCard,stockBadgeFar,soldBadge,stockBadgeExact].sort(compareInventoryRecommendations),[stockBadgeExact,soldBadge,stockBadgeFar,stockCard],'matching type and price rank above inventory availability; stock breaks equal-match ties');
+assert.ok(compareInventoryRecommendations(soldBadge,stockBadgeFar)<0,'sold-out exact price beats in-stock different price');
 assert.ok(rec('치이카와 아크릴',30000).score>rec('귀멸 카드',10000,{image_url:sale.image_url}).score,'series dominates type, price and image');
 assert.ok(rec('치이카와 카드',30000).score>rec('치이카와 아크릴',10000,{image_url:sale.image_url}).score,'kind dominates price and image');
 assert.ok(rec('치이카와 카드',11000).score>rec('치이카와 카드',11001,{image_url:sale.image_url}).score,'inclusive 10% boundary');

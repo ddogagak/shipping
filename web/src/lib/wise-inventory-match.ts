@@ -111,8 +111,15 @@ export function recommendInventory(sale:{item_name:string; image_url:string|null
   const nearPrice=diff!==null&&diff<=0.1000000001;
   const priceTier=nearPrice?2:diff!==null?1:0;
   const closeness=diff===null?0:Math.round(999/(1+diff))*10;
-  const score=(manualMatch?100_000_000:sameSeries?10_000_000:0)+keywordScore+(sameType?200_000:nearType?100_000:0)+priceTier*10_000+closeness+(sameImage?4:0)+(sameName?2:0)+(candidate.random_member?0:1);
+  const priorityScore=(manualMatch?100_000_000:sameSeries?10_000_000:0)+keywordScore+(sameType?200_000:nearType?100_000:0)+priceTier*10_000+closeness;
+  const score=priorityScore+(sameImage?4:0)+(sameName?2:0)+(candidate.random_member?0:1);
   const reasons=[manualMatch?"수동분류 작품 일치: "+manualSeries:sameSeries?"동일 작품":"",matches.length?"상품 키워드: "+matches.slice(0,3).join(", ")+(frequency?" (최소 "+rarity+"종 일치)":""):"",sameType?"동일 종류":nearType?"유사 종류":"",nearPrice?`판매가 ±10% (${(diff!*100).toFixed(1)}% 차이)`:"",sameImage?"동일 이미지":""].filter(Boolean);
   const reason=reasons.join(" · ");
-  return {score,reason};
+  return {score,priorityScore,reason};
+}
+
+// Stock availability breaks ties only after series, keywords, type and price.
+type RankedCandidate={remaining_units:number;recommendation:{priorityScore:number;score:number}};
+export function compareInventoryRecommendations(a:RankedCandidate,b:RankedCandidate):number {
+  return b.recommendation.priorityScore-a.recommendation.priorityScore||Number(b.remaining_units>0)-Number(a.remaining_units>0)||b.recommendation.score-a.recommendation.score;
 }

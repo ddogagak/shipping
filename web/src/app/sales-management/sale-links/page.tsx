@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { baseProductName, imageIdentity, normalizeProductName, recommendInventory, inventoryKeywordFrequency, saleBroadcastGroupKey, saleProductKey } from "@/lib/wise-inventory-match";
+import { baseProductName, imageIdentity, normalizeProductName, recommendInventory, inventoryKeywordFrequency, saleBroadcastGroupKey, saleProductKey, compareInventoryRecommendations } from "@/lib/wise-inventory-match";
 import SaleUnitsEditor, {saveSaleUnits} from "../SaleUnitsEditor";
 import {saleUnits} from "@/lib/sale-units";
 import {manualSeriesForSale,wiseListingId} from "@/lib/item-analysis-series";
@@ -164,8 +164,8 @@ export default function WiseInventoryLinkPage() {
     const samples = [...new Map(chosen.map(row=>[saleProductKey(row),row])).values()].map(s=>({sale:s,frequency:inventoryKeywordFrequency(s.item_name,candidates)}));
     return candidates.filter(c => (candidateType === "all" || c.type === candidateType) &&
       (!query || [c.name, c.option, c.series, c.purchase_date, c.item_type].some(v => normalizeProductName(v).includes(query)) || (parsePriceSearch(candidateSearch)!==null&&matchesPriceSearch(candidateSearch,[c.sale_price,...(c.reference_prices||[])]))) && matchesPriceSearch(candidatePriceSearch,[c.sale_price,...(c.reference_prices||[])]))
-      .map(c=>({...c, recommendation:samples.map(s=>recommendInventory(s.sale,c,s.frequency)).sort((a,b)=>b.score-a.score)[0]||{score:0,reason:""}}))
-      .sort((a,b)=>Number(b.remaining_units>0)-Number(a.remaining_units>0)||b.recommendation.score-a.recommendation.score).slice(0,150);
+      .map(c=>({...c, recommendation:samples.map(s=>recommendInventory(s.sale,c,s.frequency)).sort((a,b)=>b.score-a.score)[0]||{score:0,priorityScore:0,reason:""}}))
+      .sort(compareInventoryRecommendations).slice(0,150);
   }, [candidateSearch, candidatePriceSearch, candidates, candidateType, sales, selected]);
   const candidateNames = useMemo(() => new Map([...Object.entries(inventoryNames),...candidates.map(c => [c.type + "|" + c.id, c.name + (c.option ? " · " + c.option : "")] as [string,string])]), [candidates,inventoryNames]);
   const selectedIds = useMemo(() => sales.filter(s => selected[s.id]).map(s => s.id), [sales, selected]);
@@ -291,7 +291,7 @@ export default function WiseInventoryLinkPage() {
 
       <aside style={{ ...panel, position: "sticky", top: 10 }}>
         <h2 style={{ fontSize: 17, margin: "0 0 8px" }}>연결할 방송판매재고</h2>
-        <p style={{ fontSize: 12, color: "#64748b" }}>재고 보유 우선 · 추천 순서: ① 수동분류 작품 (없으면 상품명 작품 추론) → ② 특징적인 상품명 키워드 (희소한 키워드 우선) → ③ 동일 상품 종류 → ④ 판매가 ±10% 근접. 완판 상품도 과거 연결을 위해 유지해.</p>
+        <p style={{ fontSize: 12, color: "#64748b" }}>추천 순서: ① 수동분류 작품 (없으면 상품명 작품 추론) → ② 특징적인 상품명 키워드 (희소한 키워드 우선) → ③ 동일 상품 종류 → ④ 판매가 ±10% 근접 → ⑤ 잔여 재고 보유. 정확한 완판 상품도 우선 추천해.</p>
         <input aria-label="재고 검색" placeholder="재고명·작품명·매입일·판매가 검색" value={candidateSearch} onChange={e => setCandidateSearch(e.target.value)} style={{ ...field, width: "100%", boxSizing: "border-box" }} />
         <input aria-label="재고 등록 판매가 검색" inputMode="numeric" placeholder="등록 판매가 (예: 3700)" value={candidatePriceSearch} onChange={e=>setCandidatePriceSearch(e.target.value)} style={{...field,width:"100%",boxSizing:"border-box",marginTop:6}} />
         <div style={{ display: "flex", gap: 8, margin: "9px 0" }}>
