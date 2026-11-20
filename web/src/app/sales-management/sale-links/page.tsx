@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { baseProductName, imageIdentity, normalizeProductName, recommendInventory } from "@/lib/wise-inventory-match";
+import { baseProductName, imageIdentity, normalizeProductName, recommendInventory, inventoryKeywordFrequency } from "@/lib/wise-inventory-match";
 import SaleUnitsEditor, {saveSaleUnits} from "../SaleUnitsEditor";
 import {saleUnits} from "@/lib/sale-units";
 
@@ -155,10 +155,10 @@ export default function WiseInventoryLinkPage() {
     const query = normalizeProductName(candidateSearch);
     const chosen = sales.filter(row => selected[row.id]);
     // Compare distinct selected families rather than every identical sale row.
-    const samples = [...new Map(chosen.map(row=>[familyOf(row).key,row])).values()];
+    const samples = [...new Map(chosen.map(row=>[familyOf(row).key,row])).values()].map(s=>({sale:s,frequency:inventoryKeywordFrequency(s.item_name,candidates)}));
     return candidates.filter(c => (candidateType === "all" || c.type === candidateType) &&
       (!query || [c.name, c.option, c.series, c.purchase_date, c.item_type].some(v => normalizeProductName(v).includes(query)) || (parsePriceSearch(candidateSearch)!==null&&matchesPriceSearch(candidateSearch,[c.sale_price,...(c.reference_prices||[])]))) && matchesPriceSearch(candidatePriceSearch,[c.sale_price,...(c.reference_prices||[])]))
-      .map(c=>({...c, recommendation:samples.map(s=>recommendInventory(s,c)).sort((a,b)=>b.score-a.score)[0]||{score:0,reason:""}}))
+      .map(c=>({...c, recommendation:samples.map(s=>recommendInventory(s.sale,c,s.frequency)).sort((a,b)=>b.score-a.score)[0]||{score:0,reason:""}}))
       .sort((a,b)=>Number(b.remaining_units>0)-Number(a.remaining_units>0)||b.recommendation.score-a.recommendation.score).slice(0,150);
   }, [candidateSearch, candidatePriceSearch, candidates, candidateType, sales, selected]);
   const candidateNames = useMemo(() => new Map([...Object.entries(inventoryNames),...candidates.map(c => [c.type + "|" + c.id, c.name + (c.option ? " · " + c.option : "")] as [string,string])]), [candidates,inventoryNames]);
@@ -285,7 +285,7 @@ export default function WiseInventoryLinkPage() {
 
       <aside style={{ ...panel, position: "sticky", top: 10 }}>
         <h2 style={{ fontSize: 17, margin: "0 0 8px" }}>연결할 방송판매재고</h2>
-        <p style={{ fontSize: 12, color: "#64748b" }}>추천 순서: ① 동일 작품 → ② 동일 상품 종류 → ③ 판매가 ±10% 근접. 완판 상품도 과거 연결을 위해 유지해.</p>
+        <p style={{ fontSize: 12, color: "#64748b" }}>재고 보유 우선 · 추천 순서: ① 동일 작품 → ② 특징적인 상품명 키워드 (희소한 키워드 우선) → ③ 동일 상품 종류 → ④ 판매가 ±10% 근접. 완판 상품도 과거 연결을 위해 유지해.</p>
         <input aria-label="재고 검색" placeholder="재고명·작품명·매입일·판매가 검색" value={candidateSearch} onChange={e => setCandidateSearch(e.target.value)} style={{ ...field, width: "100%", boxSizing: "border-box" }} />
         <input aria-label="재고 등록 판매가 검색" inputMode="numeric" placeholder="등록 판매가 (예: 3700)" value={candidatePriceSearch} onChange={e=>setCandidatePriceSearch(e.target.value)} style={{...field,width:"100%",boxSizing:"border-box",marginTop:6}} />
         <div style={{ display: "flex", gap: 8, margin: "9px 0" }}>

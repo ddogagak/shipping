@@ -43,22 +43,47 @@ const types = [
 function found(text:string, dictionary: readonly (readonly [string, RegExp])[]) { return dictionary.filter(([,re]) => re.test(text)).map(([label]) => label); }
 const intersection = (a:string[],b:string[]) => a.some(x => b.includes(x));
 const related = (a:string[],b:string[]) => a.some(x=>b.some(y=> (x==="씰"&&y==="스티커")||(x==="스티커"&&y==="씰")||(x==="피규어"&&y==="봉제")||(x==="봉제"&&y==="피규어")));
-export function recommendInventory(sale:{item_name:string; image_url:string|null;item_price:number}, candidate:{name:string;option:string;series:string;item_type?:string;image_url:string|null;sale_price:number|null;reference_prices?:number[];stock_status:string;random_member?:boolean}) {
+type KeywordCandidate = {name:string;option:string};
+const genericWords=new Set(["랜덤","세트","세트상품","상품","굿즈","정품","공식","한정","한정판","특전","미니","빅","일반","개별","단품","박스","묶음","판매","신상","클리어","투명","컬렉션","시리즈","버전","버젼","오리지널","프리미엄","캐릭터","애니","애니메이션","기념","스페셜","일본","다섯개","두개","세개","네개","한개","개입","random","set","mini","box","goods","ver","version","special","limited","clear","collection"]);
+const typeSuffixes=["피규어","아크릴스탠드","아크릴","캔뱃지","캔배지","뱃지","배지","스티커","키링","키홀더","카드","인형","마스코트","엽서","브로마이드","포스터","봉제","파우치"];
+export function productKeywords(name:string):string[] {
+  const words=baseProductName(name).toLowerCase().match(/[\p{L}\p{N}]+/gu)||[];
+  return [...new Set(words.map(word=>{
+    const suffix=typeSuffixes.find(t=>word.endsWith(t)&&word.length-t.length>=2);
+    return suffix?word.slice(0,-suffix.length):word;
+  }).filter(word=>word.length>=2&&word.length<=40&&(!/^[a-z]+$/.test(word)||word.length>=3)&&!/^\d/.test(word)&&!genericWords.has(word)&&!found(word,series).length&&!found(word,types).length))];
+}
+function keywordText(candidate:KeywordCandidate){
+  return normalizeProductName([candidate.name,candidate.option].join(" "));
+}
+// Count distinct product names/options so identical purchase lots do not make
+// a distinctive character or collection name look more common than it is.
+export function inventoryKeywordFrequency(saleName:string,candidates:readonly KeywordCandidate[]):Map<string,number>{
+  const result=new Map<string,number>();
+  const names=[...new Set(candidates.map(keywordText))];
+  for(const keyword of productKeywords(saleName))result.set(keyword,names.filter(name=>name.includes(keyword)).length);
+  return result;
+}
+export function recommendInventory(sale:{item_name:string; image_url:string|null;item_price:number}, candidate:{name:string;option:string;series:string;item_type?:string;image_url:string|null;sale_price:number|null;reference_prices?:number[];stock_status:string;random_member?:boolean}, frequency?:ReadonlyMap<string,number>) {
   const a = sale.item_name, b = [candidate.name,candidate.option,candidate.series,candidate.item_type].join(" ");
   const sa=found(a,series), sb=found(b,series), ta=found(a,types), tb=found(b,types);
   const sameSeries=intersection(sa,sb), sameType=intersection(ta,tb), nearType=related(ta,tb);
   const sameImage=Boolean(imageIdentity(sale.image_url))&&imageIdentity(sale.image_url)===imageIdentity(candidate.image_url);
   const sameName=normalizeProductName(a)===normalizeProductName(candidate.name);
-  // Strict priority: series, kind, then actual listed sale price. Price and
-  // appearance cannot outweigh a stronger series/kind match. A repeated-lot
+  const matches=(frequency?[...frequency.keys()]:productKeywords(a)).filter(word=>keywordText(candidate).includes(word))
+    .sort((x,y)=>(frequency?.get(x)||1)-(frequency?.get(y)||1)||y.length-x.length);
+  const rarity=matches.length?Math.max(1,frequency?.get(matches[0])||1):0;
+  const keywordScore=matches.length?2_000_000+Math.round(2_000_000/rarity)+Math.min(50_000,matches.length*5_000):0;
+  // Strict priority: series, distinctive product keyword, kind, then actual
+  // listed sale price. Rare keywords beat equally generic matches. A repeated-lot
   // group may have several different sale prices: compare its closest one.
   const prices=[candidate.sale_price,...(candidate.reference_prices||[])].filter((p):p is number=>typeof p==='number'&&Number.isFinite(p)&&p>0);
   const diff=sale.item_price>0&&prices.length?Math.min(...prices.map(p=>Math.abs(p-sale.item_price)/sale.item_price)):null;
   const nearPrice=diff!==null&&diff<=0.1000000001;
   const priceTier=nearPrice?2:diff!==null?1:0;
   const closeness=diff===null?0:Math.round(999/(1+diff))*10;
-  const score=(sameSeries?1_000_000:0)+(sameType?200_000:nearType?100_000:0)+priceTier*10_000+closeness+(sameImage?4:0)+(sameName?2:0)+(candidate.random_member?0:1);
-  const reasons=[sameSeries?"동일 작품":"",sameType?"동일 종류":nearType?"유사 종류":"",nearPrice?`판매가 ±10% (${(diff!*100).toFixed(1)}% 차이)`:"",sameImage?"동일 이미지":""].filter(Boolean);
+  const score=(sameSeries?10_000_000:0)+keywordScore+(sameType?200_000:nearType?100_000:0)+priceTier*10_000+closeness+(sameImage?4:0)+(sameName?2:0)+(candidate.random_member?0:1);
+  const reasons=[sameSeries?"동일 작품":"",matches.length?"상품 키워드: "+matches.slice(0,3).join(", ")+(frequency?" (최소 "+rarity+"종 일치)":""):"",sameType?"동일 종류":nearType?"유사 종류":"",nearPrice?`판매가 ±10% (${(diff!*100).toFixed(1)}% 차이)`:"",sameImage?"동일 이미지":""].filter(Boolean);
   const reason=reasons.join(" · ");
   return {score,reason};
 }
