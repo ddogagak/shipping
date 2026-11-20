@@ -159,7 +159,7 @@ export default function WiseInventoryLinkPage() {
     return candidates.filter(c => (candidateType === "all" || c.type === candidateType) &&
       (!query || [c.name, c.option, c.series, c.purchase_date, c.item_type].some(v => normalizeProductName(v).includes(query)) || (parsePriceSearch(candidateSearch)!==null&&matchesPriceSearch(candidateSearch,[c.sale_price,...(c.reference_prices||[])]))) && matchesPriceSearch(candidatePriceSearch,[c.sale_price,...(c.reference_prices||[])]))
       .map(c=>({...c, recommendation:samples.map(s=>recommendInventory(s,c)).sort((a,b)=>b.score-a.score)[0]||{score:0,reason:""}}))
-      .sort((a,b)=>b.recommendation.score-a.recommendation.score).slice(0,150);
+      .sort((a,b)=>Number(b.remaining_units>0)-Number(a.remaining_units>0)||b.recommendation.score-a.recommendation.score).slice(0,150);
   }, [candidateSearch, candidatePriceSearch, candidates, candidateType, sales, selected]);
   const candidateNames = useMemo(() => new Map([...Object.entries(inventoryNames),...candidates.map(c => [c.type + "|" + c.id, c.name + (c.option ? " · " + c.option : "")] as [string,string])]), [candidates,inventoryNames]);
   const selectedIds = useMemo(() => sales.filter(s => selected[s.id]).map(s => s.id), [sales, selected]);
