@@ -1,8 +1,9 @@
 "use client";
 import Link from "next/link";
+import {saleUnits} from "@/lib/sale-units";
 import {Fragment,useEffect,useMemo,useState,type CSSProperties} from "react";
 import {classifySeriesByKeywords,DEFAULT_ANALYSIS_SERIES,type SeriesKeywordRule} from "@/lib/item-analysis-series";
-type Sale={id:string;order_id:string;item_name:string;item_price:number;buyer_nickname:string;ordered_at:string;video_id?:string|null;image_url?:string|null};
+type Sale={id:string;order_id:string;item_name:string;item_price:number;sale_units?:number;buyer_nickname:string;ordered_at:string;video_id?:string|null;image_url?:string|null};
 type Report={ok:boolean;all_time_sales_rows:Sale[];settings?:{item_settings?:{id:string;deleted:boolean}[]}};
 type Classified=Sale & {series:string;matched:string[];month:string;manual:boolean};
 type Summary={series:string;revenue:number;items:number;orders:Set<string>;buyers:Set<string>;broadcasts:Set<string>};
@@ -33,14 +34,14 @@ const th:CSSProperties={padding:"11px 12px",borderBottom:"1px solid #e2e8f0",fon
 const td:CSSProperties={padding:"10px 12px",borderBottom:"1px solid #f1f5f9",textAlign:"right",whiteSpace:"nowrap"};
 function summarize(rows:Classified[]):Summary[]{
  const map=new Map<string,Summary>();
- for(const x of rows){const g=map.get(x.series)||{series:x.series,revenue:0,items:0,orders:new Set<string>(),buyers:new Set<string>(),broadcasts:new Set<string>()};g.revenue+=Number(x.item_price)||0;g.items++;g.orders.add(x.order_id);g.buyers.add(x.buyer_nickname.trim().toLocaleLowerCase());if(x.video_id)g.broadcasts.add(x.video_id);map.set(x.series,g)}
+ for(const x of rows){const g=map.get(x.series)||{series:x.series,revenue:0,items:0,orders:new Set<string>(),buyers:new Set<string>(),broadcasts:new Set<string>()};g.revenue+=Number(x.item_price)||0;g.items+=saleUnits(x.sale_units);g.orders.add(x.order_id);g.buyers.add(x.buyer_nickname.trim().toLocaleLowerCase());if(x.video_id)g.broadcasts.add(x.video_id);map.set(x.series,g)}
  return [...map.values()].sort((a,b)=>b.revenue-a.revenue);
 }
 type TitleDetail={key:string;name:string;series:string;imageKey:string;count:number;revenue:number;latestSaleAt:string;buyers:Set<string>;orders:Set<string>;rows:Classified[]};
 type TitleFamily={key:string;name:string;series:string;imageKey:string;count:number;revenue:number;latestSaleAt:string;buyers:Set<string>;orders:Set<string>;children:TitleDetail[]};
 function ReactFragmentItem({item,expanded,onToggle,onClassify,options,saving,manual,checked,onCheckedChange,selectable}:{item:TitleDetail;expanded:boolean;onToggle:()=>void;onClassify:(name:string,imageKey:string,series:string)=>void;options:string[];saving:boolean;manual:boolean;checked:boolean;onCheckedChange:(value:boolean)=>void;selectable:boolean}){
  const buyers=new Map<string,{name:string;revenue:number;count:number;orders:Set<string>}>();
- for(const sale of item.rows){const key=sale.buyer_nickname.trim().toLocaleLowerCase();const buyer=buyers.get(key)||{name:sale.buyer_nickname,revenue:0,count:0,orders:new Set<string>()};buyer.revenue+=Number(sale.item_price)||0;buyer.count++;buyer.orders.add(sale.order_id);buyers.set(key,buyer)}
+ for(const sale of item.rows){const key=sale.buyer_nickname.trim().toLocaleLowerCase();const buyer=buyers.get(key)||{name:sale.buyer_nickname,revenue:0,count:0,orders:new Set<string>()};buyer.revenue+=Number(sale.item_price)||0;buyer.count+=saleUnits(sale.sale_units);buyer.orders.add(sale.order_id);buyers.set(key,buyer)}
  const ranking=[...buyers.values()].sort((a,b)=>b.revenue-a.revenue);
  return <><tr style={{cursor:"pointer",background:expanded?"#f0fdfa":"transparent"}} onClick={onToggle}>
  <td style={{...td,textAlign:"center"}} onClick={event=>event.stopPropagation()}><input type="checkbox" aria-label={item.name+" 일괄 분류 선택"} checked={checked} disabled={!selectable||saving} onChange={e=>onCheckedChange(e.target.checked)}/></td>
@@ -97,7 +98,7 @@ export default function WiseItemAnalysis(){
    // Identical labels may refer to entirely different goods: keep their photo identities distinct.
    const key=x.series+"|"+itemKey(x.item_name)+"|"+imageKey;
    const v:TitleDetail=map.get(key)??{key,name:x.item_name,series:x.series,imageKey,count:0,revenue:0,latestSaleAt:"",buyers:new Set<string>(),orders:new Set<string>(),rows:[]};
-   v.count++;v.revenue+=Number(x.item_price)||0;
+   v.count+=saleUnits(x.sale_units);v.revenue+=Number(x.item_price)||0;
    if(Number.isFinite(Date.parse(x.ordered_at))&&(!v.latestSaleAt||Date.parse(x.ordered_at)>Date.parse(v.latestSaleAt)))v.latestSaleAt=x.ordered_at;
    v.buyers.add(x.buyer_nickname.trim().toLocaleLowerCase());
    v.orders.add(x.order_id);v.rows.push(x);map.set(key,v);
@@ -172,11 +173,11 @@ export default function WiseItemAnalysis(){
    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(185px,1fr))",gap:12,marginBottom:15}}>
     {[
      ["실제 상품 매출",cash(revenue)+"원","매출관리 아이템 판매금액 합계"],
-     ["판매 아이템",cash(filtered.length)+"개","판매된 개별 아이템 건수"],
+     ["판매 아이템",cash(filtered.reduce((sum,x)=>sum+saleUnits(x.sale_units),0))+"개",cash(filtered.length)+"건의 실제 낱개 수량"],
      ["구매 고객",cash(new Set(filtered.map(x=>x.buyer_nickname)).size)+"명","닉네임 기준"],
      ["구매 발생 방송",cash(new Set(filtered.map(x=>x.video_id).filter(Boolean)).size)+"회","방송 ID 있는 건 기준"],
-     ["작품 분류 확인",ratio(known.length,filtered.length),cash(known.length)+"개 분류"],
-     ["미분류·충돌",cash(unknown.length)+"개",cash(unknown.reduce((n,x)=>n+Number(x.item_price||0),0))+"원"]
+     ["작품 분류 확인",ratio(known.length,filtered.length),cash(known.length)+"건 분류"],
+     ["미분류·충돌",cash(unknown.length)+"건",cash(unknown.reduce((n,x)=>n+Number(x.item_price||0),0))+"원"]
     ].map(([name,value,desc])=><div key={name} style={surface}><div style={{fontSize:12,color:"#64748b"}}>{name}</div><div style={{fontSize:22,fontWeight:800,margin:"8px 0"}}>{value}</div><div style={{fontSize:12,color:"#64748b"}}>{desc}</div></div>)}
    </div>
    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,480px),1fr))",gap:15,marginBottom:15}}>

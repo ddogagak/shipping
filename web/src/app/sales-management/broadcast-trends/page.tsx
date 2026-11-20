@@ -1,10 +1,11 @@
 "use client";
 import Link from "next/link";
+import {saleUnits} from "@/lib/sale-units";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 
-type SaleRow = { id:string; order_id:string; item_name:string; item_price:number; buyer_nickname:string; sold_at?:string|null; video_id?:string|null };
+type SaleRow = { id:string; order_id:string; item_name:string; item_price:number; sale_units?:number; buyer_nickname:string; sold_at?:string|null; video_id?:string|null };
 type Report = { ok:boolean; message?:string; all_time_sales_rows:SaleRow[]; settings?:{ item_settings?:Array<{id:string;deleted:boolean}> }; last_imported_at?:string|null };
-type Sale = { at:number; amount:number; id:string; buyer:string };
+type Sale = { at:number; amount:number; id:string; buyer:string; units:number };
 type Session = { id:string; first:number; last:number; sales:number; items:number; buyers:number; salesList:Sale[]; month:string; duration:number };
 
 const money=(n:number)=>Math.round(n).toLocaleString("ko-KR");
@@ -27,7 +28,7 @@ function buildSessions(rows:SaleRow[],deleted:Set<string>){
   const at=Date.parse(row.sold_at||"");
   if(!row.video_id||!Number.isFinite(at)){unmapped++;continue;}
   const bucket=map.get(row.video_id)||{list:[],buyers:new Set<string>()};
-  bucket.list.push({at,amount:Number(row.item_price)||0,id:row.id,buyer:row.buyer_nickname||row.order_id});
+  bucket.list.push({at,amount:Number(row.item_price)||0,id:row.id,buyer:row.buyer_nickname||row.order_id,units:saleUnits(row.sale_units)});
   bucket.buyers.add(row.buyer_nickname||row.order_id);
   map.set(row.video_id,bucket);
  }
@@ -36,7 +37,7 @@ function buildSessions(rows:SaleRow[],deleted:Set<string>){
   info.list.sort((a,b)=>a.at-b.at);
   const first=info.list[0]?.at,last=info.list[info.list.length-1]?.at;
   if(first===undefined||last===undefined)continue;
-  sessions.push({id,first,last,month:monthOf(first),duration:last-first,sales:info.list.reduce((s,x)=>s+x.amount,0),items:info.list.length,buyers:info.buyers.size,salesList:info.list});
+  sessions.push({id,first,last,month:monthOf(first),duration:last-first,sales:info.list.reduce((s,x)=>s+x.amount,0),items:info.list.reduce((s,x)=>s+x.units,0),buyers:info.buyers.size,salesList:info.list});
  }
  return {sessions:sessions.sort((a,b)=>b.first-a.first),unmapped};
 }
@@ -84,7 +85,7 @@ function buildClockMetrics(sessions:Session[],step:number,basis:DayBasis){
   for(const sale of session.salesList){
    const index=slotFor(sale.at),day=dayFor(sale.at,session);
    for(const b of [times[index],days[day],cells[index][day]]){
-    b.amount+=sale.amount;b.items++;b.buyers.add(sale.buyer);b.saleSessions.add(session.id);
+    b.amount+=sale.amount;b.items+=sale.units;b.buyers.add(sale.buyer);b.saleSessions.add(session.id);
     // A single sale without measurable exposure cannot establish an hourly rate.
     if(b.sessions.has(session.id))b.rateAmount+=sale.amount;
    }

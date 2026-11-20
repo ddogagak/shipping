@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
+import { effectiveSaleUnits } from "@/lib/sale-units";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -71,7 +72,7 @@ async function getSales(videoIds: string[]) {
   const sales: any[] = [];
   for (let start = 0; ; start += PAGE_SIZE) {
     const { data, error } = await sb.from("domestic_wise_item_photo")
-      .select("wise_stock_id,video_id,wise_user_id,buyer_nickname,item_name,item_price,image_url,sold_at")
+      .select("wise_stock_id,video_id,wise_user_id,buyer_nickname,item_name,item_price,image_url,sold_at,actual_sale_units")
       .in("video_id", videoIds).order("sold_at", { ascending: true })
       .order("wise_stock_id", { ascending: true })
       .range(start, start + PAGE_SIZE - 1);
@@ -105,6 +106,8 @@ async function getSales(videoIds: string[]) {
       video_id: row.video_id, wise_user_id: row.wise_user_id,
       buyer_nickname: row.buyer_nickname,
       item_name: row.item_name, item_price: Number(row.item_price || 0),
+      actual_sale_units: row.actual_sale_units,
+      sale_units: effectiveSaleUnits(row.actual_sale_units, linkMap.get(String(row.wise_stock_id)) || []),
       image_url: row.image_url, sold_at: row.sold_at,
       links: linkMap.get(String(row.wise_stock_id)) || []
     }))
@@ -211,14 +214,22 @@ export async function POST(request: Request) {
     const ids = stockIds(body.stock_ids);
     if (!ids.length) return fail("실판매 항목을 1~300개 선택해줘.");
     const action = String(body.action || "");
-    if (!["link", "unlink"].includes(action)) return fail("연결 또는 해제 작업을 선택해줘.");
+    if (!["link", "unlink", "set_units"].includes(action)) return fail("연결 또는 해제 작업을 선택해줘.");
 
     const sb = createServiceRoleClient();
     const { data: actual, error: actualError } = await sb.from("domestic_wise_item_photo")
       .select("wise_stock_id,video_id").in("wise_stock_id", ids);
     if (actualError) throw actualError;
-    if (!actual || actual.length !== ids.length || actual.some(row => !row.video_id)) {
+    if (!actual || actual.length !== ids.length || (action !== "set_units" && actual.some(row => !row.video_id))) {
       return fail("선택한 판매기록이 존재하지 않거나 방송 정보가 없어. 새로고침 후 다시 선택해줘.", 409);
+    }
+
+    if (action === "set_units") {
+      const units = Number(body.sale_units);
+      if (!Number.isSafeInteger(units) || units < 1 || units > 9999) return fail("실제 판매 수량은 1~9999개로 입력해줘.");
+      const { data, error } = await sb.rpc("wise_set_sale_units", { p_ids: ids, p_units: units });
+      if (error) throw error;
+      return NextResponse.json({ ok: true, ...data });
     }
 
     if (action === "unlink") {

@@ -1,11 +1,13 @@
 "use client";
 import Link from "next/link";
+import SaleUnitsEditor, {saveSaleUnits} from "./SaleUnitsEditor";
+import {saleUnits} from "@/lib/sale-units";
 import {analysisSeriesForSale,type SeriesKeywordRule} from "@/lib/item-analysis-series";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 
 type SortKey = "ordered_at" | "buyer_nickname" | "item_name" | "item_price";
 type SortDirection = "asc" | "desc";
-type SaleRow = { id: string; order_id: string; item_name: string; item_price: number; buyer_nickname: string; ordered_at: string; image_url?: string | null; video_id?: string | null; sold_at?: string | null };
+type SaleRow = { id: string; order_id: string; item_name: string; item_price: number; sale_units?:number; buyer_nickname: string; ordered_at: string; image_url?: string | null; video_id?: string | null; sold_at?: string | null };
 type Buyer = { buyer_nickname: string; sales: number; order_count: number; item_count: number };
 type Period = { key: string; sales: number; order_count: number; item_count: number; sales_rows: SaleRow[] };
 type ItemPref = { includeCost: boolean; memo: string; deleted?: boolean };
@@ -38,7 +40,7 @@ function broadcastMetrics(rows: SaleRow[], prefs: ItemPrefs, granularity: "month
     record.first = Math.min(record.first, sold);
     record.last = Math.max(record.last, sold);
     record.sales += Number(row.item_price || 0);
-    record.itemCount++;
+    record.itemCount+=saleUnits(row.sale_units);
     videos.set(row.video_id, record);
   }
   const metrics = new Map<string, BroadcastMetrics>();
@@ -118,7 +120,7 @@ function visibleRows(rows: SaleRow[], prefs: ItemPrefs) {
 }
 function summarizeRows(rows: SaleRow[], prefs: ItemPrefs) {
   const visible = visibleRows(rows, prefs);
-  return { sales: visible.reduce((sum, row) => sum + Number(row.item_price || 0), 0), item_count: visible.length, order_count: new Set(visible.map(row => row.order_id)).size };
+  return { sales: visible.reduce((sum, row) => sum + Number(row.item_price || 0), 0), item_count: visible.reduce((sum,row)=>sum+saleUnits(row.sale_units),0), order_count: new Set(visible.map(row => row.order_id)).size };
 }
 function buyersFromRows(rows: SaleRow[], prefs: ItemPrefs): Buyer[] {
   const map = new Map<string, { sales: number; orderIds: Set<string>; item_count: number }>();
@@ -127,7 +129,7 @@ function buyersFromRows(rows: SaleRow[], prefs: ItemPrefs): Buyer[] {
     const buyer = map.get(name) || { sales: 0, orderIds: new Set<string>(), item_count: 0 };
     buyer.sales += Number(row.item_price || 0);
     buyer.orderIds.add(row.order_id);
-    buyer.item_count++;
+    buyer.item_count+=saleUnits(row.sale_units);
     map.set(name, buyer);
   }
   return Array.from(map, ([buyer_nickname, row]) => ({ buyer_nickname, sales: row.sales, order_count: row.orderIds.size, item_count: row.item_count })).sort((a, b) => b.sales - a.sales);
@@ -274,7 +276,7 @@ export default function SalesManagementPage() {
       const name = nameKey(row.item_name);
       if (!name) continue;
       const key = JSON.stringify([row.order_id, name]);
-      groupCounts.set(key, (groupCounts.get(key) ?? 0) + 1);
+      groupCounts.set(key, (groupCounts.get(key) ?? 0) + saleUnits(row.sale_units));
     }
     for (const row of rows) {
       if (counts[row.id] != null) continue;
@@ -331,6 +333,14 @@ export default function SalesManagementPage() {
   const allRowsById = useMemo(() => new Map((report?.all_time_sales_rows || []).map(row => [row.id, row])), [report]);
   const deletedItems = Object.entries(savedPrefs).filter(([, pref]) => pref.deleted);
   const hasUnsaved = JSON.stringify(savedPrefs) !== JSON.stringify(draftPrefs);
+  async function editUnits(ids:string[],units:number){
+    if(saving||hasUnsaved||!ids.length||ids.length>300)return;
+    if(!window.confirm(ids.length+"건의 실제 판매 수량을 건당 "+units+"개로 저장할까? 기존에 차감한 단일 연결은 차이만 반영돼."))return;
+    setSaving(true);setError("");
+    try{const data=await saveSaleUnits(ids,units);setNotice(data.count+"건 실제 판매 수량 저장 완료");await refresh();}
+    catch(e){setError(e instanceof Error?e.message:"수량 저장 실패");}
+    finally{setSaving(false);}
+  }
   const expectedSettlement = Math.round(Number(report?.wise_gross_total || 0) * 0.94 - settledAmount);
 
   const saveKeywords = async (next: string[]) => {
@@ -527,6 +537,7 @@ export default function SalesManagementPage() {
         <div style={{ ...panelTitle, display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           <span>{selectedKey ? periodLabel(selectedKey) : "선택 기간"} 판매 내역</span>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12}}>건당 실제 수량 <SaleUnitsEditor key={selectedItems.join(",")} units={1} disabled={saving||hasUnsaved||!selectedItems.length||selectedItems.length>300} bulk onSave={n=>editUnits(selectedItems,n)}/></label>
             <button style={button} disabled={!selectedItems.length} onClick={() => applyToSelected({ deleted: true })}>삭제</button>
             <button style={{ ...button, background: "#111827", color: "#fff" }} disabled={!hasUnsaved || saving} onClick={saveItemSettings}>{saving ? "저장 중..." : "저장"}</button>
           </div>
@@ -549,7 +560,7 @@ export default function SalesManagementPage() {
                   <div><b>{row.item_name}</b>{pendingDelete && <div style={{ color: "#b45309", fontSize: 11 }}>저장하면 삭제</div>}</div>
                 </div></td>
                 <td style={td}><span style={{...chip,whiteSpace:"nowrap"}}>{row.series}</span></td>
-                <td style={td}>{money(row.item_price)}원</td>
+                <td style={td}><b>{money(row.item_price)}원</b><div style={{fontSize:12,color:"#475569",margin:"4px 0"}}>실제 {saleUnits(row.sale_units)}개 · 개당 {money(row.item_price/saleUnits(row.sale_units))}원</div><SaleUnitsEditor key={row.id+"-"+row.sale_units} units={saleUnits(row.sale_units)} disabled={saving||hasUnsaved} onSave={n=>editUnits([row.id],n)}/></td>
                 <td style={td}><button onClick={() => updateDraft(row.key, { includeCost: !draft.includeCost })} aria-label="판매원가 포함 여부 전환" style={{ ...button, minWidth: 44, padding: "5px 10px", background: draft.includeCost ? "#dcfce7" : "#f3f4f6", borderColor: draft.includeCost ? "#86efac" : "#d1d5db", color: draft.includeCost ? "#166534" : "#6b7280" }}>{draft.includeCost ? "Y" : "N"}</button></td>
                 <td style={td} title={`같은 와이스 주문에서 동일한 상품명 수량 (#번호 제외): ${row.sameItemCount ?? "확인 불가"}개`}><b style={{ color: Number(row.sameItemCount || 0) > 1 ? "#1d4ed8" : "#475569" }}>{row.sameItemCount == null ? "—" : row.sameItemCount + "개"}</b></td>
                 <td style={td}><input value={draft.memo} onChange={e => updateDraft(row.key, { memo: e.target.value })} placeholder="메모 입력" style={{ width: 220, maxWidth: "45vw", height: 32, padding: "0 8px", border: "1px solid #d1d5db", borderRadius: 6 }} /></td>

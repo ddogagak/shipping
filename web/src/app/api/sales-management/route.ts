@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
+import { saleUnits } from "@/lib/sale-units";
 
 export const runtime = "nodejs";
 const DEFAULT_EXCLUDED = ["야생", "용자", "소장", "양도", "양고"];
@@ -113,7 +114,7 @@ function addItem(group: Map<string, any>, item: any, orderId: string) {
   const itemName = String(item.item_name || "").trim() || "(상품명 없음)";
   const key = itemName.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
   const row = group.get(key) || { item_name: itemName, quantity: 0, sales: 0, order_ids: new Set<string>() };
-  row.quantity += 1;
+  row.quantity += saleUnits(item.sale_units);
   row.sales += money(item.item_price);
   row.order_ids.add(orderId);
   group.set(key, row);
@@ -121,7 +122,7 @@ function addItem(group: Map<string, any>, item: any, orderId: string) {
 function addBuyer(map: Map<string, any>, buyerName: string, item: any, orderId: string) {
   const buyer = map.get(buyerName) || { buyer_nickname: buyerName, sales: 0, item_count: 0, order_ids: new Set<string>(), items: new Map<string, any>() };
   buyer.sales += money(item.item_price);
-  buyer.item_count += 1;
+  buyer.item_count += saleUnits(item.sale_units);
   buyer.order_ids.add(orderId);
   addItem(buyer.items, item, orderId);
   map.set(buyerName, buyer);
@@ -131,9 +132,9 @@ function addPeriod(map: Map<string, any>, key: string, order: any, items: any[])
   const buyerName = String(order.buyer_nickname || "").trim() || "(닉네임 없음)";
   for (const item of items) {
     const orderId = String(order.id);
-    const row = { id: String(item.id), order_id: orderId, item_name: item.item_name, item_price: money(item.item_price), buyer_nickname: buyerName, ordered_at: item.sold_at || order.ordered_at, image_url: item.image_url || null, video_id: item.video_id || null, sold_at: item.sold_at || null };
+    const row = { id: String(item.id), order_id: orderId, item_name: item.item_name, item_price: money(item.item_price), sale_units: saleUnits(item.sale_units), buyer_nickname: buyerName, ordered_at: item.sold_at || order.ordered_at, image_url: item.image_url || null, video_id: item.video_id || null, sold_at: item.sold_at || null };
     bucket.sales += row.item_price;
-    bucket.item_count += 1;
+    bucket.item_count += row.sale_units;
     bucket.order_ids.add(orderId);
     bucket.sales_rows.push(row);
     addItem(bucket.items, item, orderId);
@@ -194,14 +195,25 @@ async function readSettings() {
 
 async function buildReport(excludedKeywords: string[]) {
   const terms = excludedKeywords.map(term => term.toLowerCase());
-  const itemRows = await readAll("domestic_wise_item_photo", "wise_stock_id,wise_order_id,buyer_nickname,ordered_at,sold_at,item_name,item_price,image_url,video_id,imported_at");
+  const itemRows = await readAll("domestic_wise_item_photo", "wise_stock_id,wise_order_id,buyer_nickname,ordered_at,sold_at,item_name,item_price,image_url,video_id,imported_at,actual_sale_units");
+  const db = createServiceRoleClient();
+  const linkedUnits = new Map<string, number>();
+  for (let start = 0; ; start += 1000) {
+    const {data, error} = await db.from("wise_sale_inventory_links").select("wise_stock_id,quantity").order("id").range(start,start+999);
+    if (error) throw error;
+    for (const link of data || []) {
+      const id = String(link.wise_stock_id);
+      linkedUnits.set(id, (linkedUnits.get(id) || 0) + saleUnits(link.quantity));
+    }
+    if ((data || []).length < 1000) break;
+  }
   const orders = new Map<string, any>();
   let lastImportedAt = "";
   for (const row of itemRows) {
     const id = String(row.wise_order_id || "");
     if (!id) continue;
     const order = orders.get(id) || { id, buyer_nickname: row.buyer_nickname || "", ordered_at: row.ordered_at, items: [] };
-    order.items.push({ id: String(row.wise_stock_id), item_name: String(row.item_name || ""), item_price: money(row.item_price), sold_at: row.sold_at || null, video_id: row.video_id || null, image_url: String(row.image_url || "") || null });
+    order.items.push({ id: String(row.wise_stock_id), item_name: String(row.item_name || ""), item_price: money(row.item_price), sale_units: row.actual_sale_units != null ? saleUnits(row.actual_sale_units) : linkedUnits.get(String(row.wise_stock_id)) ?? 1, sold_at: row.sold_at || null, video_id: row.video_id || null, image_url: String(row.image_url || "") || null });
     orders.set(id, order);
     const imported = String(row.imported_at || "");
     if (imported > lastImportedAt) lastImportedAt = imported;
@@ -223,7 +235,7 @@ async function buildReport(excludedKeywords: string[]) {
         .replace(/^(?:#\s*\d+\s*)+/, "")
         .replace(/(?:\s*#\s*\d+)+\s*$/, "")
         .replace(/\s+/g, "");
-      if (name) byName.set(name, (byName.get(name) || 0) + 1);
+      if (name) byName.set(name, (byName.get(name) || 0) + saleUnits(item.sale_units));
       return { id: String(item.id), name };
     });
     for (const item of normalized) {
@@ -243,12 +255,12 @@ async function buildReport(excludedKeywords: string[]) {
     const items = order.items.filter((item: any) => {
       const haystack = item.item_name.normalize("NFKC").toLowerCase();
       const excluded = terms.some(term => haystack.includes(term));
-      if (excluded) excludedItemCount++;
+      if (excluded) excludedItemCount+=saleUnits(item.sale_units);
       return !excluded;
     });
     if (!items.length) continue;
     includedOrderCount++;
-    includedItemCount += items.length;
+    includedItemCount += items.reduce((sum:number,item:any)=>sum+saleUnits(item.sale_units),0);
     const buyerName = String(order.buyer_nickname || "").trim() || "(닉네임 없음)";
     for (const item of items) {
       const itemTime = item.sold_at || order.ordered_at;
@@ -258,7 +270,7 @@ async function buildReport(excludedKeywords: string[]) {
       const quarterKey = date.slice(0, 4) + "-Q" + (Math.floor((Number(date.slice(5, 7)) - 1) / 3) + 1);
       addPeriod(monthly, monthKey, order, [item]);
       addPeriod(quarterly, quarterKey, order, [item]);
-      allTimeSalesRows.push({ id: String(item.id), order_id: String(order.id), item_name: item.item_name, item_price: money(item.item_price), buyer_nickname: buyerName, ordered_at: itemTime, image_url: item.image_url || null, video_id: item.video_id || null, sold_at: item.sold_at || null });
+      allTimeSalesRows.push({ id: String(item.id), order_id: String(order.id), item_name: item.item_name, item_price: money(item.item_price), sale_units: saleUnits(item.sale_units), buyer_nickname: buyerName, ordered_at: itemTime, image_url: item.image_url || null, video_id: item.video_id || null, sold_at: item.sold_at || null });
     }
   }
   return {
