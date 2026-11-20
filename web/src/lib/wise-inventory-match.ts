@@ -5,6 +5,15 @@ export const baseProductName = (value: string) => String(value || "").normalize(
   .replace(/^\s*#\s*\d+\s*/, "").replace(/\s*#\s*\d+\s*$/, "").trim();
 export const imageIdentity = (value: string | null) => String(value || "").trim().split("#")[0];
 
+type SaleProductIdentity = {item_name:string;item_price:number;image_url:string|null;manual_series?:string|null};
+export function saleProductKey(row:SaleProductIdentity):string {
+  return JSON.stringify([normalizeProductName(row.item_name),row.item_price,imageIdentity(row.image_url),row.manual_series||""]);
+}
+// Identical product labels/photos can be reused for different items in later broadcasts.
+export function saleBroadcastGroupKey(row:SaleProductIdentity&{video_id:string;id:string}):string {
+  return JSON.stringify([row.video_id||null,row.video_id?null:row.id,saleProductKey(row)]);
+}
+
 const series = [
   ["치이카와", /치이카와|먼작귀|치이|chiikawa|ちいかわ|吉伊卡哇/i],
   ["나히아", /나히아|나의\s*히어로|나의히어로|my\s*hero\s*academia|ヒーローアカデミア/i],

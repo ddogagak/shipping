@@ -4,7 +4,15 @@ import ts from 'typescript';
 
 const src=readFileSync(new URL('./src/lib/wise-inventory-match.ts',import.meta.url),'utf8');
 const code=ts.transpileModule(src,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
-const {recommendInventory,inventoryKeywordFrequency,productKeywords}=await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+const {recommendInventory,inventoryKeywordFrequency,productKeywords,saleBroadcastGroupKey,saleProductKey}=await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+const badge={id:'1',video_id:'broadcast-a',item_name:'캔뱃지 #1',item_price:4700,image_url:'https://example.com/badge.png',manual_series:'나의히어로아카데미아'};
+assert.equal(saleBroadcastGroupKey(badge),saleBroadcastGroupKey({...badge,id:'2',item_name:'캔뱃지 #2'}),'same broadcast and product group together');
+assert.notEqual(saleBroadcastGroupKey(badge),saleBroadcastGroupKey({...badge,video_id:'broadcast-b'}),'different broadcasts never group together');
+assert.notEqual(saleBroadcastGroupKey(badge),saleBroadcastGroupKey({...badge,manual_series:'헌터헌터'}),'different manual series never group together');
+assert.notEqual(saleBroadcastGroupKey(badge),saleBroadcastGroupKey({...badge,item_price:5000}));
+assert.notEqual(saleBroadcastGroupKey(badge),saleBroadcastGroupKey({...badge,image_url:'https://example.com/other.png'}));
+assert.notEqual(saleBroadcastGroupKey({...badge,video_id:''}),saleBroadcastGroupKey({...badge,video_id:'',id:'2'}),'unknown broadcast rows never group');
+assert.equal(saleProductKey(badge),saleProductKey({...badge,video_id:'broadcast-b'}),'cross-broadcast matching remains possible when explicitly selected');
 const sale={item_name:'치이카와 클리어카드 #1',image_url:'https://example.com/a.png',item_price:10000};
 const candidate=(name,price,extra={})=>({name,option:'',series:'',item_type:'',image_url:null,sale_price:price,stock_status:'active',...extra});
 const rec=(name,price,extra)=>recommendInventory(sale,candidate(name,price,extra));

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { baseProductName, imageIdentity, normalizeProductName, recommendInventory, inventoryKeywordFrequency } from "@/lib/wise-inventory-match";
+import { baseProductName, imageIdentity, normalizeProductName, recommendInventory, inventoryKeywordFrequency, saleBroadcastGroupKey, saleProductKey } from "@/lib/wise-inventory-match";
 import SaleUnitsEditor, {saveSaleUnits} from "../SaleUnitsEditor";
 import {saleUnits} from "@/lib/sale-units";
 import {manualSeriesForSale} from "@/lib/item-analysis-series";
@@ -11,7 +11,7 @@ type LinkRow = { id: number; wise_stock_id: number | string; purchase_item_id: s
 type Sale = { id: string; video_id: string; wise_user_id: string | null; buyer_nickname: string; item_name: string; item_price: number; sale_units: number; image_url: string | null; sold_at: string | null; links: LinkRow[]; manual_series?:string|null };
 type Show = { video_id: string; first_sale: string; last_sale: string; revenue: number; count: number; buyer_count: number };
 type Candidate = { type: "purchase_item" | "random_box" | "inventory_group"; id: string; name: string; option: string; image_url: string | null; series: string; unit_price: number; currency: string; component_count: number; sale_price: number | null; reference_prices?:number[]; stock_status: string; purchase_date: string; item_type: string; remaining_units: number; random_member: boolean };
-type Family = { key: string; title: string; count: number; price:number; revenue: number; linked: number; image: string | null; items: Sale[] };
+type Family = { key: string; title: string; count: number; price:number; revenue: number; linked: number; image: string | null; broadcastAt:string|null; items: Sale[] };
 
 const panel: CSSProperties = { border: "1px solid #e2e8f0", borderRadius: 13, padding: 16, background: "#fff" };
 const field: CSSProperties = { padding: "9px 11px", borderRadius: 8, border: "1px solid #cbd5e1", color: "#0f172a", background: "#fff", maxWidth: "100%" };
@@ -34,7 +34,7 @@ function matchesPriceSearch(query:string,prices:Array<number|null|undefined>):bo
 const kst = (s: string | null) => s ? new Date(s).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }) : "—";
 function familyOf(row: Sale) {
   const name = baseProductName(row.item_name);
-  const key = normalizeProductName(row.item_name) + "|" + row.item_price + "|" + imageIdentity(row.image_url);
+  const key = saleBroadcastGroupKey(row);
   return { key, name };
 }
 async function requestJson(url: string, init?: RequestInit) {
@@ -141,9 +141,10 @@ export default function WiseInventoryLinkPage() {
 
   const familyGroups = useMemo(() => {
     const map = new Map<string, Family>();
+    const broadcastDates = new Map(shows.map(show=>[show.video_id,show.first_sale]));
     for (const row of sales) {
       const { key, name } = familyOf(row);
-      const g = map.get(key) || { key, title: name + " · " + won(row.item_price), count: 0, price:row.item_price, revenue: 0, linked: 0, image: row.image_url || null, items: [] };
+      const g = map.get(key) || { key, title: name + " · " + won(row.item_price), count: 0, price:row.item_price, revenue: 0, linked: 0, image: row.image_url || null, broadcastAt: broadcastDates.get(row.video_id)||row.sold_at, items: [] };
       g.count += 1;
       g.revenue += row.item_price;
       g.linked += row.links?.length ? 1 : 0;
@@ -152,7 +153,7 @@ export default function WiseInventoryLinkPage() {
       map.set(key, g);
     }
     return [...map.values()].sort((a, b) => b.count - a.count || a.title.localeCompare(b.title));
-  }, [sales]);
+  }, [sales,shows]);
   const filteredGroups = useMemo(() => familyGroups.filter(g =>
     (!onlyUnlinked || g.linked < g.count) && (!groupSearch || g.title.toLowerCase().includes(groupSearch.trim().toLowerCase()) || (parsePriceSearch(groupSearch)!==null&&matchesPriceSearch(groupSearch,[g.price]))) && matchesPriceSearch(salePriceSearch,[g.price])
   ).sort((a,b)=>(saleSort==='price_desc'?b.price-a.price:saleSort==='price_asc'?a.price-b.price:0)||b.items.reduce((n,s)=>n+saleUnits(s.sale_units),0)-a.items.reduce((n,s)=>n+saleUnits(s.sale_units),0)||a.title.localeCompare(b.title)), [familyGroups, groupSearch, onlyUnlinked,saleSort,salePriceSearch]);
@@ -160,7 +161,7 @@ export default function WiseInventoryLinkPage() {
     const query = normalizeProductName(candidateSearch);
     const chosen = sales.filter(row => selected[row.id]);
     // Compare distinct selected families rather than every identical sale row.
-    const samples = [...new Map(chosen.map(row=>[familyOf(row).key+"|"+(row.manual_series||""),row])).values()].map(s=>({sale:s,frequency:inventoryKeywordFrequency(s.item_name,candidates)}));
+    const samples = [...new Map(chosen.map(row=>[saleProductKey(row),row])).values()].map(s=>({sale:s,frequency:inventoryKeywordFrequency(s.item_name,candidates)}));
     return candidates.filter(c => (candidateType === "all" || c.type === candidateType) &&
       (!query || [c.name, c.option, c.series, c.purchase_date, c.item_type].some(v => normalizeProductName(v).includes(query)) || (parsePriceSearch(candidateSearch)!==null&&matchesPriceSearch(candidateSearch,[c.sale_price,...(c.reference_prices||[])]))) && matchesPriceSearch(candidatePriceSearch,[c.sale_price,...(c.reference_prices||[])]))
       .map(c=>({...c, recommendation:samples.map(s=>recommendInventory(s.sale,c,s.frequency)).sort((a,b)=>b.score-a.score)[0]||{score:0,reason:""}}))
@@ -172,7 +173,7 @@ export default function WiseInventoryLinkPage() {
   const applicableSales = selectedSales.filter(s=>deductionMode==="historical" || deductionMode==="future" && cutover && s.sold_at && new Date(s.sold_at)>=new Date(cutover));
   const selectedUnitTotal = selectedSales.reduce((sum,s)=>sum+saleUnits(s.sale_units),0);
   const commonUnits = selectedSales.length && selectedSales.every(s=>s.sale_units===selectedSales[0].sale_units) ? saleUnits(selectedSales[0].sale_units) : 1;
-  const canRemember = selectedSales.length>0 && selectedSales.every(s=>Boolean(imageIdentity(s.image_url)) && familyOf(s).key===familyOf(selectedSales[0]).key);
+  const canRemember = selectedSales.length>0 && selectedSales.every(s=>Boolean(imageIdentity(s.image_url)) && saleProductKey(s)===saleProductKey(selectedSales[0]));
   const linkedCount = useMemo(() => sales.filter(s => s.links?.length).length, [sales]);
   const selectedTargets = useMemo(() => Object.entries(targets).filter(([, quantity]) => quantity >= 1).map(([key, quantity]) => {
     const candidate = candidates.find(c => c.type + "|" + c.id === key);
@@ -267,7 +268,7 @@ export default function WiseInventoryLinkPage() {
     {videoIds.length > 0 && <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.8fr) minmax(320px, 1fr)", gap: 12, alignItems: "start" }}>
       <section style={panel}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <div><b style={{ fontSize: 17 }}>실제 판매기록</b><div style={{ fontSize: 12, color: "#64748b" }}>전체 {sales.length}건 · 실제 {sales.reduce((n,s)=>n+saleUnits(s.sale_units),0)}개 · 연결 {linkedCount}건 · 미연결 {sales.length - linkedCount}건</div></div>
+          <div><b style={{ fontSize: 17 }}>실제 판매기록</b><div style={{ fontSize: 12, color: "#64748b" }}>전체 {sales.length}건 · 실제 {sales.reduce((n,s)=>n+saleUnits(s.sale_units),0)}개 · 연결 {linkedCount}건 · 미연결 {sales.length - linkedCount}건</div><div style={{fontSize:12,color:"#64748b"}}>같은 방송 내 동일 상품만 묶어서 표시</div></div>
           <input aria-label="판매상품 검색" placeholder="상품명 / 판매가 검색" value={groupSearch} onChange={e => setGroupSearch(e.target.value)} style={field} />
           <input aria-label="실제 판매가 검색" inputMode="numeric" placeholder="판매가 (예: 3700)" value={salePriceSearch} onChange={e=>setSalePriceSearch(e.target.value)} style={{...field,width:140}} />
           <select aria-label="판매목록 정렬" value={saleSort} onChange={e=>setSaleSort(e.target.value as typeof saleSort)} style={field}><option value="quantity">판매수량 많은순</option><option value="price_desc">판매가 높은순</option><option value="price_asc">판매가 낮은순</option></select>
@@ -356,7 +357,7 @@ function FragmentGroup({ group, selected, expanded, onSelect, onToggle, onSelect
       <td style={td}><input type="checkbox" aria-label={group.title + " 선택"} checked={checkedCount === group.count} ref={element => { if (element) element.indeterminate = checkedCount > 0 && checkedCount < group.count; }} onChange={e => onSelect(e.target.checked)} /></td>
       <td style={td}><div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         {group.image ? <img src={group.image} alt="" loading="lazy" style={{ width: 42, height: 42, objectFit: "contain" }} /> : null}
-        <span style={{ fontWeight: 700 }}>{group.title}{[...new Set(group.items.map(row=>row.manual_series).filter(Boolean))].map(series=><span key={series} style={{display:"block",fontSize:11,color:"#166534",fontWeight:700}}>수동 작품: {series}</span>)}</span>
+        <span style={{ fontWeight: 700 }}>{group.title}<span style={{display:"block",fontSize:11,color:"#64748b",fontWeight:500}}>방송 {kst(group.broadcastAt)}</span>{group.items[0]?.manual_series&&<span style={{display:"block",fontSize:11,color:"#166534",fontWeight:700}}>수동 작품: {group.items[0].manual_series}</span>}</span>
       </div></td>
       <td style={td}>{group.count}건 · {group.items.reduce((n,s)=>n+saleUnits(s.sale_units),0)}개</td>
       <td style={{ ...td, color: group.linked === group.count ? "#15803d" : "#64748b" }}>{group.linked}/{group.count}</td>
