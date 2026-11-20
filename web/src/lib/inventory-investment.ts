@@ -1,5 +1,6 @@
 // Read-only analysis: order commitments, physical stock and actual linked sales
 // are separate measures. A missing cost is never treated as free inventory.
+import { resolveAnalysisType, type TypeKeywordRule } from "./item-analysis-type";
 import { DEFAULT_PRICING_SETTINGS } from "./pricing";
 import { effectiveSaleUnits } from "./sale-units";
 import { resolveAnalysisSeries, type SeriesKeywordRule } from "./item-analysis-series";
@@ -42,7 +43,7 @@ export type InvestmentLink={wise_stock_id:string|number;purchase_item_id?:string
 export type InvestmentOrder={id:string;status:string;date:string|null;shop:string;number:string;units:number;products:number;cost:number|null;confirmedKrw:number;estimated:boolean;series:string[]};
 export type InvestmentReport={asOf:string;orders:InvestmentOrder[];lots:InvestmentLot[];coverage:{sales:number;revenue:number;linked:number;linkedRevenue:number;costed:number;costedRevenue:number;costedCost:number;profit:number;unallocatedGroup:number;multiTarget:number;missingCost:number;quantityMismatch:number;unlinked:number};excludedOrders:number};
 
-export function buildInvestmentReport(input:{orders:any[];inventory:any[];boxes:any[];sales:InvestmentSale[];links:InvestmentLink[];rules:SeriesKeywordRule[];excludedKeywords:string[];deletedIds:string[];now:string}):InvestmentReport{
+export function buildInvestmentReport(input:{orders:any[];inventory:any[];boxes:any[];sales:InvestmentSale[];links:InvestmentLink[];rules:SeriesKeywordRule[];typeRules?:TypeKeywordRule[];excludedKeywords:string[];deletedIds:string[];now:string}):InvestmentReport{
  const activeOrders=input.orders.filter(isPurchaseIncluded),activeIds=new Set(activeOrders.map(o=>String(o.id)));
  const orders:InvestmentOrder[]=activeOrders.map(o=>{
   const p=orderCapital(o);const items=o.purchase_items||[];
@@ -67,7 +68,7 @@ export function buildInvestmentReport(input:{orders:any[];inventory:any[];boxes:
   const price=validCost(i.sale_price)?num(i.sale_price):null;
   const date=purchaseDay(i.ordered_at);const name=String(i.display_name||i.product_name||"(상품명 없음)");
   const series=random&&Array.isArray(i.series_tags)&&i.series_tags.length>1?"혼합 랜덤박스":resolveAnalysisSeries(name,i.series_name,input.rules).series;
-  return {id:String(i.id),name,series,kind:random?"랜덤박스":String(i.item_type||"미분류"),date,age:daysBetween(date,asOf),totalUnits,remaining,unitCost,invested:unitCost===null?null:unitCost*totalUnits,remainingCost:unitCost===null?null:unitCost*remaining,price,potential:price===null?null:price*remaining,linkedUnits:0,linkedRevenue:0,costedRevenue:0,costOfSales:0,profit:null,weightedDays:0,datedUnits:0,soldThrough:totalUnits>0?Math.max(0,Math.min(100,100*(totalUnits-remaining)/totalUnits)):null,image:i.image_url||null,sku:String(i.internal_sku||""),random};
+  return {id:String(i.id),name,series,kind:random?"랜덤박스":resolveAnalysisType([i.product_name,i.display_name].filter(Boolean).join(" "),i.item_type,input.typeRules||[]),date,age:daysBetween(date,asOf),totalUnits,remaining,unitCost,invested:unitCost===null?null:unitCost*totalUnits,remainingCost:unitCost===null?null:unitCost*remaining,price,potential:price===null?null:price*remaining,linkedUnits:0,linkedRevenue:0,costedRevenue:0,costOfSales:0,profit:null,weightedDays:0,datedUnits:0,soldThrough:totalUnits>0?Math.max(0,Math.min(100,100*(totalUnits-remaining)/totalUnits)):null,image:i.image_url||null,sku:String(i.internal_sku||""),random};
  });
  const byId=new Map(lots.map(l=>[l.id,l])),linksById=new Map<string,InvestmentLink[]>();
  for(const l of input.links){const id=String(l.wise_stock_id);linksById.set(id,[...(linksById.get(id)||[]),l]);}
