@@ -46,7 +46,7 @@ function customersFrom(rows:Sale[],deleted:Set<string>,rules:SeriesKeywordRule[]
   const at=Date.parse(r.sold_at||r.ordered_at);
   if(!Number.isFinite(at))continue;
   const key=normalize(name),group=grouped.get(key)||{name,entries:[]};
-  group.entries.push({id:String(r.id),order:String(r.order_id),video:r.video_id||null,amount:Number(r.item_price)||0,units:saleUnits(r.sale_units),at,name:r.item_name,series:analysisSeriesForSale(r.item_name,r.image_url,rules,overrides)});
+  group.entries.push({id:String(r.id),order:String(r.order_id),video:r.video_id||null,amount:Number(r.item_price)||0,units:saleUnits(r.sale_units),at,name:r.item_name,series:analysisSeriesForSale(r,rules,overrides)});
   grouped.set(key,group);
  }
  const all:Buyer[]=[];

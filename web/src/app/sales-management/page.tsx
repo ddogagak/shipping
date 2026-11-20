@@ -293,7 +293,7 @@ export default function SalesManagementPage() {
   const allTimeByBuyer = useMemo(() => new Map(allTimeBuyers.map(buyer => [buyer.buyer_nickname, buyer])), [allTimeBuyers]);
   const itemRows = useMemo(() => currentRows.map(row => {
     const key = row.id;
-    return { ...row, key, sameItemCount: sameItemCounts[row.id] ?? 1, series: analysisSeriesForSale(row.item_name,row.image_url,seriesRules,seriesOverrides), includeCost: draftPrefs[key]?.includeCost !== false, memo: draftPrefs[key]?.memo || "" };
+    return { ...row, key, sameItemCount: sameItemCounts[row.id] ?? 1, series: analysisSeriesForSale(row,seriesRules,seriesOverrides), includeCost: draftPrefs[key]?.includeCost !== false, memo: draftPrefs[key]?.memo || "" };
   }), [currentRows, sameItemCounts, draftPrefs, seriesRules, seriesOverrides]);
   const filteredItemRows = useMemo(() => {
     const productQuery = productSearch.normalize("NFKC").trim().toLowerCase();

@@ -31,14 +31,32 @@ export function analysisOverrideKey(name:string,image:string|null|undefined):str
  for(let i=0;i<url.length;i++){const c=url.charCodeAt(i);h1=Math.imul(h1^c,16777619);h2=Math.imul(h2^c,2246822519);}
  return "photo:"+normalized.slice(0,370)+":"+(h1>>>0).toString(36)+":"+(h2>>>0).toString(36);
 }
-export function manualSeriesForSale(name:string,image:string|null|undefined,overrides:Record<string,string>):string|null{
- const manual=overrides[analysisOverrideKey(name,image)]||overrides[normalizedKeywordText(name)];
+export type AnalysisSaleIdentity={id:string;item_name:string;image_url?:string|null;video_id?:string|null};
+// The Wise image URL contains the original listing ID, not an image content hash.
+// This is a string lookup only; no network fetch or image comparison is needed.
+export function wiseListingId(image:string|null|undefined):string|null{
+ return String(image||"").match(/^https?:\/\/image\.wyyyes\.com\/svc\/sellers\/[^/]+\/stock\/(\d+)_/i)?.[1]||null;
+}
+export function saleIdentityKey(row:AnalysisSaleIdentity):string{
+ return "sale:"+String(row.id);
+}
+export function listingIdentityKey(row:AnalysisSaleIdentity):string{
+ const listing=wiseListingId(row.image_url);
+ return listing&&row.video_id?JSON.stringify([row.video_id,listing]):saleIdentityKey(row);
+}
+export function manualSeriesForSale(row:AnalysisSaleIdentity,overrides:Record<string,string>):string|null{
+ // Legacy photo-specific classifications remain readable; name-only legacy
+ // entries are unsafe when the same label is reused in a later broadcast.
+ const saved=overrides[saleIdentityKey(row)];
+ if(saved)return saved==="야생"?"쿠지":saved;
+ const legacy=row.image_url?analysisOverrideKey(row.item_name,row.image_url):"";
+ const manual=legacy.startsWith("photo:")?overrides[legacy]:undefined;
  return manual?(manual==="야생"?"쿠지":manual):null;
 }
-export function analysisSeriesForSale(name:string,image:string|null|undefined,rules:SeriesKeywordRule[],overrides:Record<string,string>):string{
- const manual=manualSeriesForSale(name,image,overrides);
+export function analysisSeriesForSale(row:AnalysisSaleIdentity,rules:SeriesKeywordRule[],overrides:Record<string,string>):string{
+ const manual=manualSeriesForSale(row,overrides);
  if(manual)return manual;
- const result=classifySeriesByKeywords(name,rules);
+ const result=classifySeriesByKeywords(row.item_name,rules);
  if(result.matches.length>1)return "키워드 충돌";
  return result.series||"미분류";
 }

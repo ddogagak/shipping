@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { baseProductName, imageIdentity, normalizeProductName, recommendInventory, inventoryKeywordFrequency, saleBroadcastGroupKey, saleProductKey } from "@/lib/wise-inventory-match";
 import SaleUnitsEditor, {saveSaleUnits} from "../SaleUnitsEditor";
 import {saleUnits} from "@/lib/sale-units";
-import {manualSeriesForSale} from "@/lib/item-analysis-series";
+import {manualSeriesForSale,wiseListingId} from "@/lib/item-analysis-series";
 
 type LinkRow = { id: number; wise_stock_id: number | string; purchase_item_id: string | null; random_box_id: string | null; inventory_group_id: string | null; quantity: number; applied_units: number };
 type Sale = { id: string; video_id: string; wise_user_id: string | null; buyer_nickname: string; item_name: string; item_price: number; sale_units: number; image_url: string | null; sold_at: string | null; links: LinkRow[]; manual_series?:string|null };
@@ -34,7 +34,7 @@ function matchesPriceSearch(query:string,prices:Array<number|null|undefined>):bo
 const kst = (s: string | null) => s ? new Date(s).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }) : "—";
 function familyOf(row: Sale) {
   const name = baseProductName(row.item_name);
-  const key = saleBroadcastGroupKey(row);
+  const key = saleBroadcastGroupKey(row,wiseListingId(row.image_url));
   return { key, name };
 }
 async function requestJson(url: string, init?: RequestInit) {
@@ -121,7 +121,7 @@ export default function WiseInventoryLinkPage() {
       const manual=await manualRequest;
       if(requestId!==salesRequest.current)return;
       if(manual.failed)setError("수동 작품 분류를 불러오지 못했어. 판매내역 갱신으로 다시 시도해줘.");
-      setSales([...all.values()].map(row=>({...row,manual_series:manualSeriesForSale(row.item_name,row.image_url,manual.overrides)})).sort((a,b)=>String(a.sold_at||"").localeCompare(String(b.sold_at||"")) || a.id.localeCompare(b.id)));
+      setSales([...all.values()].map(row=>({...row,manual_series:manualSeriesForSale(row,manual.overrides)})).sort((a,b)=>String(a.sold_at||"").localeCompare(String(b.sold_at||"")) || a.id.localeCompare(b.id)));
       setCutover(cutoff);
     } catch (e) { if (requestId === salesRequest.current) setError(e instanceof Error ? e.message : "판매기록 조회 실패"); }
     finally { if (requestId === salesRequest.current) setLoadingSales(false); }

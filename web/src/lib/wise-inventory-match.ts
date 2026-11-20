@@ -10,8 +10,8 @@ export function saleProductKey(row:SaleProductIdentity):string {
   return JSON.stringify([normalizeProductName(row.item_name),row.item_price,imageIdentity(row.image_url),row.manual_series||""]);
 }
 // Identical product labels/photos can be reused for different items in later broadcasts.
-export function saleBroadcastGroupKey(row:SaleProductIdentity&{video_id:string;id:string}):string {
-  return JSON.stringify([row.video_id||null,row.video_id?null:row.id,saleProductKey(row)]);
+export function saleBroadcastGroupKey(row:SaleProductIdentity&{video_id:string;id:string},listingId:string|null):string {
+  return JSON.stringify([row.video_id||null,row.video_id&&listingId?"listing:"+listingId:"sale:"+row.id,normalizeProductName(row.item_name),row.item_price,row.manual_series||""]);
 }
 
 const series = [
