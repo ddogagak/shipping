@@ -1,8 +1,11 @@
 "use client";
 
+import {resolveAnalysisType} from "@/lib/item-analysis-type";
+import {useTypeKeywords} from "@/lib/use-type-keywords";
 import { useState } from "react";
 
 export default function TaobaoImportPanel({ onMessage }: { onMessage?: (message: string) => void }) {
+  const {rules}=useTypeKeywords();
   const [file, setFile] = useState<File | null>(null);
   const [orders, setOrders] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
@@ -91,7 +94,7 @@ export default function TaobaoImportPanel({ onMessage }: { onMessage?: (message:
           <div style={orderTitle}><b>{o.order_number}</b> · {o.shop_name} · {o.ordered_at}</div>
           <span style={o.is_existing ? existingBadge : newBadge}>{o.is_existing ? "기존 등록" : "신규"}</span>
         </div>
-        {(o.items || []).map((i: any, n: number) => <div key={n} style={itemRow}><span>{i.product_name}</span><b>{Number(i.unit_price).toLocaleString()} CNY × {i.quantity}</b></div>)}
+        {(o.items || []).map((i: any, n: number) => <div key={n} style={itemRow}><span>{i.product_name} <small style={{color:"#64748b"}}>· {resolveAnalysisType([i.product_name,i.option_text].filter(Boolean).join(" "),i.item_type,rules)}</small></span><b>{Number(i.unit_price).toLocaleString()} CNY × {i.quantity}</b></div>)}
       </section>)}
     </>}
   </>;

@@ -1,3 +1,4 @@
+import { preferredRegisteredType } from "@/lib/item-analysis-type";
 import Link from "next/link";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { extractSourceProductId } from "@/lib/purchases/product-id";
@@ -33,7 +34,7 @@ export default async function PurchaseCardsPage() {
       internal_sku:item.internal_sku || sourcing?.internal_sku || null,
       option_text:item.option_text, product_url:item.product_url, quantity:item.quantity, unit_price:item.unit_price,
       image_url:item.image_url || sourcing?.image_url || null, lineup_image_url:sourcing?.lineup_image_url || null,
-      series_name:sourcing?.series_name || null, item_type:sourcing?.item_type || null, memo:sourcing?.memo || null,
+      series_name:sourcing?.series_name || null, item_type:String(preferredRegisteredType(sourcing?.item_type,item.item_type)), memo:sourcing?.memo || null,
     };
   }));
   return <PurchaseCardsClient initialItems={items} />;

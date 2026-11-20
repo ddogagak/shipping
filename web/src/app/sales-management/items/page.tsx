@@ -4,7 +4,7 @@ import {resolveAnalysisSeries,type SeriesKeywordRule} from "@/lib/item-analysis-
 import {resolveAnalysisType,type TypeKeywordRule} from "@/lib/item-analysis-type";
 import {DEFAULT_PRICING_SETTINGS} from "@/lib/pricing";
 import {useEffect,useMemo,useState,type CSSProperties} from "react";
-type Stock={id:string;order_number?:string;display_name?:string;product_name?:string;series_name?:string|null;item_type?:string|null;sale_price?:number|null;component_count?:number;purchase_quantity?:number;sold_quantity?:number;view_status?:string;stock_status?:string;ordered_at?:string|null;image_url?:string|null;internal_sku?:string|null;actual_purchase_currency?:string|null;actual_purchase_unit_price?:number|null};
+type Stock={id:string;order_number?:string;display_name?:string;product_name?:string;option_text?:string|null;sourcing_item_name?:string|null;series_name?:string|null;item_type?:string|null;sale_price?:number|null;component_count?:number;purchase_quantity?:number;sold_quantity?:number;view_status?:string;stock_status?:string;ordered_at?:string|null;image_url?:string|null;internal_sku?:string|null;actual_purchase_currency?:string|null;actual_purchase_unit_price?:number|null};
 type Item={id:string;name:string;series:string;type:string;price:number;count:number;boxes:number;qty:number;revenue:number;cost:number;net:number;profit:number|null;margin:number|null;purchaseAt:string|null;costKnown:boolean;sku:string;image:string|null;};
 type Group={key:string;items:number;qty:number;revenue:number;profit:number;costCoverage:number;costRevenue:number;dateCount:number};
 const cash=(v:number)=>Math.round(v).toLocaleString("ko-KR");
@@ -63,7 +63,7 @@ function convert(rows:Stock[],rules:SeriesKeywordRule[],typeRules:TypeKeywordRul
   if(!purchased)stats.missingPurchaseDate++;
   const itemName=String(row.display_name||row.product_name||"(이름 없음)");
   const classified=resolveAnalysisSeries([row.product_name,row.display_name].filter(Boolean).join(" "),row.series_name,rules);
-  items.push({id:String(row.id),name:itemName,series:classified.series,type:resolveAnalysisType([row.product_name,row.display_name].filter(Boolean).join(" "),row.item_type,typeRules),price,count,boxes,qty:count*boxes,revenue,cost,net,profit,margin:profit!==null&&revenue>0?profit/revenue*100:null,purchaseAt:purchased,costKnown,sku:String(row.internal_sku||""),image:row.image_url||null});
+  items.push({id:String(row.id),name:itemName,series:classified.series,type:resolveAnalysisType([row.product_name,row.display_name,row.option_text,row.sourcing_item_name].filter(Boolean).join(" "),row.item_type,typeRules),price,count,boxes,qty:count*boxes,revenue,cost,net,profit,margin:profit!==null&&revenue>0?profit/revenue*100:null,purchaseAt:purchased,costKnown,sku:String(row.internal_sku||""),image:row.image_url||null});
  }
  return {items,stats};
 }
@@ -105,7 +105,7 @@ export default function ItemAnalysis(){
   {loading&&<div style={card}>판매재고 데이터를 읽어오는 중…</div>}
   {error&&<div style={{...card,color:"#b91c1c"}} role="alert">{error}</div>}
   {!loading&&!error&&<>
-   <div style={{...card,background:"#f8fafc",marginBottom:16,fontSize:13,lineHeight:1.8}}><b>작품 분류:</b> 기존에 등록된 작품명을 우선 사용해. 작품명이 없거나 기타·미분류인 경우에만 <Link href="/sales-management/items/keywords">키워드 관리</Link>의 등록 단어로 판별하며, 여러 작품 키워드가 일치하면 미분류(키워드 충돌)로 표시해. <b> 유형 분류:</b> 기존 유형을 우선 사용하고 기타·미분류는 <Link href="/sales-management/items/type-keywords">유형 키워드</Link>로 보완해. 클리어파일은 문구로 집계해. 실제 상품·매입 데이터는 수정하지 않아.</div>
+   <div style={{...card,background:"#f8fafc",marginBottom:16,fontSize:13,lineHeight:1.8}}><b>작품 분류:</b> 기존에 등록된 작품명을 우선 사용해. 작품명이 없거나 기타·미분류인 경우에만 <Link href="/sales-management/items/keywords">키워드 관리</Link>의 등록 단어로 판별하며, 여러 작품 키워드가 일치하면 미분류(키워드 충돌)로 표시해. <b> 유형 분류:</b> 기존 유형을 우선 사용하고 기타·미분류는 <Link href="/sales-management/items/type-keywords">유형 키워드</Link>로 보완해. 복합 키워드와 유형 우선순위를 공통 적용하며 클리어파일은 문구로 집계해. 실제 상품·매입 데이터는 수정하지 않아.</div>
    <div style={{...card,background:"#f8fafc",marginBottom:16,fontSize:13,lineHeight:1.8}}><b>분석 기준:</b> 방송판매 재고에서 완료 상태이고 개당 판매가가 입력된 품목 중, 박스 구성수량과 판매 박스 수가 확인되는 항목을 집계해. <b>완료 시 재고 전체가 판매 처리되는 현행 시스템 규칙</b>에 따라 실제 결제 확정 매출과 다를 수 있어. <b>이익 = 추정 매출 × 0.84 − 분석 원가</b>이며, <b>분석 원가 = 국내 상품 매입가 그대로 / 해외 상품 매입가 × 기준환율 × 1.2</b>야. 판매가 계산기의 가상 고정비는 완료건 분석에서 제외해. 0.84는 현행 방송판매 재고 화면의 수수료·세금 단순 가정이야. 실제 세무상 순이익이나 정산 금액은 아니야. 원가 누락 품목은 이익률에서 제외해. <b>월별 필터와 추세, 정렬, 상세 날짜는 실제 매입일을 기준으로 하고 완료일은 집계 날짜에 사용하지 않아.</b></div>
    <section style={{...card,display:"flex",gap:10,flexWrap:"wrap",marginBottom:16,alignItems:"center"}}>
     <label>작품 <select style={input} value={series} onChange={e=>setSeries(e.target.value)}><option>전체</option>{seriesList.map(x=><option key={x}>{x}</option>)}</select></label>

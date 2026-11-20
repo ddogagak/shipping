@@ -1,5 +1,7 @@
 "use client";
 
+import {resolveAnalysisType,typeOptions,type TypeKeywordRule} from "@/lib/item-analysis-type";
+import {useTypeKeywords} from "@/lib/use-type-keywords";
 import Link from "next/link";
 import { calculatePricing, DEFAULT_PRICING_SETTINGS } from "@/lib/pricing";
 import { useEffect, useMemo, useState } from "react";
@@ -49,7 +51,7 @@ const statusList: InventoryStatus[] = [
   "보류",
 ];
 
-const typeList = ["아크릴", "지류", "뱃지", "피규어", "키링", "기타"];
+
 
 const seriesList = [
   "헌터헌터",
@@ -146,6 +148,8 @@ function InventoryPricingOverview({
 }
 
 export default function DomesticInventoryInputPage() {
+  const {rules,ready}=useTypeKeywords();
+  const [manualTypeEdited,setManualTypeEdited]=useState(false);
   const [inputMode, setInputMode] = useState<InputMode>("manual");
   const [rawText, setRawText] = useState("");
   const [manualForm, setManualForm] = useState(initialManualForm);
@@ -153,10 +157,12 @@ export default function DomesticInventoryInputPage() {
   const [saveMessage, setSaveMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
+  const typeList=typeOptions(rules,[manualForm.item_type,...items.map(i=>i.item_type)]);
+  const suggestedType=manualTypeEdited?manualForm.item_type:resolveAnalysisType(manualForm.item_name,"기타",rules);
   const parsedItems = useMemo(() => {
-    if (inputMode === "text") return parseInventoryText(rawText);
+    if (inputMode === "text" && ready) return parseInventoryText(rawText,rules);
     return [];
-  }, [inputMode, rawText]);
+  }, [inputMode, rawText,rules,ready]);
 
   useEffect(() => {
     if (inputMode !== "manual") {
@@ -170,6 +176,7 @@ export default function DomesticInventoryInputPage() {
     field: keyof typeof initialManualForm,
     value: string
   ) => {
+    if(field==="item_type")setManualTypeEdited(true);
     setManualForm((prev) => ({
       ...prev,
       [field]:
@@ -185,6 +192,7 @@ export default function DomesticInventoryInputPage() {
 
   const addManualItem = () => {
     setSaveMessage("");
+    if(!ready)return setSaveMessage("유형 키워드를 불러오는 중이야. 잠시 후 다시 시도해줘.");
 
     if (!manualForm.item_name.trim()) {
       setSaveMessage("상품명을 입력해줘.");
@@ -201,7 +209,7 @@ export default function DomesticInventoryInputPage() {
       local_id: `manual-${Date.now()}`,
       checked: true,
       item_name: manualForm.item_name,
-      item_type: manualForm.item_type,
+      item_type: suggestedType,
       series_name: manualForm.series_name,
       option_seq: manualForm.option_seq,
       currency: manualForm.currency,
@@ -224,7 +232,7 @@ export default function DomesticInventoryInputPage() {
     };
 
     setItems((prev) => [item, ...prev]);
-    setManualForm(initialManualForm);
+    setManualForm(initialManualForm);setManualTypeEdited(false);
     setSaveMessage("직접 입력 항목이 추가됐어. 체크한 항목 저장을 눌러 DB에 저장하면 돼.");
   };
 
@@ -393,7 +401,7 @@ export default function DomesticInventoryInputPage() {
             <div style={manualGridStyle}>
               <ManualField label="상품명" value={manualForm.item_name} onChange={(v) => updateManualForm("item_name", v)} />
               <ManualSelect label="작품명" value={manualForm.series_name} options={seriesList} onChange={(v) => updateManualForm("series_name", v)} />
-              <ManualSelect label="타입" value={manualForm.item_type} options={typeList} onChange={(v) => updateManualForm("item_type", v)} />
+              <ManualSelect label="타입" value={suggestedType} options={typeList} onChange={(v) => updateManualForm("item_type", v)} />
               <ManualSelect label="상태" value={manualForm.status} options={statusList} onChange={(v) => updateManualForm("status", v)} />
               <ManualField label="수량" type="number" value={String(manualForm.quantity)} onChange={(v) => updateManualForm("quantity", v)} />
               <ManualSelect label="통화" value={manualForm.currency} options={currencyList} onChange={(v) => updateManualForm("currency", v)} />
@@ -556,17 +564,17 @@ MEMO:`}
 }
 
 
-function parseInventoryText(rawText: string): PreviewItem[] {
+function parseInventoryText(rawText: string,rules:TypeKeywordRule[]): PreviewItem[] {
   if (!rawText.trim()) return [];
 
   if (rawText.includes("=== ITEM ===")) {
-    return parseFixedInventoryText(rawText);
+    return parseFixedInventoryText(rawText,rules);
   }
 
   return [];
 }
 
-function parseFixedInventoryText(rawText: string): PreviewItem[] {
+function parseFixedInventoryText(rawText: string,rules:TypeKeywordRule[]): PreviewItem[] {
   const hasOrderBlock = rawText.includes("=== ORDER ===");
   const orderBlock = hasOrderBlock ? rawText.split("=== ITEM ===")[0] : "";
 
@@ -590,10 +598,7 @@ function parseFixedInventoryText(rawText: string): PreviewItem[] {
       detectSeriesName(itemName) ||
       "기타";
 
-    const itemType =
-      getField(block, "TYPE") ||
-      detectItemType(itemName) ||
-      "기타";
+    const itemType=resolveAnalysisType(itemName,getField(block,"TYPE"),rules);
 
     const price = toNumber(getField(block, "PRICE"));
     const qty = toNumber(getField(block, "QTY")) || 1;
@@ -646,18 +651,6 @@ function toNumber(value: string) {
         .replace(/원/g, "")
     ) || 0
   );
-}
-
-function detectItemType(text: string) {
-  const lower = text.toLowerCase();
-
-  if (lower.includes("acrylic") || text.includes("アクリル") || text.includes("아크릴")) return "아크릴";
-  if (lower.includes("badge") || text.includes("缶バッジ") || text.includes("バッジ") || text.includes("뱃지") || text.includes("배지")) return "뱃지";
-  if (lower.includes("figure") || lower.includes("re-ment") || lower.includes("rement") || text.includes("フィギュア") || text.includes("피규어")) return "피규어";
-  if (lower.includes("keyring") || lower.includes("keychain") || lower.includes("key holder") || text.includes("キーホルダー") || text.includes("キーリング") || text.includes("키링")) return "키링";
-  if (lower.includes("card") || lower.includes("postcard") || lower.includes("photocard") || text.includes("カード") || text.includes("ポストカード") || text.includes("포토카드") || text.includes("엽서")) return "지류";
-
-  return "기타";
 }
 
 function detectSeriesName(text: string) {

@@ -1,4 +1,6 @@
 "use client";
+import {resolveAnalysisType,typeOptions,preferredRegisteredType} from "@/lib/item-analysis-type";
+import {useTypeKeywords} from "@/lib/use-type-keywords";
 import { useEffect, useState } from "react";
 import InventoryMatchPicker, {
   type InventoryMatch,
@@ -50,8 +52,8 @@ const KOREA_PROMPT = `아래 국내 거래처 명세서/영수증/주문내역�
 [작품 / 상품 유형]
 - SERIES는 헌터헌터/귀멸의칼날/나의히어로아카데미아/프리렌/진격의거인/치이카와/약사의혼잣말/나루토/기타 중 하나다.
 - 상품명/옵션/메모에 '먼작귀'가 있으면 반드시 치이카와로 분류한다. 작품을 확인할 수 없다면 기타로 둔다.
-- TYPE은 아크릴/지류/뱃지/피규어/키링/기타 중 하나다.
-- 아크릴 스탠드·아크릴 카드 등은 아크릴, 종이 카드·스티커·엽서는 지류, 캔뱃지는 뱃지, 아크릴 키링을 포함한 키링은 키링으로 분류한다. 분류에 없으면 기타로 둔다.
+- TYPE은 지류/피규어/인형/아크릴/뱃지/키링/마그넷/문구/기타 중 하나다.
+- 클리어파일은 문구, 코스터는 지류, 아크릴 스탠드·아크릴 카드 등은 아크릴, 종이 카드·스티커·엽서는 지류, 캔뱃지는 뱃지, 아크릴 키링을 포함한 키링은 키링으로 분류한다. 분류에 없으면 기타로 둔다.
 - OPTION에는 명세서에서 확인되는 캐릭터명, 디자인, 색상, 종류 등만 적는다.
 
 [이미지 / URL]
@@ -128,7 +130,7 @@ const JAPAN_PROMPT = `아래 일본 구매대행 신청내역 페이지의 HTML/
 - NAME은 상품 행의 상품 링크 텍스트를 우선 사용한다. 페이지에 더 구체적인 원본 상품명이 함께 확인되는 경우에만 그 이름을 사용한다.
 - 페이지에 can badge / acrylic / magnet처럼 단순한 이름만 있으면 임의로 캐릭터명이나 세부 상품명을 만들어내지 말고 보이는 이름을 그대로 쓴다.
 - 작품명은 헌터헌터/귀멸의칼날/나의히어로아카데미아/프리렌/진격의거인/치이카와/약사의혼잣말/나루토/기타 중 하나로 쓴다. 자료에서 작품이 명확하지 않으면 기타로 둔다.
-- TYPE은 아크릴/지류/뱃지/피규어/키링/기타 중 하나로 쓴다. can badge/badge는 뱃지, acrylic은 아크릴, card/paper goods는 지류, keychain/keyring은 키링으로 분류한다. magnet/plastic bag처럼 해당 분류가 없으면 기타로 둔다.
+- TYPE은 지류/피규어/인형/아크릴/뱃지/키링/마그넷/문구/기타 중 하나로 쓴다. can badge/badge는 뱃지, acrylic은 아크릴, card/paper goods는 지류, keychain/keyring은 키링으로 분류한다. magnet은 마그넷, clear file은 문구, coaster는 지류로 분류하고 해당 분류가 없으면 기타로 둔다.
 - OPTION은 자료에서 옵션/종류가 별도로 확인될 때만 적고, 없으면 빈칸으로 둔다.
 - BOX_COUNT는 한 박스 안 판매 단위 수가 명확하게 확인될 때만 적는다. 단품 판매임이 명확하면 1, 알 수 없으면 빈칸으로 둔다. QTY를 BOX_COUNT로 넣지 않는다.
 
@@ -184,7 +186,7 @@ const seriesOptions = [
   "나루토",
   "기타",
 ];
-const typeOptions = ["아크릴", "지류", "뱃지", "피규어", "키링", "기타"];
+
 
 export default function TextImportPanel({
   mode,
@@ -193,6 +195,7 @@ export default function TextImportPanel({
   mode: "korea" | "japan";
   simpleEntry?: any;
 }) {
+  const {rules,ready}=useTypeKeywords();
   const [text, setText] = useState(""),
     [preview, setPreview] = useState<any>(null),
     [msg, setMsg] = useState(""),
@@ -205,6 +208,7 @@ export default function TextImportPanel({
     ? `${basePrompt}\n\n[이번 전환 대상 명세서]\n아래 외부 이미지 링크를 모두 열어 모든 상품행을 확인해줘. 링크를 읽을 수 없다면 추측하지 말고 사진 첨부를 요청해줘.\n${invoiceUrls.join("\n")}`
     : basePrompt;
   const runText = async (action: string) => {
+    if(action==="preview"&&!ready)return setMsg("유형 키워드를 불러오는 중이야. 잠시 후 다시 시도해줘.");
     if (action === "preview" && !text.trim())
       return setMsg("GPT가 정리한 텍스트를 붙여넣어줘.");
     if (action === "save" && !preview?.purchase)
@@ -273,6 +277,7 @@ export default function TextImportPanel({
             : j.purchase.currency || (mode === "japan" ? "JPY" : "KRW"),
           items: (j.purchase.items || []).map((item: any) => ({
             ...item,
+            item_type:resolveAnalysisType([item.product_name,item.option_text].filter(Boolean).join(" "),item.item_type,rules),
             _selected: true,
           })),
         };
@@ -439,6 +444,7 @@ export default function TextImportPanel({
         <PurchasePreview
           purchase={preview.purchase}
           onChange={(purchase: any) => setPreview({ purchase })}
+          rules={rules}
           currency={
             preview.purchase.currency || (mode === "japan" ? "JPY" : "KRW")
           }
@@ -452,10 +458,12 @@ function PurchasePreview({
   purchase,
   onChange,
   currency,
+  rules,
 }: {
   purchase: any;
   onChange: (purchase: any) => void;
   currency: string;
+  rules: import("@/lib/item-analysis-type").TypeKeywordRule[];
 }) {
   const [pastingIndex, setPastingIndex] = useState<number | null>(null),
     [pasteMsg, setPasteMsg] = useState("");
@@ -492,7 +500,7 @@ function PurchasePreview({
                 sourcing_inventory_id: match.match_source === "sale" ? null : match.id,
                 matched_sale_purchase_item_id: match.match_source === "sale" ? match.id : null,
                 series_name: match.series_name || item.series_name,
-                item_type: match.item_type || item.item_type,
+                item_type: resolveAnalysisType([item.product_name,match.item_name,item.option_text].filter(Boolean).join(" "),preferredRegisteredType(match.item_type,item.item_type),rules),
                 image_url: match.image_url || item.image_url,
                 lineup_image_url:
                   match.lineup_image_url || item.lineup_image_url,
@@ -738,7 +746,7 @@ function PurchasePreview({
               <SelectEdit
                 label="타입"
                 value={item.item_type}
-                options={typeOptions}
+                options={typeOptions(rules,[item.item_type])}
                 onChange={(v) => editItem(index, "item_type", v)}
               />
               <Edit

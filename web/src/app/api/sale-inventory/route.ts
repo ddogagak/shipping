@@ -1,3 +1,4 @@
+import { preferredRegisteredType } from "@/lib/item-analysis-type";
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { calculatePricing, calculateDomesticSalePricing } from "@/lib/pricing";
@@ -217,7 +218,8 @@ export async function GET(req: Request) {
           image_url: imageUrl,
           lineup_image_url: (domesticMeta?.matched_sale_purchase_item_id && domesticMeta?.lineup_image_url) || sourcing?.lineup_image_url || domesticMeta?.lineup_image_url || null,
           series_name: (domesticMeta?.matched_sale_purchase_item_id && domesticMeta?.series_name) || sourcing?.series_name || domesticMeta?.series_name || item.series_name || null,
-          item_type: (domesticMeta?.matched_sale_purchase_item_id && domesticMeta?.item_type) || sourcing?.item_type || domesticMeta?.item_type || null,
+          item_type: preferredRegisteredType(domesticMeta?.matched_sale_purchase_item_id ? domesticMeta?.item_type : null,sourcing?.item_type,domesticMeta?.item_type,item.item_type),
+          sourcing_item_name: sourcing?.item_name || null,
           memo: sourcing?.memo || domesticMeta?.memo || null,
           sourcing_currency: sourcing?.currency || null,
           sourcing_purchase_price: Number(sourcing?.purchase_price || 0),

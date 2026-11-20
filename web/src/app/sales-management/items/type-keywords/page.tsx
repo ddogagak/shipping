@@ -16,12 +16,14 @@ export default function TypeKeywordEditor(){
  }
  useEffect(()=>{let active=true;fetch("/api/sales-management/type-keywords",{cache:"no-store"}).then(async r=>{const j=await r.json();if(!r.ok||!j.ok)throw Error(j.message||"키워드 조회 실패");if(active)setRules(j.rules||[])}).catch(e=>{if(active)setMessage(String(e.message||e))}).finally(()=>{if(active)setLoading(false)});return()=>{active=false}},[]);
  const catalog=useMemo(()=>{
-  const map=new Map(rules.map(rule=>[rule.type_name,rule]));
+  const map=new Map<string,TypeKeywordRule>();
+  for(const name of DEFAULT_ANALYSIS_TYPES)map.set(name,rules.find(r=>r.type_name===name)||{type_name:name,keywords:[]});
+  for(const rule of rules)map.set(rule.type_name,rule);
   for(const name of DEFAULT_ANALYSIS_TYPES){
    if(name==="기타"||name==="미분류")continue;
    if(!map.has(name))map.set(name,{type_name:name,keywords:[]});
   }
-  return [...map.values()].sort((a,b)=>a.type_name.localeCompare(b.type_name,"ko"));
+  return [...map.values()];
  },[rules]);
  function choose(name:string){const found=rules.find(x=>x.type_name===name);setSelected(name);setOriginal(found?name:"");setTitle(name);setRaw(found?.keywords.join("\n")||"");setMessage("")}
  function fresh(){setSelected("");setOriginal("");setTitle("");setRaw("");setMessage("")}
@@ -53,7 +55,7 @@ export default function TypeKeywordEditor(){
    <div><div style={{fontSize:12,color:"#64748b"}}>매출관리 / 아이템 분석 / 유형 키워드 관리</div><h1 style={{margin:"7px 0",fontSize:27}}>유형별 키워드 풀 관리</h1><p style={{fontSize:13,color:"#64748b",margin:0}}>상품명으로 유형을 분류할 단어를 직접 추가·수정·삭제해.</p></div>
    <div style={{display:"flex",gap:8}}><Link href="/sales-management/items" style={control}>← 아이템 분석</Link><Link href="/sales-management" style={control}>매출관리</Link></div>
   </header>
-  <div style={{...card,background:"#f8fafc",fontSize:13,lineHeight:1.75,marginBottom:16}}>키워드는 <b>아이템 분석과 재고 투자성과의 집계 분류에만</b> 적용돼. 기존에 등록된 유형을 우선 사용하며 기타·미분류는 상품명 키워드로 보완해. 클리어파일은 문구로 분류하고, 여러 독립적인 유형의 키워드가 일치하면 충돌로 표시해. 원본 상품 유형과 SKU는 그대로야.</div>
+  <div style={{...card,background:"#f8fafc",fontSize:13,lineHeight:1.75,marginBottom:16}}>키워드는 <b>소싱·매입·방송판매재고·매출 분석·빵.store</b>에 공통 적용돼. 복합 키워드(클리어파일→문구, 코스터→지류, 아크릴 키링→키링, 마그넷 스티커→마그넷) 우선 판별 후, 지류 → 피규어 → 인형 → 아크릴 → 뱃지 → 키링 → 마그넷 → 문구 → 기타 순으로 판별해. 기존 등록 유형은 우선 유지하고, 특수 규칙과 기타·미분류에 분류를 적용해. 원본 유형과 SKU는 변경하지 않아.</div>
   {message&&<div role="status" style={{...card,marginBottom:14,background:"#f0f9ff",fontSize:13}}>{message}</div>}
   {loading?<div style={card}>유형 목록 불러오는 중…</div>:<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,350px),1fr))",gap:16,alignItems:"start"}}>
    <section style={card}>
@@ -73,7 +75,7 @@ export default function TypeKeywordEditor(){
     <div style={{borderTop:"1px solid #e2e8f0",marginTop:20,paddingTop:14}}>
      <h3 style={{fontSize:15,margin:"0 0 6px"}}>상품명 매칭 미리보기</h3>
      <input value={sample} onChange={e=>setSample(e.target.value)} placeholder="예: 치이카와 클리어파일" style={{...control,width:"100%",boxSizing:"border-box"}}/>
-     {sample.trim()&&<div style={{fontSize:13,marginTop:9}}>{sampleResults.matches.length===1?<span>분류 결과: <b>{sampleResults.type}</b></span>:sampleResults.matches.length>1?<span style={{color:"#b45309"}}>여러 유형 키워드 충돌: {sampleResults.matches.join(" / ")}</span>:<span style={{color:"#64748b"}}>일치하는 유형 키워드 없음</span>}</div>}
+     {sample.trim()&&<div style={{fontSize:13,marginTop:9}}>{sampleResults.special||sampleResults.matches.length===1?<span>분류 결과: <b>{sampleResults.type}</b></span>:sampleResults.matches.length>1?<span>분류 결과: <b>{sampleResults.type}</b> · 일치 유형: {sampleResults.matches.join(" / ")}</span>:<span style={{color:"#64748b"}}>일치하는 유형 키워드 없음</span>}</div>}
     </div>
    </section>
   </div>}

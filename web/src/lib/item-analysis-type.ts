@@ -1,24 +1,41 @@
 export type TypeKeywordRule={type_name:string;keywords:string[]};
-export const DEFAULT_ANALYSIS_TYPES=["지류","아크릴","뱃지","피규어","키링","인형","마그넷","문구"];
+// Shared business priority for independent keyword matches; compound product terms are resolved first.
+export const DEFAULT_ANALYSIS_TYPES=["지류","피규어","인형","아크릴","뱃지","키링","마그넷","문구"];
 export const normalizeTypeKeyword=(value:unknown)=>String(value??"").normalize("NFKC").toLowerCase().replace(/[\s\p{P}\p{S}]+/gu,"");
-const CLEAR_FILE=["클리어파일","클리어화일","clear file","クリアファイル","文件夹","資料夾"].map(normalizeTypeKeyword);
-const aliases:Record<string,string>={poster:"지류",acrylicstand:"아크릴",acrylickeytag:"키링",keyholder:"키링",clearfile:"문구"};
+const aliases:Record<string,string>={poster:"지류",acrylicstand:"아크릴",acrylickeytag:"키링",keyholder:"키링",clearfile:"문구",랜깡:"랜덤박스"};
+const fallback=(value:unknown)=>!String(value??"").trim()||["기타","미분류","미분류(키워드 충돌)"].includes(String(value).trim());
+export function preferredRegisteredType(...values:unknown[]){
+ return String(values.find(value=>!fallback(value))??values.find(value=>String(value??"").trim())??"기타").trim();
+}
+export function typeOptions(rules:TypeKeywordRule[]=[],extra:unknown[]=[]){
+ return [...new Set([...DEFAULT_ANALYSIS_TYPES,...rules.map(r=>r.type_name),...extra.map(v=>String(v??"").trim()).filter(v=>v&&!fallback(v)&&v!=="전체"),"기타"])];
+}
+const titleText=(name:unknown)=>normalizeTypeKeyword(name).replace(/카드캡터|カードキャプター|cardcaptor|데스노트|デスノート/g,"");
+// Product-specific exceptions take precedence even for previously entered broad categories.
+function specialType(title:string,matches:string[]){
+ const tests:[string,RegExp][]=[
+  ["문구",/클리어파일|클리어화일|clearfile|クリアファイル|文件夹|資料夾/],
+  ["지류",/코스터|coaster|コースター/],
+  ["키링",/아크릴키링|아크릴키홀더|acrylickeyring|acrylickeychain|acrylickeytag|アクリルキーリング|アクリルキーホルダー|アクリルキータグ/],
+  ["마그넷",/마그넷스티커|마그네트스티커|magnetsticker|マグネットステッカー/],
+  ["문구",/마스코트.*(?:볼펜|샤프)|マスコット.*(?:ボールペン|シャープペン)/],
+ ];
+ return tests.find(([type,pattern])=>matches.includes(type)&&pattern.test(title))?.[0];
+}
 export function classifyTypeByKeywords(name:unknown,rules:TypeKeywordRule[]){
- // Work titles such as 카드캡터 사쿠라 or 데스노트 are not item-type signals.
- const title=normalizeTypeKeyword(name).replace(/카드캡터|カードキャプター|cardcaptor|데스노트|デスノート/g,"");
+ const title=titleText(name);
  const hits=rules.flatMap(rule=>rule.keywords.map(normalizeTypeKeyword).filter(word=>word&&title.includes(word)).map(word=>({type:rule.type_name,word})));
- // More specific compound terms beat the shorter terms inside them (e.g. 아크릴키링).
  const specific=hits.filter(hit=>!hits.some(other=>other.type!==hit.type&&other.word.length>hit.word.length&&other.word.includes(hit.word)));
- const matches=[...new Set(specific.map(hit=>hit.type))];
- return {type:matches.length===1?matches[0]:matches.length>1?"미분류(키워드 충돌)":"미분류",matches};
+ const priority=typeOptions(rules);
+ const matches=[...new Set(specific.map(hit=>hit.type))].sort((a,b)=>priority.indexOf(a)-priority.indexOf(b));
+ const special=specialType(title,[...new Set(hits.map(hit=>hit.type))]);
+ return {type:special??matches[0]??"기타",matches,special};
 }
 export function resolveAnalysisType(name:unknown,registered:unknown,rules:TypeKeywordRule[]){
  const raw=String(registered??"").trim(),normalized=normalizeTypeKeyword(raw);
- const title=normalizeTypeKeyword(name);
- const clearFile=CLEAR_FILE.some(word=>title.includes(word));
- // Explicit business rule: clear files are stationery even if previously entered as paper.
- if((!raw||raw==="지류"||raw==="기타"||raw==="미분류")&&clearFile&&rules.some(rule=>rule.type_name==="문구"&&rule.keywords.some(k=>CLEAR_FILE.includes(normalizeTypeKeyword(k))&&title.includes(normalizeTypeKeyword(k)))))return "문구";
- if(raw&&raw!=="기타"&&raw!=="미분류")return Object.prototype.hasOwnProperty.call(aliases,normalized)?aliases[normalized]:raw;
+ if(normalized==="랜덤박스"||normalized==="랜깡")return "랜덤박스";
  const classified=classifyTypeByKeywords(name,rules);
- return classified.matches.length?classified.type:raw||"미분류";
+ if(classified.special)return classified.special;
+ if(!fallback(raw))return Object.prototype.hasOwnProperty.call(aliases,normalized)?aliases[normalized]:raw;
+ return classified.type;
 }
