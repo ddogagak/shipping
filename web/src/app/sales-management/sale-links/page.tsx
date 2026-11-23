@@ -80,7 +80,7 @@ export default function WiseInventoryLinkPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [cutover, setCutover] = useState("");
-  const [deductionMode, setDeductionMode] = useState<"future"|"historical"|"link_only">("future");
+  const [deductionMode, setDeductionMode] = useState<"future"|"historical"|"link_only"|"reset_reconcile">("future");
   const [remember, setRemember] = useState(false);
   const showsRequest = useRef(0);
   const salesRequest = useRef(0);
@@ -169,7 +169,7 @@ export default function WiseInventoryLinkPage() {
   const candidateNames = useMemo(() => new Map([...Object.entries(inventoryNames),...candidates.map(c => [c.type + "|" + c.id, c.name + (c.option ? " · " + c.option : "")] as [string,string])]), [candidates,inventoryNames]);
   const selectedIds = useMemo(() => sales.filter(s => selected[s.id]).map(s => s.id), [sales, selected]);
   const selectedSales = useMemo(()=>sales.filter(s=>selected[s.id]),[sales,selected]);
-  const applicableSales = selectedSales.filter(s=>deductionMode==="historical" || deductionMode==="future" && cutover && s.sold_at && new Date(s.sold_at)>=new Date(cutover));
+  const applicableSales = selectedSales.filter(s=>(deductionMode==="historical" || deductionMode==="reset_reconcile") || deductionMode==="future" && cutover && s.sold_at && new Date(s.sold_at)>=new Date(cutover));
   const selectedUnitTotal = selectedSales.reduce((sum,s)=>sum+saleUnits(s.sale_units),0);
   const commonUnits = selectedSales.length && selectedSales.every(s=>s.sale_units===selectedSales[0].sale_units) ? saleUnits(selectedSales[0].sale_units) : 1;
   const canRemember = selectedSales.length>0 && selectedSales.every(s=>Boolean(imageIdentity(s.image_url)) && saleProductKey(s)===saleProductKey(selectedSales[0]));
@@ -219,12 +219,16 @@ export default function WiseInventoryLinkPage() {
     if (action === "link" && selectedSales.some(s=>s.sale_units!==selectedTargets.reduce((sum,c)=>sum+c.quantity,0)+s.links.filter(l=>!selectedTargets.some(c=>targetKey(l)===c.type+"|"+c.id)).reduce((sum,l)=>sum+l.quantity,0)) && !window.confirm("연결하려는 낱개 수량이 기존 실제 판매 수량과 달라. 연결 수량으로 실제 판매 수량을 변경할까?")) return;
     if(action==='link'&&selectedTargets.some(c=>c.type==='inventory_group')&&selectedTargets.length!==1){setError('동일상품 묶음은 한 번에 하나만 선택해줘.');return;}
     if(action==="link" && deductionMode==="historical" && !window.confirm("과거 판매도 실제 차감합니다. 이미 수동으로 차감한 판매는 중복될 수 있어. 미리보기 수량을 확인했나요?"))return;
+    if(action==="link"&&deductionMode==="reset_reconcile"){
+      if(selectedTargets.length!==1||selectedTargets[0].type!=="inventory_group"){setError("초기화 재정산은 통합 재고풀 하나만 선택해줘.");return;}
+      if(!window.confirm("선택한 "+ids.length+"건의 기존 연결을 새 재고풀로 이전하고, 현재 초기화된 재고에서 과거순으로 다시 차감할까?\n\n기존 판매·매입 원본은 보존하고, 이전 연결은 감사기록에 남겨. 차감됐던 재고가 완전히 초기화되지 않았다면 안전하게 중단해."))return;
+    }
     setBusy(true); setError(""); setMessage("");
     let completed=0, affectedLinks=0, deducted=0, remembered=false;
     try {
       const target = single?.target;
       const body = {
-        action, deduction_mode: deductionMode, remember: remember&&canRemember,
+        action, deduction_mode: deductionMode==="reset_reconcile"?"historical":deductionMode, reconcile_reset:action==="link"&&deductionMode==="reset_reconcile", remember: remember&&canRemember,
         targets: action === "link" ? selectedTargets.map(row => ({
           target_type: row.type, target_id: row.id, quantity: row.quantity
         })) : undefined,
@@ -362,12 +366,14 @@ export default function WiseInventoryLinkPage() {
         <div style={{display:"grid",gap:6,fontSize:12,padding:10,background:"#f8fafc",marginTop:10,borderRadius:8}}>
           <b>재고 반영 방식</b>
           <select value={deductionMode} onChange={e=>setDeductionMode(e.target.value as typeof deductionMode)} style={field}>
-            <option value="future">신규 판매만 자동 차감 (과거 연결만)</option><option value="link_only">연결만 · 수량 변화 없음</option><option value="historical">과거 포함 실제 차감</option>
+            <option value="future">신규 판매만 자동 차감 (과거 연결만)</option><option value="link_only">연결만 · 수량 변화 없음</option><option value="historical">과거 포함 실제 차감</option><option value="reset_reconcile">초기화한 재고 재정산 · 기존 연결 포함 차감</option>
           </select>
           {previews.map(({c,delta})=><div key={c.id} style={{color:delta>c.remaining_units?"#b91c1c":"#334155"}}><b>{c.name}</b><br/>{delta>c.remaining_units?"재고 부족: 잔여 "+c.remaining_units+"개 / 실제 차감 "+delta+"개 (부족 "+(delta-c.remaining_units)+"개)":"잔여 "+c.remaining_units+"개 → "+(c.remaining_units-delta)+"개 · "+(delta>0?"차감 "+delta+"개":delta<0?"복원 "+(-delta)+"개":"차감 없음")}</div>)}
+          {deductionMode==="reset_reconcile"&&<div style={{color:"#92400e",fontWeight:700}}>수동 초기화한 재고용이야. 기존 연결도 재고풀로 이전하고 FIFO 차감해. 이전 차감이 실제로 초기화됐는지 확인한 후 처리해.</div>}
           <label><input type="checkbox" checked={remember&&canRemember} disabled={!canRemember} onChange={e=>setRemember(e.target.checked)}/> 같은 상품명·이미지·가격을 다음 판매부터 자동 연결 및 차감</label>
           {!canRemember&&<span style={{color:"#64748b"}}>한 상품군(이미지 포함)을 선택하면 자동 연결을 기억할 수 있어.</span>}
         </div>
+        {error&&<div role="alert" style={{marginTop:10,padding:9,border:"1px solid #fca5a5",background:"#fef2f2",color:"#991b1b",fontSize:12,whiteSpace:"pre-wrap"}}>{error}</div>}
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
           <button style={{ ...btn, flex: 1, background: insufficient?"#94a3b8":"#1d4ed8", color: "#fff", borderColor: "#1d4ed8" }} disabled={busy || insufficient || selectedIds.length === 0 || selectedTargets.length === 0 || selectedTargets.length > 16} onClick={() => void save("link")}>{busy ? "저장 중..." : insufficient?"재고 부족":selectedIds.length + "건 · 전체 " + selectedTargets.reduce((s,c)=>s+c.quantity*selectedIds.length,0) + "개 연결"}</button>
           <button style={{ ...btn, color: "#991b1b" }} disabled={busy || selectedIds.length === 0} onClick={() => { if (window.confirm("선택한 실제 판매기록의 재고 연결만 해제할까?")) void save("unlink"); }}>연결 해제</button>
