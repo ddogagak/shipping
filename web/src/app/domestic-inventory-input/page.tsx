@@ -67,6 +67,103 @@ const seriesList = [
 
 const currencyList = ["JPY", "CNY", "KRW"];
 
+
+const SOURCING_GPT_PROMPT = \`소싱 자료를 확인해서 ddoga.lol 소싱 등록 입력용 텍스트로 정리해줘.
+
+[목표]
+- 이 결과는 DDOGA의 /domestic-inventory-input → "텍스트 붙여넣기"에 바로 붙여넣는다.
+- 실제 매입등록이 아니라 "소싱 후보/상품 정보 등록"용이다.
+- 아래 출력 형식을 정확히 지키고, 형식 밖의 설명·검산·표·마크다운은 쓰지 않는다.
+
+[자료 확인 우선순위]
+1. 이번 대화에서 가장 최근에 업로드한 HTML·텍스트·스크린샷·주문내역을 최우선으로 본다.
+2. 같은 상품 자료가 여러 개면 최신 자료를 기준으로 하고, 최신 자료에 없는 정보만 이전 자료로 보완한다.
+3. 파일이나 HTML이 일부만 보이면 전체 내용을 확인한 뒤 정리한다.
+4. 옵션 정보가 HTML/JSON 안에 있으면 skuCore / skuBase / priceVO 등 실제 옵션 구조를 확인한다.
+5. 자료에 없는 상품명, 가격, 옵션번호, 구성품 수, 이미지 URL, 구매수량, 배송비, 운송장, 판매상태를 임의로 만들지 않는다.
+6. 확인되지 않은 값은 추정하지 말고 빈칸으로 둔다. 숫자 0으로 임의 채우지 않는다.
+
+[상품 분리 규칙]
+- 서로 다른 상품/옵션은 반드시 각각 별도의 === ITEM === 블록으로 분리한다.
+- 동일 상품이라도 옵션번호, 가격, 구성품 수, 이미지가 다르면 별도 ITEM으로 분리한다.
+- 같은 상품의 수량만 여러 개 구매한 경우에는 하나의 ITEM으로 두고 QTY에 실제 구매수량을 적는다.
+- OPTION_NO는 원본 사이트에서 확인되는 실제 옵션번호/순번만 적는다. 확인되지 않으면 빈칸.
+- 상품명은 검색/매칭하기 쉽게 작품명·상품군·옵션 특징이 드러나는 이름으로 정리하되, 자료에 없는 캐릭터/옵션명을 만들어내지 않는다.
+
+[가격 / 수량 / 박스 규칙]
+- PRICE는 선택한 옵션 1개 또는 박스 1개의 "총 구매가"다.
+- 랜덤상품/BOX 상품은 박스 전체 구매가를 PRICE에 적고, BOX_COUNT에는 그 박스의 실제 구성품 수(팩 수/개수)를 적는다.
+- 예: 1박스가 20팩이고 박스 가격이 3,960엔이면 PRICE: 3960 / BOX_COUNT: 20.
+- 단품은 BOX_COUNT: 1.
+- QTY는 실제로 구매/주문하는 박스·세트·단품의 수량이다.
+- 여러 개입 세트라도 PRICE를 임의로 개당가로 나누지 않는다.
+- 통화는 JPY / CNY / KRW 중 하나만 사용한다.
+- 일본/중국 현지 배송비가 자료에 명확히 있으면 DOMESTIC_SHIPPING에 숫자만 적는다. 상품별 귀속이 불명확하면 임의 배분하지 말고 빈칸.
+
+[작품명 SERIES]
+가능하면 아래 DDOGA 작품명 중 하나로 통일한다.
+- 헌터헌터
+- 귀멸의칼날
+- 나의히어로아카데미아
+- 프리렌
+- 진격의거인
+- 치이카와
+- 약사의혼잣말
+- 나루토
+- 기타
+정확히 어느 작품인지 확인되지 않으면 기타.
+
+[TYPE]
+- 자료상 명확한 상품 형태를 적는다.
+- 예: 아크릴 / 지류 / 뱃지 / 피규어 / 키링 / 기타
+- 애매하면 기타.
+- DDOGA에서 상품명 기반 자동분류를 다시 적용하므로 억지로 추정하지 않는다.
+
+[이미지 규칙]
+- IMAGE와 LINEUP_IMAGE를 습관적으로 비워두지 않는다.
+- 업로드 자료 안의 img src, data-src, og:image, 상품 대표이미지, 옵션 이미지, 상세 이미지 URL을 반드시 확인한다.
+- IMAGE는 해당 옵션/상품의 대표이미지 URL.
+- LINEUP_IMAGE는 전체 종류/캐릭터 구성/라인업을 보여주는 이미지가 있을 때 그 URL.
+- 옵션별 대표 이미지가 다르면 각 ITEM의 IMAGE도 해당 옵션 이미지로 다르게 적는다.
+- 이미지 URL을 확인할 수 없을 때만 빈칸.
+- SOURCE_URL은 실제 원본 상품 상세페이지 URL을 적는다. 구매대행 페이지보다 원 판매처 링크가 확인되면 원 판매처 링크를 우선한다.
+
+[상태 / 메모]
+- 기본 STATUS는 입고전.
+- 해외배송/입고완료/판매중/판매완료/보류가 자료에서 명확할 때만 바꾼다.
+- MEMO에는 예약판매, 출시일, 구매제한, 특전, 등급/비율, 랜덤 구성, 박스 구성처럼 소싱 판단에 필요한 정보만 짧게 적는다.
+- 가격 계산 결과나 추정 판매가는 MEMO에 임의로 넣지 않는다.
+
+[출력 형식]
+- 반드시 아래 형식만 반복해서 출력한다.
+- 값이 없는 필드도 필드명은 유지하고 콜론 뒤를 비워둔다.
+- 코드블록을 쓰지 않는다.
+
+=== ITEM ===
+NAME:
+SERIES:
+TYPE:
+CURRENCY:
+PRICE:
+QTY:
+BOX_COUNT:
+OPTION_NO:
+IMAGE:
+LINEUP_IMAGE:
+SOURCE_URL:
+DOMESTIC_SHIPPING:
+TRACKING:
+STATUS: 입고전
+MEMO:
+
+[최종 검증]
+- 모든 옵션이 빠짐없이 ITEM으로 분리됐는지 확인한다.
+- PRICE가 개당가인지 박스 총가인지 자료 기준으로 다시 확인한다.
+- BOX_COUNT가 "구매 박스 수"가 아니라 "박스 1개 안의 실제 구성품 수"인지 확인한다.
+- QTY가 실제 구매수량인지 확인한다.
+- IMAGE / LINEUP_IMAGE / SOURCE_URL을 자료에서 찾을 수 있는데 누락하지 않았는지 확인한다.
+- 추정값을 넣지 않았는지 확인한 뒤 출력한다.\`;
+
 const initialManualForm = {
   item_name: "",
   item_type: "기타",
@@ -156,6 +253,7 @@ export default function DomesticInventoryInputPage() {
   const [items, setItems] = useState<PreviewItem[]>([]);
   const [saveMessage, setSaveMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [promptCopied, setPromptCopied] = useState(false);
 
   const typeList=typeOptions(rules,[manualForm.item_type,...items.map(i=>i.item_type)]);
   const suggestedType=manualTypeEdited?manualForm.item_type:resolveAnalysisType(manualForm.item_name,"기타",rules);
@@ -171,6 +269,17 @@ export default function DomesticInventoryInputPage() {
   }, [parsedItems, inputMode]);
 
   const checkedCount = items.filter((item) => item.checked && !item.saved).length;
+
+
+  const copySourcingPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(SOURCING_GPT_PROMPT);
+      setPromptCopied(true);
+      window.setTimeout(() => setPromptCopied(false), 1800);
+    } catch {
+      setSaveMessage("프롬프트 복사에 실패했어. 프롬프트 영역을 직접 선택해서 복사해줘.");
+    }
+  };
 
   const updateManualForm = (
     field: keyof typeof initialManualForm,
@@ -428,6 +537,37 @@ export default function DomesticInventoryInputPage() {
           </>
         ) : inputMode === "text" ? (
           <>
+            <details style={promptGuideStyle}>
+              <summary style={promptSummaryStyle}>
+                GPT 소싱 정리 프롬프트
+              </summary>
+
+              <div style={promptHeaderStyle}>
+                <div>
+                  <strong>현재 DDOGA 소싱 등록 형식 기준</strong>
+                  <div style={promptHelpStyle}>
+                    옵션별 가격 · 박스 구성수 · 이미지 · 원본 URL · 최신 자료 우선 규칙까지 포함
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => void copySourcingPrompt()}
+                  style={promptCopyButtonStyle}
+                >
+                  {promptCopied ? "복사완료 ✓" : "프롬프트 전체 복사"}
+                </button>
+              </div>
+
+              <textarea
+                readOnly
+                value={SOURCING_GPT_PROMPT}
+                onFocus={(e) => e.currentTarget.select()}
+                style={promptTextareaStyle}
+                aria-label="GPT 소싱 정리 프롬프트"
+              />
+            </details>
+
             <h2 style={panelTitleStyle}>소싱 등록 텍스트 붙여넣기</h2>
             <textarea
               value={rawText}
@@ -744,6 +884,12 @@ const modeButtonStyle: React.CSSProperties = { height: 38, padding: "0 14px", bo
 const activeModeButtonStyle: React.CSSProperties = { ...modeButtonStyle, background: "#111827", color: "#fff", border: "1px solid #111827" };
 const panelTitleStyle: React.CSSProperties = { margin: "0 0 12px", fontSize: 18, fontWeight: 800 };
 const rawTextareaStyle: React.CSSProperties = { width: "100%", minHeight: 180, padding: 12, borderRadius: 10, border: "1px solid #d1d5db", fontSize: 14, lineHeight: 1.5, resize: "vertical" };
+const promptGuideStyle: React.CSSProperties = { marginBottom: 18, border: "1px solid #c7d2fe", borderRadius: 12, background: "#f8faff", overflow: "hidden" };
+const promptSummaryStyle: React.CSSProperties = { padding: "12px 14px", cursor: "pointer", fontWeight: 800, color: "#312e81", background: "#eef2ff" };
+const promptHeaderStyle: React.CSSProperties = { display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "12px 14px 8px", flexWrap: "wrap" };
+const promptHelpStyle: React.CSSProperties = { marginTop: 4, color: "#64748b", fontSize: 12, fontWeight: 500 };
+const promptCopyButtonStyle: React.CSSProperties = { height: 36, padding: "0 12px", border: "none", borderRadius: 8, background: "#4f46e5", color: "#fff", fontWeight: 800, cursor: "pointer" };
+const promptTextareaStyle: React.CSSProperties = { width: "calc(100% - 28px)", margin: "0 14px 14px", minHeight: 420, padding: 12, borderRadius: 10, border: "1px solid #cbd5e1", background: "#fff", fontSize: 12, lineHeight: 1.55, resize: "vertical", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" };
 const fileInputStyle: React.CSSProperties = { display: "block", marginBottom: 12 };
 const controlBarStyle: React.CSSProperties = { marginTop: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" };
 const summaryBoxStyle: React.CSSProperties = { padding: "10px 12px", borderRadius: 10, background: "#f3f4f6", fontSize: 14 };
