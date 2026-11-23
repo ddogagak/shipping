@@ -14,8 +14,14 @@ export async function POST(request: Request) {
   try {
     const body=await request.json(), action=String(body.action||''), group=body.group_id==null?null:String(body.group_id), title=String(body.title||'').trim();
     const ids=Array.isArray(body.member_ids)?body.member_ids.map(String):[];
-    if(!['create','create_pool','add','dissolve'].includes(action)|| (['create','create_pool'].includes(action)?(!title||title.length>200||ids.length<2):!group||!uuid.test(group)) || ids.length>100 || ids.some((id:string)=>!uuid.test(id)) || (action==='add'&&!ids.length)) return fail('묶음 선택을 확인해줘.');
+    if(!['create','create_pool','add','dissolve','merge'].includes(action)|| (['create','create_pool'].includes(action)?(!title||title.length>200||ids.length<2):!group||!uuid.test(group)) || ids.length>100 || ids.some((id:string)=>!uuid.test(id)) || (action==='add'&&!ids.length)) return fail('묶음 선택을 확인해줘.');
     const sb=createServiceRoleClient();
+    if(action==='merge'){
+      if(!group||!uuid.test(group)||ids.length<1)return fail('합칠 재고풀을 선택해줘.');
+      const {data,error}=await sb.rpc('merge_sale_inventory_pools',{p_target:group,p_sources:ids});
+      if(error)return fail(error.message,409);
+      return NextResponse.json({ok:true,id:data});
+    }
     if(action==='create_pool'){
       const price=Number(body.sale_price);
       if(!Number.isSafeInteger(price)||price<0)return fail('판매가격은 0원 이상의 정수로 입력해줘.');
