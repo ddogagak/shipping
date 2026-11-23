@@ -202,6 +202,12 @@ export async function GET(request: Request) {
     if (mode === "shows") return await getShows(url.searchParams.get("month") || "");
     if (mode === "sales") return await getSales([...new Set(url.searchParams.getAll("video_id").map(id => id.trim()).filter(Boolean))]);
     if (mode === "inventory") return await getInventory();
+    if (mode === "overmatched") {
+      const sb = createServiceRoleClient();
+      const {data,error} = await sb.rpc("wise_list_overmatched_inventory");
+      if (error) throw error;
+      return NextResponse.json({ok:true,rows:data||[]});
+    }
     return fail("조회 종류가 올바르지 않아.");
   } catch (error) {
     return fail(errorText(error), 500);
