@@ -406,7 +406,10 @@ export default function SaleInventoryPage(){
    <div style={{fontSize:12,color:"#64748b"}}>실판매 {activeGroup.sold}개 · 실매출 {won(activeGroup.revenue)} · 실판매 평균 {activeGroup.sold?won(activeGroup.revenue/activeGroup.sold):"-"}</div>
    {activeGroup.lots.map((lot:any)=><div key={lot.id} style={{fontSize:12,borderTop:"1px solid #e5e7eb",padding:"8px 0",opacity:lot.view_status==="completed"?.65:1}}>
     <b>{String(lot.ordered_at||"").slice(0,10)} · {lot.shop_name||lot.order_number||""}</b> {lot.view_status==="completed"&&<span style={tag}>판매완료</span>}
-    <div>{lot.display_name} / 잔여 {stockLabel(lot)} ({lot.remaining_units}개)</div>
+    <div style={{fontWeight:700}}>{lot.display_name||lot.product_name}</div>
+    <div>옵션 <b>{String(lot.option_text||"").trim()||"없음"}</b></div>
+    <div>원래 입고 <b>{Number(lot.purchase_quantity||0).toLocaleString("ko-KR")}박스 × {Number(lot.component_count||1).toLocaleString("ko-KR")}개 = {(Number(lot.purchase_quantity||0)*Number(lot.component_count||1)).toLocaleString("ko-KR")}개</b> · 현재 잔여 <b>{Number(lot.remaining_units||0).toLocaleString("ko-KR")}개</b></div>
+    {(Number(lot.purchase_record_quantity||0)!==Number(lot.purchase_quantity||0)||Number(lot.purchase_record_received_quantity||0)!==Number(lot.purchase_quantity||0))&&<div style={{fontSize:11,color:"#64748b"}}>매입관리 원본: 구매수량 {Number(lot.purchase_record_quantity||0).toLocaleString("ko-KR")} · 입고수량 {Number(lot.purchase_record_received_quantity||0).toLocaleString("ko-KR")} (원본 기록)</div>}
     <div>박스 매입가 {Number(lot.actual_purchase_unit_price||0).toLocaleString()} {lot.actual_purchase_currency} · 개당 비용포함원가 {won(lot.unit_cost_price)}</div>
     <div>판매가 {won(lot.sale_price)}</div>
    </div>)}
