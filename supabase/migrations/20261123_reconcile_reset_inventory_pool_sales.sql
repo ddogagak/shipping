@@ -48,6 +48,30 @@ BEGIN
     RAISE EXCEPTION '판매기록이 누락됐거나 방송 정보가 없어. 다시 조회해줘.';
   END IF;
 
+  -- Check every previously deducted lot before changing ANY balance.
+  -- Validation must happen before the loop because the first re-deduction
+  -- intentionally makes the original lot no longer full.
+  FOR v_old IN
+    SELECT l.* FROM public.wise_sale_inventory_links l
+    WHERE l.wise_stock_id=ANY(p_ids)
+      AND l.inventory_group_id IS DISTINCT FROM p_group_id
+      AND l.applied_units>0
+    ORDER BY l.id
+  LOOP
+    IF v_old.purchase_item_id IS NULL OR NOT EXISTS (
+      SELECT 1 FROM public.sale_inventory_group_members m
+      WHERE m.group_id=p_group_id AND m.purchase_item_id=v_old.purchase_item_id
+    ) THEN
+      RAISE EXCEPTION '판매 %의 기존 차감 대상은 통합 재고풀 밖이야. 안전하게 자동 이동할 수 없어.',v_old.wise_stock_id;
+    END IF;
+    SELECT remaining INTO v_remaining FROM public.sale_inventory_group_lots(p_group_id)
+    WHERE lot_id=v_old.purchase_item_id;
+    v_capacity:=public.wise_link_inventory_capacity('purchase_item',v_old.purchase_item_id);
+    IF v_remaining IS NULL OR v_capacity IS NULL OR v_remaining<>v_capacity THEN
+      RAISE EXCEPTION '판매 %의 기존 차감 재고가 완전히 초기화되지 않았어. 해당 재고부터 확인해줘.',v_old.wise_stock_id;
+    END IF;
+  END LOOP;
+
   -- Oldest sales first; the existing grouped deduction routine selects the
   -- oldest *purchase lots* first within each sale.
   FOR v_sale IN
@@ -63,26 +87,6 @@ BEGIN
         AND inventory_group_id IS DISTINCT FROM p_group_id
       ORDER BY id FOR UPDATE
     LOOP
-      IF v_old.applied_units>0 THEN
-        -- Never silently reverse a deduction from unrelated inventory.
-        IF v_old.purchase_item_id IS NULL
-          OR NOT EXISTS (
-            SELECT 1 FROM public.sale_inventory_group_members
-            WHERE group_id=p_group_id AND purchase_item_id=v_old.purchase_item_id
-          ) THEN
-          RAISE EXCEPTION '판매 %에 다른 재고의 실제 차감이 남아 있어. 해당 연결을 별도로 확인해줘.',v_sale.wise_stock_id;
-        END IF;
-        -- A previous applied link can be rebased ONLY after that original lot
-        -- has actually been reset to full stock. Otherwise restoring or
-        -- re-deducting it could double-count physical inventory.
-        SELECT remaining INTO v_remaining FROM public.sale_inventory_group_lots(p_group_id)
-        WHERE lot_id=v_old.purchase_item_id;
-        v_capacity:=public.wise_link_inventory_capacity('purchase_item',v_old.purchase_item_id);
-        IF v_remaining IS NULL OR v_capacity IS NULL OR v_remaining<>v_capacity THEN
-          RAISE EXCEPTION '판매 %의 기존 차감 재고가 완전히 초기화되지 않았어. 재고 수량을 확인해줘.',v_sale.wise_stock_id;
-        END IF;
-      END IF;
-
       INSERT INTO public.wise_inventory_pool_relink_audit
         (batch_id,wise_stock_id,target_group_id,previous_link)
       VALUES (v_batch,v_sale.wise_stock_id,p_group_id,to_jsonb(v_old));
