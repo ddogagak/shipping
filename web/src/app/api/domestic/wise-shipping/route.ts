@@ -10,18 +10,66 @@ export async function GET() {
     "order_id,customer_order_no,platform,nickname,wise_user_id,recipient_name,phone,order_status,domestic_shipping(tracking_number,tracking_registered,shipping_status)"
   );
   if (error) return NextResponse.json({error:"조회 실패",detail:error.message},{status:500});
-  const rows = (data || []).filter((row:any) => {
+  const pending = (data || []).filter((row:any) => {
     const s = shipping(row);
     return row.platform === "wise"
       && !["kept","done"].includes(String(row.order_status || ""))
       && String(s?.shipping_status || "") !== "done"
       && s?.tracking_registered !== true
       && /[0-9]/.test(String(s?.tracking_number || ""));
-  }).map((row:any) => ({
-    order_id:row.order_id,customer_order_no:row.customer_order_no,
-    nickname:row.nickname,wise_user_id:row.wise_user_id||null,recipient_name:row.recipient_name,phone:row.phone,
-    tracking_number:String(shipping(row)?.tracking_number || "").trim()
-  }));
+  });
+
+  // Fill missing buyer IDs only from explicit Wise-order links and Wise order records.
+  // Never infer identity from nickname: nicknames can change or be duplicated.
+  const missing = pending.filter((row:any) => !String(row.wise_user_id || "").trim());
+  const links: Array<{domestic_order_id:string;wise_order_id:number;wise_user_id:string|null}> = [];
+  for (let i=0;i<missing.length;i+=100) {
+    const ids=missing.slice(i,i+100).map((row:any)=>String(row.order_id));
+    const {data:found,error:linkError}=await db.from("domestic_wise_order_link")
+      .select("domestic_order_id,wise_order_id,wise_user_id").in("domestic_order_id",ids);
+    if(linkError)return NextResponse.json({error:"와이스 주문 ID 연결 조회 실패",detail:linkError.message},{status:500});
+    links.push(...(found||[]));
+  }
+
+  const idsByWiseOrder=new Map<number,Set<string>>();
+  const addWiseId=(id:number,value:unknown)=>{
+    const text=String(value||"").trim();
+    if(!text)return;
+    if(!idsByWiseOrder.has(id))idsByWiseOrder.set(id,new Set());
+    idsByWiseOrder.get(id)!.add(text);
+  };
+  const wiseOrderIds=[...new Set(links.map(link=>Number(link.wise_order_id)).filter(Number.isSafeInteger))];
+  for(const link of links)addWiseId(Number(link.wise_order_id),link.wise_user_id);
+  // Old link rows may predate the wise_user_id column; recover from their actual Wise order.
+  for(const table of ["domestic_wise_order_snapshot","domestic_wise_sales_order","domestic_wise_import_queue"]) {
+    const unresolved=wiseOrderIds.filter(id=>!idsByWiseOrder.get(id)?.size);
+    for(let i=0;i<unresolved.length;i+=200) {
+      const {data:found,error:lookupError}=await db.from(table)
+        .select("wise_order_id,wise_user_id").in("wise_order_id",unresolved.slice(i,i+200));
+      if(lookupError)return NextResponse.json({error:"와이스 주문 구매자 ID 조회 실패",detail:lookupError.message},{status:500});
+      for(const row of found||[])addWiseId(Number(row.wise_order_id),row.wise_user_id);
+    }
+  }
+  const domesticIds=new Map<string,Set<string>>();
+  for(const link of links){
+    const ids=idsByWiseOrder.get(Number(link.wise_order_id));
+    if(!ids?.size)continue;
+    const domesticId=String(link.domestic_order_id);
+    if(!domesticIds.has(domesticId))domesticIds.set(domesticId,new Set());
+    for(const id of ids)domesticIds.get(domesticId)!.add(id);
+  }
+
+  const rows=pending.map((row:any)=>{
+    const possibleIds=[...(domesticIds.get(String(row.order_id))||new Set<string>())];
+    const recoveredId=possibleIds.length===1?possibleIds[0]:null;
+    return {
+      order_id:row.order_id,customer_order_no:row.customer_order_no,
+      nickname:row.nickname,wise_user_id:String(row.wise_user_id||"").trim()||recoveredId,
+      recipient_name:row.recipient_name,phone:row.phone,
+      tracking_number:String(shipping(row)?.tracking_number||"").trim(),
+      identity_conflict:possibleIds.length>1
+    };
+  });
   return NextResponse.json({ok:true,rows,total:rows.length});
 }
 
