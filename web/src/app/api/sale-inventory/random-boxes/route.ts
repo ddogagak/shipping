@@ -23,6 +23,9 @@ export async function GET() {
     const {data:actualSales,error:actualError}=await sb.rpc("wise_inventory_actual_sales");
     if(actualError)throw actualError;
     const salesById=new Map((actualSales||[]).filter((s:any)=>s.target_type==="random_box").map((s:any)=>[String(s.target_id),s]));
+    const {data:sharedStock,error:sharedError}=await sb.rpc("wise_random_box_shared_stock");
+    if(sharedError)throw sharedError;
+    const sharedById=new Map((sharedStock||[]).map((s:any)=>[String(s.random_box_id),s]));
     // 랜덤박스에는 독립적인 매입일이 없으므로 구성품의 실제 매입일 중 최신 날짜를 사용한다.
     const purchaseItemIds = [...new Set((data || []).flatMap((box: any) =>
       (box.sale_random_box_members || []).map((member: any) => String(member.purchase_item_id || "")).filter(Boolean),
@@ -48,7 +51,8 @@ export async function GET() {
     }
     const items = (data || []).map((row: any) => {
       const totalUnits=Number(row.purchase_quantity||1)*Math.max(1,Number(row.component_count||1));
-      const remainingUnits=row.view_status==="completed"?0:Number(row.remaining_units??totalUnits);
+      const shared:any=sharedById.get(String(row.id));
+      const remainingUnits=shared?Number(shared.remaining_units):row.view_status==="completed"?0:Number(row.remaining_units??totalUnits);
       const actual:any=salesById.get(String(row.id));
       return ({
       ordered_at: (row.sale_random_box_members || []).map((member: any) =>
@@ -68,6 +72,8 @@ export async function GET() {
       sold_quantity: Math.floor((totalUnits-remainingUnits)/Math.max(1,Number(row.component_count||1))),
       remaining_quantity: Math.ceil(remainingUnits/Math.max(1,Number(row.component_count||1))),
       remaining_units:remainingUnits,sold_units:Math.max(0,totalUnits-remainingUnits),stock_revision:row.updated_at,
+      linked_box_units:Number(shared?.box_matched??0),linked_member_units:Number(shared?.member_matched??0),
+      linked_total_units:Number(shared?.total_matched??0),
       actual_average_sale_price:actual?.average_price??null,actual_sales_revenue:Number(actual?.revenue??0),actual_sales_units:Number(actual?.sold_units??0),
       actual_sale_price_override:row.actual_sale_price_override??null,
       box_cost_price: Number(row.total_cost_krw),
@@ -201,7 +207,11 @@ export async function PATCH(req: Request) {
       const status=String(body.view_status||"display");
       if(!["display","hidden","completed"].includes(status)||!Number.isSafeInteger(sold)||sold<0||sold>capacity)throw Error("랜덤박스 판매 낱개 수량 또는 상태를 확인해줘.");
       if(current.view_status==="completed"&&status!=="completed")throw Error("완료된 랜덤박스는 수정으로 다시 열 수 없어. 차감 연결 해제를 이용해줘.");
-      const remaining=status==="completed"?0:capacity-sold;
+      const {data:shared,error:sharedError}=await sb.rpc("wise_random_box_shared_stock");
+      if(sharedError)throw sharedError;
+      const linked=Number((shared||[]).find((row:any)=>String(row.random_box_id)===String(body.id))?.total_matched||0);
+      if(capacity<linked)throw Error("랜덤박스 전체 매칭 수량보다 입고 수량을 작게 설정할 수 없어.");
+      const remaining=status==="completed"?0:Math.min(capacity-sold,capacity-linked);
       const price=body.sale_price===""||body.sale_price==null?null:Number(body.sale_price);
       const actualPrice=body.actual_sale_price_override===""||body.actual_sale_price_override==null?null:Number(body.actual_sale_price_override);
       const title=String(body.title||"").trim().slice(0,200);
