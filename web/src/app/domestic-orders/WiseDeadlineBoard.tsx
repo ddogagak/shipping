@@ -1,10 +1,13 @@
 "use client";
 import {useMemo,useState,useEffect,useRef} from "react";
 
-type Order={order_id:string;nickname:string;wise_user_id?:string|null;platform:string;first_order_date:string|null;order_status:string|null;request_status:string|null;tracking_registered:boolean};
+type Order={order_id:string;nickname:string;wise_user_id?:string|null;wise_order_ids?:number[];platform:string;first_order_date:string|null;order_status:string|null;request_status:string|null;tracking_registered:boolean};
 type Snapshot={userId:string;nickname:string;orders:{id:number;status:number;createdAt:string;deliveryCompany?:string;deliveryCode?:string}[]};
 const CACHE_KEY="ddoga:wise-deadline-snapshot:v1";
-type WiseRow={nickname:string;wise_user_id?:string|null;order_id:string;days:number;status:"unshipped"|"pending"|"confirmed"|"urgent";source:"ddoga"|"wise"};
+type WiseRow={nickname:string;wise_user_id?:string|null;order_id:string;days:number;status:"unshipped"|"pending"|"confirmed"|"urgent"|"listed";source:"ddoga"|"wise"};
+const WISE_LIST_COMPLETE="__wise_buyer_list_complete__";
+const PREPARING_STATUSES=new Set(["accepted","checked","packaged"]);
+const STATUS_LABELS:Record<string,string>={accepted:"입력됨",checked:"재고확인",packaged:"포장완료"};
 function daysSince(date:string|null){
  if(!date)return -1;
  const m=date.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
@@ -66,7 +69,14 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
     if(event.data.error){setBusy(false);setNotice(String(event.data.error));return;}
     if((event.data.records||[]).some((r:Snapshot & {error?:string})=>r.error)){setBusy(false);setNotice("와이스 일부 주문 조회 실패 · 이전 기록 유지");return;}
     const buyers:Snapshot[]=Array.isArray(event.data.records)?event.data.records:[];
-    const next:WiseRow[]=[];
+    // Keep actual undelivered-buyer-list membership even if a buyer has no
+    // eligible orderChains. The sentinel distinguishes a fresh empty list
+    // from old snapshots which did not record list membership.
+    const next:WiseRow[]=[{nickname:"",wise_user_id:null,order_id:WISE_LIST_COMPLETE,days:-1,status:"listed",source:"wise"}];
+    for(const buyer of buyers){
+     const userId=String(buyer.userId||"").trim();
+     if(userId)next.push({nickname:buyer.nickname||"",wise_user_id:userId,order_id:"buyer:"+userId,days:-1,status:"listed",source:"wise"});
+    }
     for(const buyer of buyers)for(const order of buyer.orders||[]){
      if(![10,16,25].includes(Number(order.status)))continue;
      const days=daysSince(order.createdAt);
@@ -98,6 +108,52 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
  const pending=unique(rows.filter(r=>r.status==="pending"));
  const confirmed=unique(rows.filter(r=>r.status==="confirmed"));
  const urgent=unique(rows.filter(r=>(r.status==="urgent"||r.status==="unshipped")&&r.days>=13));
+ const listDiff=useMemo(()=>{
+  const ready=rows.some(row=>row.status==="listed"&&row.order_id===WISE_LIST_COMPLETE);
+  const wiseById=new Map<string,{userId:string;nickname:string;wiseOrderIds:string[]}>();
+  if(ready){
+   for(const row of rows){
+    if(row.status!=="listed"||row.order_id===WISE_LIST_COMPLETE)continue;
+    const userId=String(row.wise_user_id||"").trim();
+    if(!userId)continue;
+    if(!wiseById.has(userId))wiseById.set(userId,{userId,nickname:row.nickname||"",wiseOrderIds:[]});
+   }
+   for(const row of rows){
+    if(!["unshipped","urgent","pending"].includes(row.status))continue;
+    const userId=String(row.wise_user_id||"").trim();
+    const buyer=wiseById.get(userId);
+    if(buyer&&!buyer.wiseOrderIds.includes(row.order_id))buyer.wiseOrderIds.push(row.order_id);
+   }
+  }
+
+  type DdogaEntry={userId:string;nickname:string;orders:{orderId:string;status:string;wiseIds:number[]}[]};
+  const ddogaById=new Map<string,DdogaEntry>();
+  const missingIds:DdogaEntry["orders"][number][]=[];
+  const missingNames:string[]=[];
+  for(const order of orders){
+   const status=order.order_status||"accepted";
+   if(String(order.platform).toLowerCase()!=="wise"||!PREPARING_STATUSES.has(status))continue;
+   const userId=String(order.wise_user_id||"").trim();
+   const detail={orderId:order.order_id,status,wiseIds:order.wise_order_ids||[]};
+   if(!userId){
+    missingIds.push(detail);
+    missingNames.push(order.nickname||"(닉네임 없음)");
+    continue;
+   }
+   let buyer=ddogaById.get(userId);
+   if(!buyer){
+    buyer={userId,nickname:order.nickname||"",orders:[]};
+    ddogaById.set(userId,buyer);
+   }
+   buyer.orders.push(detail);
+  }
+  const wiseOnly=[...wiseById.values()].filter(buyer=>!ddogaById.has(buyer.userId))
+    .sort((a,b)=>a.nickname.localeCompare(b.nickname,"ko"));
+  const ddogaOnly=[...ddogaById.values()].filter(buyer=>!wiseById.has(buyer.userId))
+    .sort((a,b)=>a.nickname.localeCompare(b.nickname,"ko"));
+  const noId=missingIds.map((order,index)=>({...order,nickname:missingNames[index]}));
+  return {ready,wiseOnly,ddogaOnly,noId,total:wiseOnly.length+ddogaOnly.length+noId.length};
+ },[rows,orders]);
  function refresh(){
   if(busy)return;
   snapshotRequestedRef.current=false;
@@ -171,6 +227,53 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
   </div>
   {urgent.length>0&&<div style={{marginTop:10,padding:10,borderRadius:8,background:"#fef2f2",fontSize:13}}><strong>발송긴급:</strong> {urgent.map(x=><span key={x.order_id} style={{...nicknameStyle,marginRight:6}}>{x.nickname} ({x.days}일)</span>)}</div>}
   <div style={{marginTop:10,padding:10,borderRadius:8,background:"#f0fdf4",fontSize:13}}><strong>직킵 수령확인 추정 {confirmed.length}명:</strong> {confirmed.length?confirmed.map(x=><span key={x.order_id} style={{...nicknameStyle,marginLeft:6}}>{x.nickname} <button type="button" disabled={acting!==null} onClick={()=>void handleConfirmation(x.order_id,"register")} style={{background:"#166534",color:"#fff",border:0,borderRadius:5,padding:"3px 7px",cursor:"pointer"}}>등록</button><button type="button" disabled={acting!==null} onClick={()=>void handleConfirmation(x.order_id,"dismiss")} style={{background:"#e5e7eb",border:0,borderRadius:5,padding:"3px 7px",cursor:"pointer"}}>삭제</button></span>):"대상 없음"}</div>
+  <section style={{marginTop:10,padding:12,borderRadius:10,border:"1px solid #d1d5db",background:"#fff"}}>
+   <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+    <strong style={{fontSize:14}}>리스트 확인 필요</strong>
+    <span style={{fontSize:14,fontWeight:800}}>{listDiff.ready?listDiff.total+"건":"비교 대기"}</span>
+   </div>
+   <p style={{fontSize:12,color:"#4b5563",margin:"6px 0 10px"}}>
+    Wise 미발송 구매자 목록 ↔ DDOGA 입력됨·재고확인·포장완료 구매자 ID 비교 · 주문번호는 확인용
+   </p>
+   {!listDiff.ready
+    ? <div style={{fontSize:13,color:"#6b7280"}}>이전 동기화 기록에는 미발송 목록 전체가 저장되지 않았어. 위 새로고침 버튼으로 최근 업데이트를 실행해줘.</div>
+    : <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",gap:10}}>
+       <div style={{border:"1px solid #e5e7eb",borderRadius:8,padding:10,minWidth:0}}>
+        <strong style={{fontSize:13}}>와이스에만 있음 · {listDiff.wiseOnly.length}명</strong>
+        <div style={{fontSize:11,color:"#6b7280",marginTop:3}}>Wise 미발송 목록에는 있지만 DDOGA 준비 상태 목록에는 없음</div>
+        <div style={{marginTop:8,maxHeight:340,overflowY:"auto",overflowWrap:"anywhere",fontSize:12}}>
+         {listDiff.wiseOnly.length?listDiff.wiseOnly.map(buyer=><div key={buyer.userId} style={{borderTop:"1px solid #f3f4f6",padding:"7px 0"}}>
+          <strong>{buyer.nickname||"(닉네임 없음)"}</strong> · ID: <code>{buyer.userId}</code>
+          {buyer.wiseOrderIds.length>0&&<div style={{color:"#6b7280",marginTop:3}}>Wise 주문: {buyer.wiseOrderIds.join(", ")}</div>}
+         </div>):"차이 없음"}
+        </div>
+       </div>
+       <div style={{border:"1px solid #e5e7eb",borderRadius:8,padding:10,minWidth:0}}>
+        <strong style={{fontSize:13}}>DDOGA에만 있음 · {listDiff.ddogaOnly.length}명</strong>
+        <div style={{fontSize:11,color:"#6b7280",marginTop:3}}>DDOGA 준비 상태 목록에는 있지만 Wise 미발송 목록에는 없음</div>
+        <div style={{marginTop:8,maxHeight:340,overflowY:"auto",overflowWrap:"anywhere",fontSize:12}}>
+         {listDiff.ddogaOnly.length?listDiff.ddogaOnly.map(buyer=><div key={buyer.userId} style={{borderTop:"1px solid #f3f4f6",padding:"7px 0"}}>
+          <strong>{buyer.nickname||"(닉네임 없음)"}</strong> · ID: <code>{buyer.userId}</code>
+          {buyer.orders.map(order=><div key={order.orderId} style={{color:"#6b7280",marginTop:3}}>
+           DDOGA 주문: {order.orderId} · {STATUS_LABELS[order.status]||order.status}
+           {order.wiseIds.length>0&&" · Wise 주문: "+order.wiseIds.join(", ")}
+          </div>)}
+         </div>):"차이 없음"}
+        </div>
+       </div>
+       {listDiff.noId.length>0&&<div style={{gridColumn:"1 / -1",border:"1px solid #f59e0b",borderRadius:8,padding:10,background:"#fffbeb"}}>
+        <strong style={{fontSize:13}}>구매자 ID 확인 필요 · {listDiff.noId.length}건</strong>
+        <div style={{fontSize:11,color:"#92400e",marginTop:3}}>ID가 없어 비교에서 제외했어. 닉네임이 같더라도 자동으로 동일인으로 판단하지 않아.</div>
+        <div style={{maxHeight:200,overflowY:"auto",overflowWrap:"anywhere",fontSize:12,marginTop:6}}>
+         {listDiff.noId.map(order=><div key={order.orderId} style={{padding:"3px 0"}}>
+          {order.nickname} · DDOGA 주문: {order.orderId} · {STATUS_LABELS[order.status]||order.status}
+          {order.wiseIds.length>0&&" · Wise 주문: "+order.wiseIds.join(", ")}
+         </div>)}
+        </div>
+       </div>}
+      </div>
+   }
+  </section>
   {notice&&<p role="status" style={{fontSize:12}}>{notice}</p>}
  </div>;
 }
