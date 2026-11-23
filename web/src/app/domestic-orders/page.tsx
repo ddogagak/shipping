@@ -24,6 +24,7 @@ type DomesticOrder = {
   first_order_date: string | null;
   nickname: string | null;
   wise_user_id: string | null;
+  wise_order_ids?: number[];
   recipient_name: string | null;
   phone: string | null;
   postal_code: string | null;
