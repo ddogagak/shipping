@@ -12,6 +12,7 @@ type Sale = { id: string; video_id: string; wise_user_id: string | null; buyer_n
 type Show = { video_id: string; first_sale: string; last_sale: string; revenue: number; count: number; buyer_count: number };
 type Candidate = { type: "purchase_item" | "random_box" | "inventory_group"; id: string; name: string; option: string; image_url: string | null; series: string; unit_price: number; currency: string; component_count: number; sale_price: number | null; reference_prices?:number[]; stock_status: string; purchase_date: string; item_type: string; remaining_units: number; random_member: boolean };
 type Family = { key: string; title: string; count: number; price:number; revenue: number; linked: number; image: string | null; broadcastAt:string|null; items: Sale[] };
+type Overmatch = {target_type:"purchase_item"|"random_box"|"inventory_group";target_id:string;item_name:string;capacity:number;matched:number;excess:number};
 
 const panel: CSSProperties = { border: "1px solid #e2e8f0", borderRadius: 13, padding: 16, background: "#fff" };
 const field: CSSProperties = { padding: "9px 11px", borderRadius: 8, border: "1px solid #cbd5e1", color: "#0f172a", background: "#fff", maxWidth: "100%" };
@@ -63,6 +64,9 @@ export default function WiseInventoryLinkPage() {
   const [sales, setSales] = useState<Sale[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [inventoryNames,setInventoryNames]=useState<Record<string,string>>({});
+  const [overmatched,setOvermatched]=useState<Overmatch[]>([]);
+  const [overmatchOpen,setOvermatchOpen]=useState(false);
+  const [overmatchError,setOvermatchError]=useState("");
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [groupSearch, setGroupSearch] = useState("");
   const [salePriceSearch,setSalePriceSearch]=useState("");
@@ -138,6 +142,13 @@ export default function WiseInventoryLinkPage() {
     finally { setLoadingInventory(false); }
   }, []);
   useEffect(() => { void loadInventory(); }, [loadInventory]);
+  const loadOvermatched = useCallback(async()=>{
+    try{
+      const data=await requestJson("/api/sales-management/sale-links?mode=overmatched");
+      setOvermatched(data.rows||[]);setOvermatchError("");
+    }catch(e){setOvermatchError(e instanceof Error?e.message:"과매칭 조회 실패");}
+  },[]);
+  useEffect(()=>{void loadOvermatched();},[loadOvermatched]);
 
   const familyGroups = useMemo(() => {
     const map = new Map<string, Family>();
@@ -185,7 +196,7 @@ export default function WiseInventoryLinkPage() {
     if(busy||!ids.length||ids.length>300)return;
     if(!window.confirm(ids.length+"건의 실제 판매 수량을 건당 "+units+"개로 저장할까? 이미 차감한 단일 재고 연결은 차이만 반영해."))return;
     setBusy(true);setError("");setMessage("");
-    try{const data=await saveSaleUnits(ids,units);setMessage(data.count+"건 수량 수정 완료 · 재고 "+(data.deducted_units>0?data.deducted_units+"개 추가 차감":data.deducted_units<0?-data.deducted_units+"개 복원":"변화 없음"));setTargets({});await loadSales(videoIds);await loadInventory();}
+    try{const data=await saveSaleUnits(ids,units);setMessage(data.count+"건 수량 수정 완료 · 재고 "+(data.deducted_units>0?data.deducted_units+"개 추가 차감":data.deducted_units<0?-data.deducted_units+"개 복원":"변화 없음"));setTargets({});await loadSales(videoIds);await loadInventory();await loadOvermatched();}
     catch(e){setError(e instanceof Error?e.message:"수량 저장 실패");}
     finally{setBusy(false);}
   }
@@ -223,6 +234,7 @@ export default function WiseInventoryLinkPage() {
       if (action === "link") setTargets({});
       await loadSales(videoIds);
       await loadInventory();
+      await loadOvermatched();
     } catch (e) { setError(e instanceof Error ? e.message : "매칭 저장 실패"); }
     finally { setBusy(false); }
   }
@@ -241,6 +253,22 @@ export default function WiseInventoryLinkPage() {
 
     {error && <div role="alert" style={{ ...panel, marginBottom: 12, background: "#fef2f2", color: "#991b1b" }}>{error}</div>}
     {message && <div role="status" style={{ ...panel, marginBottom: 12, background: "#f0fdf4", color: "#166534" }}>{message}</div>}
+    <section style={{...panel,marginBottom:12}}>
+      <button type="button" style={{...btn,display:"flex",width:"100%",justifyContent:"space-between",alignItems:"center"}} onClick={()=>setOvermatchOpen(v=>!v)} aria-expanded={overmatchOpen}>
+        <span>과매칭 확인 필요 · {overmatched.length}종</span><span>{overmatchOpen?"▲":"▼"}</span>
+      </button>
+      {overmatchError&&<p style={{fontSize:12,color:"#991b1b"}}>{overmatchError}</p>}
+      {overmatchOpen&&<div style={{marginTop:10}}>
+        <p style={{fontSize:12,color:"#64748b"}}>매입 낱개 수량보다 실판매 연결이 많은 상품이야. 기존 연결을 자동 삭제하지 않고, 새 연결만 차단해. 수량 수정·양도 여부를 확인해줘.</p>
+        <button type="button" style={btn} onClick={()=>void loadOvermatched()}>목록 새로고침</button>
+        <div style={{maxHeight:400,overflowY:"auto",marginTop:9}}>
+          {overmatched.length===0?"초과 연결 없음":overmatched.map(row=><div key={row.target_type+"|"+row.target_id} style={{padding:"7px 0",borderTop:"1px solid #e2e8f0",fontSize:13}}>
+            <strong>{row.item_name}</strong> · {row.matched}/{row.capacity}개 <span style={{color:"#b91c1c",fontWeight:700}}>(+{row.excess}개)</span>
+            {row.target_type!=="purchase_item"&&<span style={{color:"#64748b"}}> · {row.target_type==="random_box"?"랜덤박스":"동일상품 묶음"}</span>}
+          </div>)}
+        </div>
+      </div>}
+    </section>
 
     <section style={{ ...panel, marginBottom: 12 }}>
       <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
