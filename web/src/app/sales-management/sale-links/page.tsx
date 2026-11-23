@@ -181,12 +181,28 @@ export default function WiseInventoryLinkPage() {
   const previews=selectedTargets.map(c=>({c,delta:applicableSales.reduce((sum,s)=>sum+c.quantity-(s.links.find(l=>targetKey(l)===c.type+"|"+c.id)?.applied_units||0),0)}));
   const insufficient=previews.some(({c,delta})=>delta>c.remaining_units);
   async function editUnits(ids:string[], units:number){
-    if(busy||!ids.length||ids.length>300)return;
+    if(busy||!ids.length)return;
     if(!window.confirm(ids.length+"건의 실제 판매 수량을 건당 "+units+"개로 저장할까? 이미 차감한 단일 재고 연결은 차이만 반영해."))return;
     setBusy(true);setError("");setMessage("");
-    try{const data=await saveSaleUnits(ids,units);setMessage(data.count+"건 수량 수정 완료 · 재고 "+(data.deducted_units>0?data.deducted_units+"개 추가 차감":data.deducted_units<0?-data.deducted_units+"개 복원":"변화 없음"));setTargets({});await loadSales(videoIds);await loadInventory();}
-    catch(e){setError(e instanceof Error?e.message:"수량 저장 실패");}
-    finally{setBusy(false);}
+    let completed=0, deducted=0;
+    try {
+      for(let start=0;start<ids.length;start+=300){
+        const batch=ids.slice(start,start+300);
+        const data=await saveSaleUnits(batch,units);
+        completed+=batch.length;
+        deducted+=Number(data.deducted_units??0);
+        if(completed<ids.length)setMessage(completed+"/"+ids.length+"건 수량 수정 중…");
+      }
+      setMessage(completed+"건 수량 수정 완료 · 재고 "+(deducted>0?deducted+"개 추가 차감":deducted<0?-deducted+"개 복원":"변화 없음"));
+      setTargets({});
+    } catch(e) {
+      const reason=e instanceof Error?e.message:"수량 저장 실패";
+      setMessage("");
+      setError(completed>0?completed+"/"+ids.length+"건 저장 후 중단: "+reason+" · 앞서 저장된 건은 유지돼. 새로고침된 상태에서 다시 선택해줘.":reason);
+    } finally {
+      if(completed>0){await loadSales(videoIds);await loadInventory();}
+      setBusy(false);
+    }
   }
   const setGroupSelection = (family: Family, checked: boolean) => {
     setSelected(prev => {
@@ -204,26 +220,41 @@ export default function WiseInventoryLinkPage() {
     if(action==='link'&&selectedTargets.some(c=>c.type==='inventory_group')&&selectedTargets.length!==1){setError('동일상품 묶음은 한 번에 하나만 선택해줘.');return;}
     if(action==="link" && deductionMode==="historical" && !window.confirm("과거 판매도 실제 차감합니다. 이미 수동으로 차감한 판매는 중복될 수 있어. 미리보기 수량을 확인했나요?"))return;
     setBusy(true); setError(""); setMessage("");
+    let completed=0, affectedLinks=0, deducted=0, remembered=false;
     try {
       const target = single?.target;
       const body = {
-        action, stock_ids: ids,
-        deduction_mode: deductionMode, remember: remember&&canRemember,
+        action, deduction_mode: deductionMode, remember: remember&&canRemember,
         targets: action === "link" ? selectedTargets.map(row => ({
           target_type: row.type, target_id: row.id, quantity: row.quantity
         })) : undefined,
         target_type: target ? (target.inventory_group_id?'inventory_group':target.purchase_item_id ? "purchase_item" : "random_box") : undefined,
         target_id: target ? (target.inventory_group_id||target.purchase_item_id || target.random_box_id) : undefined
       };
-      const data = await requestJson("/api/sales-management/sale-links", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
-      });
-      setMessage(data.count + "개 연결 " + (action === "link" ? "저장" : "해제") + " 완료 · " + (data.deducted_units>0?`낱개 ${data.deducted_units}개 차감`:data.deducted_units<0?`낱개 ${-data.deducted_units}개 복원`:"재고 변화 없음") + (data.remembered?" · 다음 방송 자동 매칭 저장됨":""));
-      if (action === "link") setTargets({});
-      await loadSales(videoIds);
-      await loadInventory();
-    } catch (e) { setError(e instanceof Error ? e.message : "매칭 저장 실패"); }
-    finally { setBusy(false); }
+      // Keep the API/DB per-request safety limits but automatically batch larger UI selections.
+      const batchSize=action==="link"?Math.min(300,Math.floor(1200/selectedTargets.length)):300;
+      for(let start=0;start<ids.length;start+=batchSize){
+        const batch=ids.slice(start,start+batchSize);
+        const data=await requestJson("/api/sales-management/sale-links", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body:JSON.stringify({...body,stock_ids:batch})
+        });
+        completed+=batch.length;
+        affectedLinks+=Number(data.count??0);
+        deducted+=Number(data.deducted_units??0);
+        remembered ||= Boolean(data.remembered);
+        if(completed<ids.length)setMessage(completed+"/"+ids.length+"건 "+(action==="link"?"연결":"해제")+" 처리 중…");
+      }
+      setMessage(completed+"건 처리 완료 · 연결 "+affectedLinks+"개 "+(action==="link"?"저장":"해제")+" · "+(deducted>0?`낱개 ${deducted}개 차감`:deducted<0?`낱개 ${-deducted}개 복원`:"재고 변화 없음")+(remembered?" · 다음 방송 자동 매칭 저장됨":""));
+      if(action==="link")setTargets({});
+    } catch(e) {
+      const reason=e instanceof Error?e.message:"매칭 저장 실패";
+      setMessage("");
+      setError(completed>0?completed+"/"+ids.length+"건 처리 후 중단: "+reason+" · 처리된 건은 유지돼. 갱신된 목록에서 미처리 건만 다시 선택해줘.":reason);
+    } finally {
+      if(completed>0){await loadSales(videoIds);await loadInventory();}
+      setBusy(false);
+    }
   }
   const selectedShows = shows.filter(show => videoIds.includes(show.video_id));
   const totalShowRevenue = selectedShows.reduce((sum, show) => sum + show.revenue, 0);
@@ -282,8 +313,8 @@ export default function WiseInventoryLinkPage() {
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
           <button style={btn} onClick={() => setSelected(Object.fromEntries(filteredGroups.flatMap(g => g.items.map(row => [row.id, true]))))}>현재 목록 전체 선택</button>
           <button style={btn} onClick={() => setSelected({})}>선택 해제</button>
-          <span style={{ fontSize: 12, color: "#475569" }}>선택 {selectedIds.length}건 · 실제 {selectedUnitTotal}개 · 300건까지 저장</span>
-          <label style={{fontSize:13,fontWeight:700}}>선택 건당 실제 판매 수량 <SaleUnitsEditor key={selectedIds.join(",")} units={commonUnits} disabled={busy||!selectedIds.length||selectedIds.length>300} bulk onSave={n=>editUnits(selectedIds,n)}/></label>
+          <span style={{ fontSize: 12, color: "#475569" }}>선택 {selectedIds.length}건 · 실제 {selectedUnitTotal}개 · 대량 선택 자동 분할 저장</span>
+          <label style={{fontSize:13,fontWeight:700}}>선택 건당 실제 판매 수량 <SaleUnitsEditor key={selectedIds.join(",")} units={commonUnits} disabled={busy||!selectedIds.length} bulk onSave={n=>editUnits(selectedIds,n)}/></label>
         </div>
         <div style={{ maxHeight: "68vh", overflow: "auto", border: "1px solid #e2e8f0", borderRadius: 8 }}>
           <table style={{ borderCollapse: "collapse", width: "100%" }}>
@@ -338,8 +369,8 @@ export default function WiseInventoryLinkPage() {
           {!canRemember&&<span style={{color:"#64748b"}}>한 상품군(이미지 포함)을 선택하면 자동 연결을 기억할 수 있어.</span>}
         </div>
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-          <button style={{ ...btn, flex: 1, background: insufficient?"#94a3b8":"#1d4ed8", color: "#fff", borderColor: "#1d4ed8" }} disabled={busy || insufficient || selectedIds.length === 0 || selectedIds.length > 300 || selectedTargets.length === 0 || selectedTargets.length > 16 || selectedIds.length * selectedTargets.length > 1200} onClick={() => void save("link")}>{busy ? "저장 중..." : insufficient?"재고 부족":selectedIds.length + "건 · 전체 " + selectedTargets.reduce((s,c)=>s+c.quantity*selectedIds.length,0) + "개 연결"}</button>
-          <button style={{ ...btn, color: "#991b1b" }} disabled={busy || selectedIds.length === 0 || selectedIds.length > 300} onClick={() => { if (window.confirm("선택한 실제 판매기록의 재고 연결만 해제할까?")) void save("unlink"); }}>연결 해제</button>
+          <button style={{ ...btn, flex: 1, background: insufficient?"#94a3b8":"#1d4ed8", color: "#fff", borderColor: "#1d4ed8" }} disabled={busy || insufficient || selectedIds.length === 0 || selectedTargets.length === 0 || selectedTargets.length > 16} onClick={() => void save("link")}>{busy ? "저장 중..." : insufficient?"재고 부족":selectedIds.length + "건 · 전체 " + selectedTargets.reduce((s,c)=>s+c.quantity*selectedIds.length,0) + "개 연결"}</button>
+          <button style={{ ...btn, color: "#991b1b" }} disabled={busy || selectedIds.length === 0} onClick={() => { if (window.confirm("선택한 실제 판매기록의 재고 연결만 해제할까?")) void save("unlink"); }}>연결 해제</button>
         </div>
         <p style={{ fontSize: 12, color: "#64748b" }}>기존 연결은 차감하지 않아. 차감한 연결을 해제하면 그 수량만 복원돼. 배송·실매출 원본은 변경하지 않아.</p>
       </aside>
