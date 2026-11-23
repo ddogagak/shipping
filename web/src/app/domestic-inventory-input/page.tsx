@@ -68,7 +68,7 @@ const seriesList = [
 const currencyList = ["JPY", "CNY", "KRW"];
 
 
-const SOURCING_GPT_PROMPT = \`소싱 자료를 확인해서 ddoga.lol 소싱 등록 입력용 텍스트로 정리해줘.
+const SOURCING_GPT_PROMPT = `소싱 자료를 확인해서 ddoga.lol 소싱 등록 입력용 텍스트로 정리해줘.
 
 [목표]
 - 이 결과는 DDOGA의 /domestic-inventory-input → "텍스트 붙여넣기"에 바로 붙여넣는다.
@@ -162,7 +162,7 @@ MEMO:
 - BOX_COUNT가 "구매 박스 수"가 아니라 "박스 1개 안의 실제 구성품 수"인지 확인한다.
 - QTY가 실제 구매수량인지 확인한다.
 - IMAGE / LINEUP_IMAGE / SOURCE_URL을 자료에서 찾을 수 있는데 누락하지 않았는지 확인한다.
-- 추정값을 넣지 않았는지 확인한 뒤 출력한다.\`;
+- 추정값을 넣지 않았는지 확인한 뒤 출력한다.`;
 
 const initialManualForm = {
   item_name: "",
