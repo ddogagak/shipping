@@ -9,7 +9,7 @@ type Row = {
   wise_user_id?: string | null;
   order_id: string;
   days: number;
-  status: "unshipped" | "pending" | "confirmed" | "urgent";
+  status: "unshipped" | "pending" | "confirmed" | "urgent" | "listed";
   source: "wise";
 };
 
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     const row = item as Record<string, unknown>;
     if (typeof row.nickname !== "string" || typeof row.order_id !== "string" ||
         typeof row.days !== "number" || !Number.isFinite(row.days) ||
-        !["unshipped", "pending", "confirmed", "urgent"].includes(String(row.status)) ||
+        !["unshipped", "pending", "confirmed", "urgent", "listed"].includes(String(row.status)) ||
         row.source !== "wise") {
       return NextResponse.json({ error: "유효하지 않은 주문 필드" }, { status: 400 });
     }
