@@ -300,29 +300,24 @@ export async function POST(request: Request) {
     }
 
     const mode = ["future", "historical", "link_only"].includes(body.deduction_mode) ? body.deduction_mode : "link_only";
-    // Inventory groups must not overwrite unrelated legacy links. Skip conflicting
-    // sale records while retaining existing purchase-item allocations and balances.
-    let eligibleIds = ids;
-    let skippedConflicts = 0;
-    if (targets.length === 1 && targets[0].target_type === "inventory_group") {
-      const groupId = targets[0].target_id;
-      const { data: existing, error: linkError } = await sb.from("wise_sale_inventory_links")
-        .select("wise_stock_id,inventory_group_id,purchase_item_id,random_box_id").in("wise_stock_id", ids);
-      if (linkError) throw linkError;
-      const conflicted = new Set((existing || [])
-        .filter(row => String(row.inventory_group_id || "") !== groupId)
-        .map(row => String(row.wise_stock_id)));
-      eligibleIds = ids.filter(id => !conflicted.has(id));
-      skippedConflicts = ids.length - eligibleIds.length;
+    if (body.reconcile_reset === true) {
+      if (targets.length !== 1 || targets[0].target_type !== "inventory_group")
+        return fail("초기화 재정산은 통합 재고풀 하나만 선택해줘.");
+      if (mode !== "historical")
+        return fail("초기화 재정산은 과거 포함 실제 차감 모드에서만 가능해.");
+      const { data, error } = await sb.rpc("wise_reconcile_inventory_pool_from_reset", {
+        p_ids: ids, p_group_id: targets[0].target_id,
+        p_quantity: targets[0].quantity, p_remember: body.remember === true
+      });
+      if (error) return fail(error.message, 409);
+      return NextResponse.json({ ok: true, ...data });
     }
-    if (!eligibleIds.length) {
-      return NextResponse.json({ ok: true, count: 0, deducted_units: 0, remembered: false, skipped_conflicts: skippedConflicts });
-    }
+
     const { data, error } = await sb.rpc("wise_save_inventory_links", {
-      p_action: "link", p_ids: eligibleIds, p_targets: targets, p_mode: mode, p_remember: body.remember === true
+      p_action: "link", p_ids: ids, p_targets: targets, p_mode: mode, p_remember: body.remember === true
     });
     if (error) throw error;
-    return NextResponse.json({ ok: true, ...data, skipped_conflicts: skippedConflicts });
+    return NextResponse.json({ ok: true, ...data });
   } catch (error) {
     return fail(errorText(error), 500);
   }
