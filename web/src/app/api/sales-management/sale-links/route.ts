@@ -190,7 +190,7 @@ async function getInventory() {
     lots.forEach(c=>hiddenIds.add(c.id));
     const first=lots[0],remaining=lots.reduce((s,c)=>s+c.remaining_units,0);
     const referencePrices=[...new Set(lots.map(c=>c.sale_price).filter((p):p is number=>typeof p==='number'&&Number.isFinite(p)&&p>0))].sort((a,b)=>a-b);
-    groupCandidates.push({...first,id:group.id,type:'inventory_group',name:group.title,option:group.group_kind==='sale_pool'?`판매용 재고풀 · ${lots.length}종`:`동일상품 묶음 · ${lots.length}차수`,remaining_units:remaining,stock_status:remaining?'active':'soldout',sale_price:group.group_kind==='sale_pool'?Number(group.sale_price):null,reference_prices:group.group_kind==='sale_pool'?[Number(group.sale_price)]:referencePrices,random_member:false});
+    groupCandidates.push({...first,id:group.id,type:'inventory_group',name:group.title,option:group.group_kind==='sale_pool'?`판매용 재고풀 · ${lots.length}종`:`동일상품 묶음 · ${lots.length}차수`,remaining_units:remaining,stock_status:remaining?'active':'soldout',sale_price:group.group_kind==='sale_pool'&&group.sale_price!=null?Number(group.sale_price):null,reference_prices:group.group_kind==='sale_pool'&&group.sale_price!=null?[Number(group.sale_price)]:referencePrices,random_member:false});
   }
   return NextResponse.json({ ok: true, candidates:[...groupCandidates,...candidates.filter(c=>!hiddenIds.has(c.id))], names });
 }
