@@ -110,19 +110,11 @@ function RandomBoxMemberGrid({members,inventoryById}:{members:any[];inventoryByI
   {sorted.map((m:any)=>{
    const left=quantity(m);
    const full=String(m.item_name||inventoryById.get(String(m.purchase_item_id))?.display_name||"구성품");
-   const short=full.replace(/^.*?(?=(?:엔딩\\s*Ver\\.?\\s*)?디자인\\s*\\d+)/i,"").trim()||full;
-   const original=Math.max(0,Number(m.original_box_quantity||0))*Math.max(1,Number(m.component_count||1));
-   return <div key={String(m.purchase_item_id)} style={{minWidth:0,overflow:"hidden",border:"1px solid #e2e8f0",borderRadius:8,background:"#fff"}}>
-    <div style={{position:"relative",aspectRatio:"1 / 1",background:"#f8fafc"}}>
-     {(m.image_url||inventoryById.get(String(m.purchase_item_id))?.image_url)
-      ?<img src={m.image_url||inventoryById.get(String(m.purchase_item_id))?.image_url} alt={full} loading="lazy" style={{width:"100%",height:"100%",objectFit:"contain"}}/>
-      :<div style={{...noImage,fontSize:10}}>이미지 없음</div>}
-     <span style={{position:"absolute",right:3,bottom:3,background:left===0?"#991b1b":"#1e40af",color:"#fff",padding:"3px 5px",borderRadius:5,fontSize:11,fontWeight:900,boxShadow:"0 1px 3px rgba(0,0,0,.2)"}}>잔여 {left}개</span>
-    </div>
-    <div title={full} style={{padding:"5px 6px",fontSize:10,lineHeight:1.4,overflowWrap:"anywhere",color:"#334155"}}>
-     <div style={{fontWeight:800,minHeight:28}}>{short}</div>
-     <div style={{color:"#64748b"}}>원래 {original}개</div>
-    </div>
+   return <div key={String(m.purchase_item_id)} title={full} style={{position:"relative",minWidth:0,aspectRatio:"1 / 1",overflow:"hidden",border:"1px solid #e2e8f0",borderRadius:8,background:"#f8fafc"}}>
+    {(m.image_url||inventoryById.get(String(m.purchase_item_id))?.image_url)
+     ?<img src={m.image_url||inventoryById.get(String(m.purchase_item_id))?.image_url} alt={full} loading="lazy" style={{display:"block",width:"100%",height:"100%",objectFit:"contain"}}/>
+     :<div style={{...noImage,fontSize:10}}>이미지 없음</div>}
+    <span aria-label={`잔여 ${left}개`} style={{position:"absolute",right:5,bottom:5,background:"rgba(15,23,42,.55)",color:"#fff",padding:"3px 7px",borderRadius:6,fontSize:14,fontWeight:900,lineHeight:1.2,fontVariantNumeric:"tabular-nums",pointerEvents:"none"}}>{left}</span>
    </div>;
   })}
  </div>;
