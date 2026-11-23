@@ -7,7 +7,6 @@ const CACHE_KEY="ddoga:wise-deadline-snapshot:v1";
 type WiseRow={nickname:string;wise_user_id?:string|null;order_id:string;days:number;status:"unshipped"|"pending"|"confirmed"|"urgent"|"listed";source:"ddoga"|"wise"};
 const WISE_LIST_COMPLETE="__wise_buyer_list_complete__";
 const PREPARING_STATUSES=new Set(["accepted","checked","packaged"]);
-const STATUS_LABELS:Record<string,string>={accepted:"입력됨",checked:"재고확인",packaged:"포장완료"};
 function daysSince(date:string|null){
  if(!date)return -1;
  const m=date.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
@@ -227,52 +226,19 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
   </div>
   {urgent.length>0&&<div style={{marginTop:10,padding:10,borderRadius:8,background:"#fef2f2",fontSize:13}}><strong>발송긴급:</strong> {urgent.map(x=><span key={x.order_id} style={{...nicknameStyle,marginRight:6}}>{x.nickname} ({x.days}일)</span>)}</div>}
   <div style={{marginTop:10,padding:10,borderRadius:8,background:"#f0fdf4",fontSize:13}}><strong>직킵 수령확인 추정 {confirmed.length}명:</strong> {confirmed.length?confirmed.map(x=><span key={x.order_id} style={{...nicknameStyle,marginLeft:6}}>{x.nickname} <button type="button" disabled={acting!==null} onClick={()=>void handleConfirmation(x.order_id,"register")} style={{background:"#166534",color:"#fff",border:0,borderRadius:5,padding:"3px 7px",cursor:"pointer"}}>등록</button><button type="button" disabled={acting!==null} onClick={()=>void handleConfirmation(x.order_id,"dismiss")} style={{background:"#e5e7eb",border:0,borderRadius:5,padding:"3px 7px",cursor:"pointer"}}>삭제</button></span>):"대상 없음"}</div>
-  <section style={{marginTop:10,padding:12,borderRadius:10,border:"1px solid #d1d5db",background:"#fff"}}>
-   <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-    <strong style={{fontSize:14}}>리스트 확인 필요</strong>
-    <span style={{fontSize:14,fontWeight:800}}>{listDiff.ready?listDiff.total+"건":"비교 대기"}</span>
-   </div>
-   <p style={{fontSize:12,color:"#4b5563",margin:"6px 0 10px"}}>
-    Wise 미발송 구매자 목록 ↔ DDOGA 입력됨·재고확인·포장완료 구매자 ID 비교 · 주문번호는 확인용
-   </p>
+  <section style={{marginTop:10,padding:10,borderRadius:8,border:"1px solid #d1d5db",background:"#fff",fontSize:13}}>
+   <strong>리스트 확인 필요 {listDiff.ready?listDiff.wiseOnly.length+listDiff.ddogaOnly.length+"명":"· 비교 대기"}:</strong>{" "}
    {!listDiff.ready
-    ? <div style={{fontSize:13,color:"#6b7280"}}>이전 동기화 기록에는 미발송 목록 전체가 저장되지 않았어. 위 새로고침 버튼으로 최근 업데이트를 실행해줘.</div>
-    : <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",gap:10}}>
-       <div style={{border:"1px solid #e5e7eb",borderRadius:8,padding:10,minWidth:0}}>
-        <strong style={{fontSize:13}}>와이스에만 있음 · {listDiff.wiseOnly.length}명</strong>
-        <div style={{fontSize:11,color:"#6b7280",marginTop:3}}>Wise 미발송 목록에는 있지만 DDOGA 준비 상태 목록에는 없음</div>
-        <div style={{marginTop:8,maxHeight:340,overflowY:"auto",overflowWrap:"anywhere",fontSize:12}}>
-         {listDiff.wiseOnly.length?listDiff.wiseOnly.map(buyer=><div key={buyer.userId} style={{borderTop:"1px solid #f3f4f6",padding:"7px 0"}}>
-          <strong>{buyer.nickname||"(닉네임 없음)"}</strong> · ID: <code>{buyer.userId}</code>
-          {buyer.wiseOrderIds.length>0&&<div style={{color:"#6b7280",marginTop:3}}>Wise 주문: {buyer.wiseOrderIds.join(", ")}</div>}
-         </div>):"차이 없음"}
-        </div>
-       </div>
-       <div style={{border:"1px solid #e5e7eb",borderRadius:8,padding:10,minWidth:0}}>
-        <strong style={{fontSize:13}}>DDOGA에만 있음 · {listDiff.ddogaOnly.length}명</strong>
-        <div style={{fontSize:11,color:"#6b7280",marginTop:3}}>DDOGA 준비 상태 목록에는 있지만 Wise 미발송 목록에는 없음</div>
-        <div style={{marginTop:8,maxHeight:340,overflowY:"auto",overflowWrap:"anywhere",fontSize:12}}>
-         {listDiff.ddogaOnly.length?listDiff.ddogaOnly.map(buyer=><div key={buyer.userId} style={{borderTop:"1px solid #f3f4f6",padding:"7px 0"}}>
-          <strong>{buyer.nickname||"(닉네임 없음)"}</strong> · ID: <code>{buyer.userId}</code>
-          {buyer.orders.map(order=><div key={order.orderId} style={{color:"#6b7280",marginTop:3}}>
-           DDOGA 주문: {order.orderId} · {STATUS_LABELS[order.status]||order.status}
-           {order.wiseIds.length>0&&" · Wise 주문: "+order.wiseIds.join(", ")}
-          </div>)}
-         </div>):"차이 없음"}
-        </div>
-       </div>
-       {listDiff.noId.length>0&&<div style={{gridColumn:"1 / -1",border:"1px solid #f59e0b",borderRadius:8,padding:10,background:"#fffbeb"}}>
-        <strong style={{fontSize:13}}>구매자 ID 확인 필요 · {listDiff.noId.length}건</strong>
-        <div style={{fontSize:11,color:"#92400e",marginTop:3}}>ID가 없어 비교에서 제외했어. 닉네임이 같더라도 자동으로 동일인으로 판단하지 않아.</div>
-        <div style={{maxHeight:200,overflowY:"auto",overflowWrap:"anywhere",fontSize:12,marginTop:6}}>
-         {listDiff.noId.map(order=><div key={order.orderId} style={{padding:"3px 0"}}>
-          {order.nickname} · DDOGA 주문: {order.orderId} · {STATUS_LABELS[order.status]||order.status}
-          {order.wiseIds.length>0&&" · Wise 주문: "+order.wiseIds.join(", ")}
-         </div>)}
-        </div>
-       </div>}
-      </div>
-   }
+    ? <span>최근 업데이트를 눌러줘.</span>
+    : <>
+       {listDiff.wiseOnly.length===0&&listDiff.ddogaOnly.length===0
+        ? "차이 없음"
+        : <span style={{display:"inline-flex",flexWrap:"wrap",gap:"4px 10px",verticalAlign:"middle"}}>
+           {listDiff.ddogaOnly.map(buyer=><span key={"wise:"+buyer.userId}>{buyer.userId}(와이스누락)</span>)}
+           {listDiff.wiseOnly.map(buyer=><span key={"ddoga:"+buyer.userId}>{buyer.userId}(ddoga누락)</span>)}
+          </span>}
+       {listDiff.noId.length>0&&<span style={{marginLeft:8,color:"#92400e"}}>· ID 없는 주문 {listDiff.noId.length}건 비교 제외</span>}
+      </>}
   </section>
   {notice&&<p role="status" style={{fontSize:12}}>{notice}</p>}
  </div>;
