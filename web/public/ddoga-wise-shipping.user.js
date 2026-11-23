@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DDOGA Wise shipping bridge
 // @namespace    https://www.ddoga.lol/
-// @version      2.4.16
+// @version      2.4.17
 // @updateURL    https://www.ddoga.lol/ddoga-wise-shipping.user.js
 // @downloadURL  https://www.ddoga.lol/ddoga-wise-shipping.user.js
 // @match        https://wyyyes.com/*
@@ -27,8 +27,8 @@
 
   // raw(page) 컨텍스트: Firefox 모바일의 cross-realm fetch/XHR 충돌 방지.
   const page = window;
-  if (page.__DDOGA_WISE_SHIP_V2416__) return;
-  page.__DDOGA_WISE_SHIP_V2416__ = true;
+  if (page.__DDOGA_WISE_SHIP_V2417__) return;
+  page.__DDOGA_WISE_SHIP_V2417__ = true;
 
   const hasOpener = () => {
     try { return Boolean(window.opener && !window.opener.closed); }
@@ -93,56 +93,20 @@
   ).trim();
 
   function resolveWiseBuyer(users, row) {
-    const wantedId = String(row?.wise_user_id || row?.user_id || "").trim();
-
-    if (wantedId) {
-      const byId = users.filter(user => wiseUserIdOf(user) === wantedId);
-
-      if (byId.length === 1) {
-        return {
-          user: byId[0],
-          userId: wantedId,
-          matchedBy: "id",
-          count: 1
-        };
-      }
-
-      // 고유 ID가 이미 있으면 닉네임이 우연히 같은 다른 사람으로 대체하지 않는다.
-      // 미발송 목록에서 이미 사라진 경우에도 orderChains는 ID로 직접 조회 가능하다.
-      return {
-        user: null,
-        userId: wantedId,
-        matchedBy: "id",
-        count: byId.length
-      };
+    const wantedId = String(row?.wise_user_id || "").trim();
+    if (!wantedId || row?.identity_conflict) {
+      return {user:null,userId:"",matchedBy:"id",count:0};
     }
-
-    const byName = users.filter(user =>
-      norm(wiseNicknameOf(user)) === norm(row?.nickname)
-    );
-
-    if (byName.length !== 1) {
-      return {
-        user: null,
-        userId: "",
-        matchedBy: "nickname",
-        count: byName.length
-      };
-    }
-
-    return {
-      user: byName[0],
-      userId: wiseUserIdOf(byName[0]),
-      matchedBy: "nickname",
-      count: 1
-    };
+    // Stable identity only. A nickname is never evidence of ownership.
+    const byId = users.filter(user => wiseUserIdOf(user) === wantedId);
+    return {user:byId.length === 1 ? byId[0] : null,userId:wantedId,matchedBy:"id",count:byId.length};
   }
 
   const originalFetch = page.fetch;
 
   function diagnostic() {
     return (
-      "DDOGA 2.4.16 · " + phase + "\n" +
+      "DDOGA 2.4.17 · " + phase + "\n" +
       "요청 감지 " + apiSeen +
       " · 인증 " +
       (
@@ -814,35 +778,29 @@
     return rect.width > 0 && rect.height > 0;
   }
 
-  function exactBuyerRows(nickname) {
-    const target = norm(nickname);
+  function exactBuyerRowsById(userId) {
+    // Do not resolve a buyer by nickname or by positional DOM order.
+    // Only click an element that exposes the exact Wise buyer ID.
+    const target = String(userId || "").trim();
     if (!target) return [];
-
-    const rows = [
-      ...document.querySelectorAll('div[tabindex="0"]')
-    ].filter(row => {
-      if (!visible(row)) return false;
-
-      const labels = [
-        ...row.querySelectorAll("img[alt]")
-      ].map(img => img.alt);
-
-      const names = [
-        ...row.querySelectorAll('[dir="auto"]')
-      ].map(el => el.textContent || "");
-
-      return [...labels, ...names].some(label =>
-        norm(label).includes(target)
-      );
-    });
-
-    const innermost = rows.filter(row =>
-      !rows.some(other =>
-        other !== row && row.contains(other)
-      )
-    );
-
-    return innermost.length ? innermost : rows;
+    const rows = [...document.querySelectorAll('div[tabindex="0"],a[href],[role="button"]')]
+      .filter(visible)
+      .filter(row => {
+        const nodes = [row,...row.querySelectorAll('[data-user-id],[data-userid],[data-buyer-id],a[href]')];
+        return nodes.some(el => {
+          const attrs = ["data-user-id","data-userid","data-buyer-id"];
+          if (attrs.some(key => el.getAttribute(key) === target)) return true;
+          const href = el.getAttribute("href");
+          if (!href) return false;
+          try {
+            const url = new URL(href, location.origin);
+            if (!url.pathname.startsWith("/delivery-list-by-user/")) return false;
+            return url.pathname.split("/").filter(Boolean).pop() === target ||
+              url.searchParams.get("userId") === target;
+          } catch (_) { return false; }
+        });
+      });
+    return rows.filter(row => !rows.some(other => other !== row && row.contains(other)));
   }
 
   // 412(추가 주문) UI 처리 이후 구매자 상세 화면에 남는 문제 방지.
@@ -906,7 +864,7 @@
 
     // 반드시 미발송 구매자 목록에서만 선택한다. 상세 화면에서 다른 사람을 탐색하지 않는다.
     await ensureBuyerList();
-    let buyers = exactBuyerRows(match.nickname);
+    let buyers = exactBuyerRowsById(match.user_id);
 
     if (!buyers.length) {
       for (
@@ -915,7 +873,7 @@
         attempt++
       ) {
         await wait(250);
-        buyers = exactBuyerRows(match.nickname);
+        buyers = exactBuyerRowsById(match.user_id);
       }
     }
 
@@ -929,7 +887,7 @@
         .slice(0, 6);
 
       throw Error(
-        "구매자 행 탐색 실패 (" + buyers.length + "개). 현재 화면: " +
+        "구매자 ID에 해당하는 클릭 가능한 행을 확인하지 못했어 (" + buyers.length + "개). ID: " + match.user_id + " · 현재 화면: " +
         location.pathname +
         " · 화면의 구매자 이미지: " +
         (visibleNames.join(", ") || "없음") +
@@ -1042,7 +1000,7 @@
   }
 
   // 운송장 등록 대상 미리보기
-  // Wise 고유 user ID 우선, 과거 주문만 닉네임 fallback.
+  // Stable Wise user ID only; nickname is display-only.
   async function preview(orders) {
     matches = [];
 
@@ -1064,6 +1022,7 @@
           orders
       ) {
         const match = {
+          identity_conflict: Boolean(order.identity_conflict),
           order_id:
             order.order_id,
 
@@ -1114,10 +1073,9 @@
         if (
           !resolved.userId
         ) {
-          match.reason =
-            resolved.count
-              ? "중복 닉네임"
-              : "닉네임 없음";
+          match.reason = order.identity_conflict
+            ? "Wise 주문 기록에서 서로 다른 구매자 ID 충돌"
+            : "Wise 구매자 ID 없음 · 주문 연결정보를 확인해줘";
 
           matches.push(
             match
@@ -1266,15 +1224,9 @@
         match.status =
           "ready";
 
-        match.reason =
-          active.length > 1
-            ? "등록 가능 · 미발송 " +
-              active.length +
-              "개 중 맨 위 첫 번째 사용"
-            : resolved.matchedBy ===
-                "id"
-              ? "등록 가능 · Wise ID 매칭"
-              : "등록 가능 · 닉네임 fallback";
+        match.reason = active.length > 1
+          ? "등록 가능 · 미발송 " + active.length + "개 중 첫 번째 사용 · Wise ID 매칭"
+          : "등록 가능 · Wise ID 매칭";
 
         matches.push(
           match
