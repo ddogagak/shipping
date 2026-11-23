@@ -106,7 +106,7 @@ function RandomBoxCard({item,onEdit,onSave,saving}:{
   <div style={imageWrap}>{item.image_url?<img src={item.image_url} alt="" style={image}/>:<div style={noImage}>NO IMAGE</div>}<span style={{...badge,background:"#854d0e"}}>랜덤박스 · 잔여 {stockLabel(item)}</span></div>
   <div style={body}>
    <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
-    <span style={{...tag,display:"inline-flex",background:"#fef9c3",color:"#854d0e"}}>독립 랜덤박스</span>
+    <span style={{...tag,display:"inline-flex",background:"#fef9c3",color:"#854d0e"}}>통합 재고</span>
     {(item.series_tags||[]).map((seriesName:string)=><span key={seriesName} style={tag}>{seriesName}</span>)}
    </div>
    <label style={fieldLabel}>제목<input value={item.display_name||""} onChange={e=>onEdit(item.id,"display_name",e.target.value)} style={{...input,width:"100%",fontWeight:800}}/></label>
@@ -123,7 +123,7 @@ function RandomBoxCard({item,onEdit,onSave,saving}:{
    <div style={{...numbers,marginTop:8}}><label>입고 박스<input type="text" inputMode="numeric" value={item.purchase_quantity??1} onChange={e=>{if(/^\d*$/.test(e.target.value))onEdit(item.id,"purchase_quantity",Number(e.target.value))}} style={{...input,width:"100%"}}/></label><label>판매 낱개<input type="number" min={0} value={item.sold_units??0} onChange={e=>onEdit(item.id,"sold_units",Number(e.target.value))} style={{...input,width:"100%"}}/></label></div>
    <textarea value={item.sale_memo||""} onChange={e=>onEdit(item.id,"sale_memo",e.target.value)} placeholder="판매 메모" style={memo}/>
    <label style={{display:"block",marginTop:8,fontSize:11,fontWeight:700}}>빵.store 공개 댓글<input value={item.public_comment||""} onChange={e=>onEdit(item.id,"public_comment",e.target.value)} maxLength={100} style={{...input,width:"100%",marginTop:4}}/></label>
-   <div style={{fontSize:10,color:"#64748b",marginTop:7}}>선택 구성품 {members.length}개 · 원본 상품과 별도 관리</div>
+   <div style={{fontSize:10,color:"#64748b",marginTop:7}}>구성품 {members.length}종 · 개별 매칭 {item.linked_member_units??0}개 + 랜덤박스 매칭 {item.linked_box_units??0}개 = 총 {item.linked_total_units??0}개 차감</div>
    <div style={{...actionRow,flexWrap:"wrap"}}>
     <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
      <a href={item.image_url} target="_blank" rel="noreferrer" style={button}>라인업</a>
