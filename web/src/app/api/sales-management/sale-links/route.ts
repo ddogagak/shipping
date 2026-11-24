@@ -122,7 +122,7 @@ async function getInventory() {
     sb.from("purchase_sale_inventory")
       .select("purchase_item_id,display_name,image_url_override,component_count_override,purchase_price_override,sale_price,stock_status,remaining_units,remaining_quantity,box_quantity_override"),
     sb.from("sale_random_boxes")
-      .select("id,title,image_url,component_count,purchase_quantity,total_cost_krw,sale_price,view_status,series_tags,created_at,remaining_units")
+      .select("id,title,image_url,component_count,purchase_quantity,stock_capacity_units,total_cost_krw,sale_price,view_status,series_tags,created_at,remaining_units")
       .order("created_at", { ascending: false }),
     sb.from("sale_random_box_members").select("purchase_item_id,random_box_id"),
     sb.from("sale_inventory_exclusions").select("purchase_item_id"),
@@ -136,6 +136,9 @@ async function getInventory() {
   if (exclusionsResult.error) throw exclusionsResult.error;
   if (sourcingResult.error) throw sourcingResult.error;
   if (groupsResult.error) throw groupsResult.error;
+  const {data:sharedStock,error:sharedError}=await sb.rpc("wise_random_box_shared_stock");
+  if(sharedError)throw sharedError;
+  const sharedById=new Map((sharedStock||[]).map((x:any)=>[String(x.random_box_id),x]));
   const sourcing = new Map((sourcingResult.data || []).map(x=>[String(x.id),x]));
   const members = new Set((membersResult.data || []).map(x => String(x.purchase_item_id)));
   const excluded = new Set((exclusionsResult.data || []).map(x => String(x.purchase_item_id)));
@@ -165,11 +168,12 @@ async function getInventory() {
     }
   }
   for (const box of boxesResult.data || []) {
+    const shared:any=sharedById.get(String(box.id));
     candidates.push({
       type: "random_box", id: String(box.id), name: box.title,
       option: "랜덤박스", image_url: box.image_url || null,
       series: (box.series_tags || []).join(", "), item_type: "랜덤박스", random_member: false,
-      remaining_units: box.view_status === "completed" ? 0 : Number(box.remaining_units ?? Math.max(1, Number(box.component_count || 1)) * Number(box.purchase_quantity || 1)),
+      remaining_units: box.view_status === "completed" ? 0 : Number(shared?.remaining_units ?? box.remaining_units ?? box.stock_capacity_units ?? Math.max(1,Number(box.component_count||1))*Number(box.purchase_quantity||1)),
       unit_price: Number(box.total_cost_krw || 0),
       currency: "KRW", component_count: Number(box.component_count || 1),
       sale_price: box.sale_price == null ? null : Number(box.sale_price),
