@@ -489,6 +489,44 @@ export default function SaleInventoryPage(){
  {priceMessages[i.id]&&<div style={{fontSize:12,color:"#b91c1c",marginTop:7}}>{priceMessages[i.id]}</div>}
  <div style={{display:"flex",gap:6,marginTop:9}}><button type="button" style={button} disabled={priceSaving!==null} onClick={()=>void correctPrice(i)}>{priceSaving===i.id?"저장 중…":"수정 저장"}</button><button type="button" style={button} disabled={priceSaving!==null} onClick={()=>cancelPriceEdit(i.id)}>취소</button></div>
  </div>}{i.can_fill_purchase_price&&editingPriceId!==i.id&&<div style={{marginTop:8}}><label>박스 매입가 입력 ({i.actual_purchase_currency} / 박스 1개)<input aria-label="누락 실제 매입가" type="text" inputMode="decimal" value={priceDrafts[i.id]??""} disabled={priceSaving!==null||saving!==null} onChange={e=>setPriceDrafts(v=>({...v,[i.id]:e.target.value}))} placeholder="매입가 입력" style={{...input,width:"100%",marginTop:4}}/></label><button type="button" style={{...button,marginTop:6}} disabled={priceSaving!==null||saving!==null||!priceDrafts[i.id]} onClick={()=>void fillPrice(i)}>{priceSaving===i.id?"매입가 저장 중…":"누락 매입가 저장"}</button><div style={{marginTop:4}}>방송판매재고에만 저장 · 저장 후에도 금액 더블클릭으로 수정 가능</div></div>}{priceMessages[i.id]&&<div role="status" style={{marginTop:6,fontWeight:700}}>{priceMessages[i.id]}</div>}</div><div style={profitBox}><Metric label="총 수익" value={actual&&p.count?won(boxProfit):'-'} strong compact/><Metric label="개당 수익" value={actual?won(unitProfit):'-'} strong compact/></div><ActualSales item={i} onEdit={edit}/><div style={numbers}><label>입고 박스 <small style={{color:"#1d4ed8",fontWeight:700}}>총 {(Math.max(0,Number(i.purchase_quantity||0))*Math.max(1,Number(i.component_count||1))).toLocaleString("ko-KR")}개 · 잔여 {Math.max(0,Number(i.remaining_units||0)).toLocaleString("ko-KR")}개</small><input type="number" min={0} value={i.purchase_quantity} onChange={e=>edit(i.id,"purchase_quantity",Number(e.target.value))} style={{...input,width:"100%"}}/></label><label>판매 낱개<input type="number" min={0} value={i.sold_units??0} onChange={e=>edit(i.id,"sold_units",Number(e.target.value))} style={{...input,width:"100%"}}/></label></div><textarea value={i.sale_memo||""} onChange={e=>edit(i.id,"sale_memo",e.target.value)} placeholder="판매 메모" style={memo}/><div style={imageEdit}><label>대표 이미지 URL</label><input value={i.image_url||""} onChange={e=>edit(i.id,"image_url",e.target.value)} placeholder="https://..." style={{...input,width:"100%",fontSize:10}}/></div><label style={{display:"block",marginTop:8,fontSize:11,fontWeight:700}}>빵.store 공개 댓글<input type="text" value={i.public_comment||""} maxLength={100} onChange={e=>edit(i.id,"public_comment",e.target.value)} placeholder="빵.store에서 보일 한 줄 댓글" style={{...input,width:"100%",marginTop:4}}/></label><div style={actionRow}><div style={{display:"flex",alignItems:"center",gap:5}}>{i.product_url&&<a href={i.product_url} target="_blank" rel="noreferrer" style={urlButton}>URL</a>}{i.memo&&<button type="button" style={button} title="기타 보기" onClick={()=>setMemoPopup({title:String(i.display_name||i.product_name||"상품"),content:String(i.memo)})}>기타</button>}</div><div style={visibilityButtons}>{[["hidden","숨김"],["display","표시"],["completed","완료"]].map(([value,label])=><button key={value} onClick={()=>edit(i.id,"pending_view_status",value)} disabled={saving===i.id} style={{...visibilityButton,...((i.pending_view_status??i.view_status)===value?activeVisibilityButton:{})}}>{label}</button>)}</div><div style={rightActions}><button type="button" style={{...button,borderColor:"#93c5fd",color:"#1d4ed8"}} onClick={()=>openLinkedSales(i)}>판매 연결 보기</button>{i.lineup_image_url&&<button style={button} onClick={()=>setLineup(i.lineup_image_url)}>라인업 보기</button>}{i.view_status==="hidden"&&!i.is_random_box&&<button type="button" style={{...button,borderColor:"#fca5a5",color:"#b91c1c"}} disabled={saving!==null||priceSaving!==null} onClick={()=>void removeHiddenItem(i)}>삭제</button>}<button style={button} onClick={()=>void save(i)} disabled={saving!==null||priceSaving!==null}>{saving===i.id?"저장 중…":"저장"}</button></div></div></div></article>})}</section>
+
+ {linksPopup&&<div style={backdrop} role="presentation" onClick={()=>!linksSaving&&setLinksPopup(null)}>
+  <div role="dialog" aria-modal="true" aria-label="실판매 재고 연결 목록" style={{...modal,width:"min(920px,95vw)",maxHeight:"90vh",overflow:"hidden"}} onClick={event=>event.stopPropagation()}>
+   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+    <div><b style={{fontSize:17}}>실판매 연결 내역</b><div style={{fontSize:12,color:"#64748b"}}>{linksPopup.name}</div></div>
+    <button type="button" style={button} onClick={()=>setLinksPopup(null)} disabled={linksSaving}>닫기</button>
+   </div>
+   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap",fontSize:12}}>
+    <span>연결 {linkedSales.length}건 · 연결 낱개 {linkedSales.reduce((n,r)=>n+Number(r.allocated_units||0),0)}개 · 실제 차감 {linkedSales.reduce((n,r)=>n+Number(r.applied_units||0),0)}개</span>
+    <button type="button" style={button} disabled={linksLoading||linksSaving} onClick={()=>void fetchLinkedSales(linksPopup)}>새로고침</button>
+   </div>
+   <p style={{fontSize:11,color:"#64748b",margin:"0"}}>체크한 연결만 해제할 수 있어. 차감된 재고는 복원하고 와이스 원본 판매내역은 삭제하지 않아.</p>
+   {linksError&&<div role="alert" style={{color:"#b91c1c",fontSize:12}}>{linksError}</div>}
+   <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+    <label style={{fontSize:12,display:"flex",alignItems:"center",gap:5}}>
+     <input type="checkbox" checked={linkedSales.length>0&&checkedLinks.length===linkedSales.length} disabled={linksSaving||!linkedSales.length} onChange={e=>setCheckedLinks(e.target.checked?linkedSales.map(r=>Number(r.id)):[])}/>전체 선택
+    </label>
+    <b style={{fontSize:12}}>선택 {checkedLinks.length}건</b>
+    <button type="button" style={{...danger,marginLeft:"auto"}} disabled={!checkedLinks.length||linksSaving} onClick={()=>void unlinkSelected(checkedLinks)}>{linksSaving?"연결 해제 중…":"선택 "+checkedLinks.length+"건 연결 해제"}</button>
+   </div>
+   <div style={{overflowY:"auto",minHeight:80,border:"1px solid #e5e7eb",borderRadius:8}}>
+    {linksLoading?<p style={{padding:16,fontSize:13}}>판매 연결 불러오는 중…</p>:
+     !linkedSales.length?<p style={{padding:16,fontSize:13,color:"#64748b"}}>연결된 실판매 기록이 없어.</p>:
+     linkedSales.map(row=><div key={row.id} style={{display:"flex",gap:10,alignItems:"center",padding:"10px",borderBottom:"1px solid #e5e7eb",fontSize:12}}>
+      <input type="checkbox" aria-label={row.item_name+" 연결 선택"} disabled={linksSaving} checked={checkedLinks.includes(Number(row.id))} onChange={e=>setCheckedLinks(prev=>e.target.checked?[...prev,Number(row.id)]:prev.filter(id=>id!==Number(row.id)))}/>
+      {row.image_url&&<img src={row.image_url} alt="" loading="lazy" style={{width:45,height:45,objectFit:"contain",borderRadius:5}}/>}
+      <div style={{flex:1,minWidth:0}}>
+       <b style={{overflowWrap:"anywhere"}}>{row.item_name}</b>
+       <div style={{marginTop:3,color:"#64748b"}}>{row.buyer_nickname||"구매자 미확인"} · {row.sold_at?new Date(row.sold_at).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"}):"판매일 미확인"}</div>
+       <div style={{color:"#475569"}}>판매가 {won(row.item_price)} · 연결 {row.allocated_units}개 · 실제 차감 {row.applied_units}개 · 판매 ID {row.wise_stock_id}</div>
+       {row.target_type==="inventory_group"&&<div style={{color:"#b45309"}}>묶음 재고 연결 · 해제 시 묶음 전체의 차감분이 복원될 수 있음</div>}
+       {linksPopup.type==="random_box"&&row.target_type==="purchase_item"&&<div style={{color:"#2563eb"}}>구성품 개별 연결</div>}
+      </div>
+      <button type="button" style={{...danger,flexShrink:0}} disabled={linksSaving} onClick={()=>void unlinkSelected([Number(row.id)])}>해제</button>
+     </div>)}
+   </div>
+  </div>
+ </div>}
  {activeGroup&&<div style={backdrop} role="presentation" onClick={()=>!groupBusy&&setActiveGroupId(null)}>
   <div role="dialog" aria-modal="true" aria-label="동일상품 묶음 관리" style={{...modal,width:"min(540px,92vw)",maxHeight:"85vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}><strong style={{fontSize:16}}>{activeGroup.title}</strong>{activeGroup.group_kind==="sale_pool"&&<span style={{fontSize:12}}>판매가 {won(Number(activeGroup.sale_price||0))}</span>}<button type="button" style={button} onClick={()=>setActiveGroupId(null)}>닫기</button></div>
