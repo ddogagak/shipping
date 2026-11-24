@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type SetStateAction } from "react";
 import { baseProductName, imageIdentity, normalizeProductName, recommendInventory, inventoryKeywordFrequency, saleBroadcastGroupKey, saleProductKey, compareInventoryRecommendations } from "@/lib/wise-inventory-match";
 import SaleUnitsEditor, {saveSaleUnits} from "../SaleUnitsEditor";
 import {saleUnits} from "@/lib/sale-units";
@@ -85,11 +85,19 @@ export default function WiseInventoryLinkPage() {
   const showsRequest = useRef(0);
   const salesRequest = useRef(0);
 
+  // A new selection on the left must never inherit inventory targets/units
+  // chosen for the previous sale. Clear them in the same event, before saving.
+  const changeSaleSelection = (next: SetStateAction<Record<string, boolean>>) => {
+    setSelected(next);
+    setTargets({});
+    setRemember(false);
+  };
+
   const loadShows = useCallback(async () => {
     const requestId = ++showsRequest.current;
     ++salesRequest.current;
     setLoadingShows(true); setError("");
-    setShows([]); setVideoId(""); setVideoIds([]); setSales([]); setSelected({});
+    setShows([]); setVideoId(""); setVideoIds([]); setSales([]); setSelected({}); setTargets({}); setRemember(false); setTargets({}); setRemember(false);
     try {
       const data = await requestJson("/api/sales-management/sale-links?mode=shows&month=" + encodeURIComponent(month));
       if (requestId !== showsRequest.current) return;
@@ -205,7 +213,7 @@ export default function WiseInventoryLinkPage() {
     }
   }
   const setGroupSelection = (family: Family, checked: boolean) => {
-    setSelected(prev => {
+    changeSaleSelection(prev => {
       const next = { ...prev };
       for (const row of family.items) next[row.id] = checked;
       return next;
@@ -315,15 +323,15 @@ export default function WiseInventoryLinkPage() {
           <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 5 }}><input type="checkbox" checked={onlyUnlinked} onChange={e => setOnlyUnlinked(e.target.checked)} />미연결 포함만</label>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
-          <button style={btn} onClick={() => setSelected(Object.fromEntries(filteredGroups.flatMap(g => g.items.map(row => [row.id, true]))))}>현재 목록 전체 선택</button>
-          <button style={btn} onClick={() => setSelected({})}>선택 해제</button>
+          <button style={btn} onClick={() => changeSaleSelection(Object.fromEntries(filteredGroups.flatMap(g => g.items.map(row => [row.id, true]))))}>현재 목록 전체 선택</button>
+          <button style={btn} onClick={() => changeSaleSelection({})}>선택 해제</button>
           <span style={{ fontSize: 12, color: "#475569" }}>선택 {selectedIds.length}건 · 실제 {selectedUnitTotal}개 · 대량 선택 자동 분할 저장</span>
           <label style={{fontSize:13,fontWeight:700}}>선택 건당 실제 판매 수량 <SaleUnitsEditor key={selectedIds.join(",")} units={commonUnits} disabled={busy||!selectedIds.length} bulk onSave={n=>editUnits(selectedIds,n)}/></label>
         </div>
         <div style={{ maxHeight: "68vh", overflow: "auto", border: "1px solid #e2e8f0", borderRadius: 8 }}>
           <table style={{ borderCollapse: "collapse", width: "100%" }}>
             <thead style={{ position: "sticky", top: 0, background: "#f8fafc", zIndex: 1 }}><tr><th style={th}>선택</th><th style={th}>상품군 · 판매가</th><th style={th}>수량</th><th style={th}>연결</th><th style={th}>상세</th></tr></thead>
-            <tbody>{filteredGroups.map(g => <FragmentGroup key={g.key} group={g} selected={selected} expanded={Boolean(expanded[g.key])} onSelect={checked => setGroupSelection(g, checked)} onToggle={() => setExpanded(prev => ({ ...prev, [g.key]: !prev[g.key] }))} onSelectItem={(id, val) => setSelected(prev => ({ ...prev, [id]: val }))} candidateNames={candidateNames} busy={busy} onUnits={(id,n)=>editUnits([id],n)} onUnlink={(saleId, target) => { if (window.confirm("이 판매건에서 선택한 재고 연결만 해제할까?")) void save("unlink", { saleId, target }); }} />)}</tbody>
+            <tbody>{filteredGroups.map(g => <FragmentGroup key={g.key} group={g} selected={selected} expanded={Boolean(expanded[g.key])} onSelect={checked => setGroupSelection(g, checked)} onToggle={() => setExpanded(prev => ({ ...prev, [g.key]: !prev[g.key] }))} onSelectItem={(id, val) => changeSaleSelection(prev => ({ ...prev, [id]: val }))} candidateNames={candidateNames} busy={busy} onUnits={(id,n)=>editUnits([id],n)} onUnlink={(saleId, target) => { if (window.confirm("이 판매건에서 선택한 재고 연결만 해제할까?")) void save("unlink", { saleId, target }); }} />)}</tbody>
           </table>
           {!filteredGroups.length && <p style={{ textAlign: "center", color: "#64748b", padding: 16 }}>{loadingSales ? "판매기록을 불러오는 중..." : "표시할 판매기록이 없어."}</p>}
         </div>
