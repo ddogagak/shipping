@@ -273,7 +273,8 @@ export default function SaleInventoryPage(){
   if(groupBusy)return;
   const chosenGroups=groups.filter(g=>g.active&&g.group_kind==="sale_pool"&&(g.sale_inventory_group_members||[]).some((m:any)=>selectedIds.includes(String(m.purchase_item_id))));
   const groupIds=new Set(chosenGroups.map(g=>String(g.id)));
-  const independent=items.filter(i=>selectedIds.includes(String(i.id))&&!i.is_random_box&&!i.is_random_member&&!groupByLot.has(String(i.id))&&i.view_status!=="completed");
+  // Completed items are valid pool members too; their stock remains zero until explicitly restocked.
+  const independent=items.filter(i=>selectedIds.includes(String(i.id))&&!i.is_random_box&&!i.is_random_member&&!groupByLot.has(String(i.id)));
   if(chosenGroups.length+independent.length<2){setMsg("재고풀 또는 독립 상품을 합쳐 2개 이상 선택해줘.");return;}
   const title=window.prompt("새 통합 재고풀 이름 (예: 랜덤 지류 3,300원)",chosenGroups[0]?.title||"랜덤 지류");
   if(!title?.trim())return;
@@ -282,7 +283,9 @@ export default function SaleInventoryPage(){
   if(priceText===null)return;
   const price=Number(priceText.replace(/,/g,"").trim());
   if(!Number.isSafeInteger(price)||price<0){setMsg("판매가격은 0원 이상의 정수로 입력해줘.");return;}
-  if(!window.confirm(`기존 재고풀 ${chosenGroups.length}개 + 개별상품 ${independent.length}개를 "${title.trim()}"로 통합할까?\n원본 매입가·재고·판매 연결은 유지되고, 기존 재고풀은 통합 후 비활성화돼.`))return;
+  const completed=independent.filter(i=>i.view_status==="completed");
+  const warning=completed.length?"\n주의: 판매완료 상품 "+completed.length+"개는 잔여 0개 상태로 묶여. 재고가 자동 복원되지는 않아.":"";
+  if(!window.confirm(`기존 재고풀 ${chosenGroups.length}개 + 개별상품 ${independent.length}개를 "${title.trim()}"로 통합할까?\n원본 매입가·재고·판매 연결은 유지되고, 기존 재고풀은 통합 후 비활성화돼.${warning}`))return;
   setGroupBusy(true);
   try{
    const response=await fetch("/api/sale-inventory/groups",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"create_selection",title:title.trim(),sale_price:price,member_ids:independent.map(i=>i.id),source_group_ids:[...groupIds]})});
