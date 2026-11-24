@@ -82,6 +82,12 @@ export default function WiseInventoryLinkPage() {
   const [cutover, setCutover] = useState("");
   const [deductionMode, setDeductionMode] = useState<"future"|"historical"|"link_only"|"reset_reconcile">("future");
   const [remember, setRemember] = useState(false);
+  const [linkView,setLinkView]=useState<Candidate|null>(null);
+  const [viewLinks,setViewLinks]=useState<any[]>([]);
+  const [viewLoading,setViewLoading]=useState(false);
+  const [viewSaving,setViewSaving]=useState(false);
+  const [viewError,setViewError]=useState("");
+  const [viewChecked,setViewChecked]=useState<number[]>([]);
   const showsRequest = useRef(0);
   const salesRequest = useRef(0);
 
@@ -92,6 +98,38 @@ export default function WiseInventoryLinkPage() {
     setTargets({});
     setRemember(false);
   };
+
+  async function fetchCandidateLinks(candidate:Candidate){
+    setViewLoading(true);setViewError("");
+    try{
+      const qs=new URLSearchParams({target_type:candidate.type,target_id:candidate.id});
+      const data=await requestJson("/api/sale-inventory/linked-sales?"+qs.toString());
+      setViewLinks(data.links||[]);
+    }catch(e){setViewError(e instanceof Error?e.message:"연결 목록 조회 실패");}
+    finally{setViewLoading(false);}
+  }
+  function openCandidateLinks(candidate:Candidate){
+    setLinkView(candidate);setViewLinks([]);setViewChecked([]);
+    void fetchCandidateLinks(candidate);
+  }
+  async function unlinkCandidateLinks(ids:number[]){
+    if(!linkView||viewSaving||!ids.length)return;
+    const picked=viewLinks.filter(x=>ids.includes(Number(x.id)));
+    const allocated=picked.reduce((n,x)=>n+Number(x.allocated_units||0),0);
+    const groupWarning=picked.some(x=>x.target_type==="inventory_group")?"\\n묶음 연결은 다른 매입차수의 재고도 복원할 수 있어.":"";
+    if(!window.confirm(ids.length+"건 · "+allocated+"개 연결을 해제할까?\\n실판매 원본은 유지하고 실제 차감 재고만 복원해."+groupWarning))return;
+    setViewSaving(true);setViewError("");
+    try{
+      const data=await requestJson("/api/sale-inventory/linked-sales",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({target_type:linkView.type,target_id:linkView.id,link_ids:ids})
+      });
+      setViewChecked([]);
+      await Promise.all([fetchCandidateLinks(linkView),loadInventory(),...(videoIds.length?[loadSales(videoIds)]:[])]);
+      setMessage(data.removed+"건 연결 해제 · 재고 "+data.restored+"개 복원");
+    }catch(e){setViewError(e instanceof Error?e.message:"연결 해제 실패");}
+    finally{setViewSaving(false);}
+  }
 
   const loadShows = useCallback(async () => {
     const requestId = ++showsRequest.current;
@@ -350,20 +388,24 @@ export default function WiseInventoryLinkPage() {
         </div>
         <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>후보 {candidates.length}개 · 목록은 최대 150개 표시</div>
         <div style={{ maxHeight: 340, overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: 8 }}>
-          {filteredCandidates.map(c => <label key={c.type + c.id} style={{ display: "flex", gap: 9, padding: 9, alignItems: "center", borderBottom: "1px solid #f1f5f9", background: targets[c.type + "|" + c.id] ? "#eff6ff" : "#fff", cursor: "pointer" }}>
+          {filteredCandidates.map(c => <div key={c.type + c.id} style={{display:"flex",alignItems:"center",gap:4,borderBottom:"1px solid #f1f5f9",background:targets[c.type+"|"+c.id]?"#eff6ff":"#fff"}}>
+            <label style={{ display:"flex",gap:9,padding:9,alignItems:"center",flex:1,minWidth:0,cursor:"pointer" }}>
             <input type="checkbox" checked={Boolean(targets[c.type + "|" + c.id])} onChange={event => { const key = c.type + "|" + c.id; setTargets(prev => { const next = {...prev}; if (event.target.checked) next[key] = Object.keys(prev).length ? 1 : commonUnits; else delete next[key]; return next; }); }} />
             {c.image_url ? <img src={c.image_url} alt="" loading="lazy" style={{ width: 48, height: 48, objectFit: "contain", borderRadius: 5 }} /> : <span style={{ width: 48, height: 48, display: "grid", placeItems: "center", background: "#f1f5f9", borderRadius: 5, fontSize: 10 }}>사진 없음</span>}
             <span style={{ flex: 1, minWidth: 0, fontSize: 12 }}><b>{c.name}</b><br />
               <span style={{ color: "#64748b" }}>{c.type === "random_box" ? "랜덤박스" : c.type==='inventory_group'?'묶음 재고':"매입상품"} · {c.option || c.series || "옵션 없음"}<br />{c.sale_price != null ? "판매가 " + won(c.sale_price) + " · " : c.reference_prices?.length ? "판매가 " + won(c.reference_prices[0]) + (c.reference_prices.length>1?"~"+won(c.reference_prices[c.reference_prices.length-1]):"") + " · " : ""}{c.type==='inventory_group'?'오래된 입고부터 차감':`${c.component_count}개 구성`} · 잔여 {c.remaining_units}개 {c.random_member?"· 랜덤박스 구성품(연결만 가능)":""}</span>{c.recommendation.reason&&<span style={{display:"block",color:"#166534",fontWeight:700}}>{c.recommendation.reason}</span>}
             </span>
-          </label>)}
+            </label>
+            <button type="button" title="이 재고의 판매 연결 보기/해제" aria-label={c.name+" 판매 연결 보기"} onClick={()=>openCandidateLinks(c)} style={{width:27,height:27,flexShrink:0,marginRight:7,border:"1px solid #e2e8f0",borderRadius:6,background:"#fff",fontSize:15,cursor:"pointer",padding:0}}>🔗</button>
+          </div>)}
           {!filteredCandidates.length && <p style={{ fontSize: 13, color: "#64748b", padding: 12 }}>검색 결과가 없어.</p>}
         </div>
         {selectedTargets.length > 0 && <div style={{ padding: 10, background: "#eff6ff", fontSize: 13, marginTop: 10, borderRadius: 8 }}>
           <b>선택 재고 {selectedTargets.length}종 · 판매 {selectedIds.length}건</b>
           <p style={{margin:"6px 0",color:"#475569"}}>아래 수량은 판매 1건당 낱개 수량이야.</p>
           {selectedTargets.map(c => <div key={c.type + "|" + c.id} style={{ display: "flex", flexWrap:"wrap",alignItems: "center", justifyContent: "space-between", gap: 8, paddingTop: 8 }}>
-            <span style={{ flex:"1 0 100%", overflowWrap: "anywhere",fontWeight:700 }}>{c.name} {c.option} · 박스당 {c.component_count}개</span>
+            <span style={{ flex:1,overflowWrap:"anywhere",fontWeight:700 }}>{c.name} {c.option} · {c.component_count}종/개 구성</span>
+            <button type="button" title="연결된 판매 목록 및 해제" aria-label={c.name+" 연결 목록"} onClick={()=>openCandidateLinks(c)} style={{width:26,height:26,border:"1px solid #bfdbfe",borderRadius:6,background:"#fff",cursor:"pointer",fontSize:15}}>🔗</button>
             <label style={{ whiteSpace: "nowrap" }}>건당 낱개 <input aria-label={c.name + " 판매 1건당 연결 수량"} type="number" min={1} max={9999} value={c.quantity} style={{ ...field, width: 65 }} onChange={e => { const quantity = Number(e.target.value); setTargets(prev => ({ ...prev, [c.type + "|" + c.id]: Number.isSafeInteger(quantity) && quantity >= 1 ? Math.min(quantity, 9999) : 1 })); }} /></label>
             <div style={{display:"flex",gap:4,flexWrap:"wrap"}}><button type="button" style={{...btn,padding:"4px 6px"}} onClick={()=>setTargets(prev=>({...prev,[c.type+"|"+c.id]:c.component_count}))}>건당 1박스 ({c.component_count}개)</button>
             <button type="button" style={{...btn,padding:"4px 6px"}} disabled={!selectedIds.length||c.component_count%selectedIds.length!==0} title="선택 판매 건수로 한 박스를 균등하게 나눌 수 있을 때만 사용" onClick={()=>setTargets(prev=>({...prev,[c.type+"|"+c.id]:c.component_count/selectedIds.length}))}>선택 전체 1박스</button></div>
@@ -388,6 +430,35 @@ export default function WiseInventoryLinkPage() {
         </div>
         <p style={{ fontSize: 12, color: "#64748b" }}>기존 연결은 차감하지 않아. 차감한 연결을 해제하면 그 수량만 복원돼. 배송·실매출 원본은 변경하지 않아.</p>
       </aside>
+    </div>}
+    {linkView&&<div role="presentation" onClick={()=>!viewSaving&&setLinkView(null)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,.65)",display:"flex",alignItems:"center",justifyContent:"center",padding:12,zIndex:1000}}>
+      <section role="dialog" aria-modal="true" aria-label="후보 재고 판매 연결 내역" onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:12,padding:16,width:"min(760px,95vw)",maxHeight:"85vh",display:"flex",flexDirection:"column",gap:9}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+          <div><b>🔗 실판매 연결 내역</b><div style={{fontSize:12,color:"#64748b",marginTop:3}}>{linkView.name}</div></div>
+          <button type="button" style={btn} disabled={viewSaving} onClick={()=>setLinkView(null)}>닫기</button>
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",fontSize:12}}>
+          <span>연결 {viewLinks.length}건 · {viewLinks.reduce((n,r)=>n+Number(r.allocated_units||0),0)}개</span>
+          <button type="button" style={btn} disabled={viewLoading||viewSaving} onClick={()=>void fetchCandidateLinks(linkView)}>새로고침</button>
+          <label style={{display:"flex",gap:4,alignItems:"center",marginLeft:"auto"}}><input type="checkbox" checked={viewLinks.length>0&&viewChecked.length===viewLinks.length} onChange={e=>setViewChecked(e.target.checked?viewLinks.map(r=>Number(r.id)):[])} disabled={viewSaving||!viewLinks.length}/>전체 선택</label>
+          <button type="button" style={{...btn,color:"#b91c1c"}} disabled={viewSaving||!viewChecked.length} onClick={()=>void unlinkCandidateLinks(viewChecked)}>선택 {viewChecked.length}건 해제</button>
+        </div>
+        <p style={{fontSize:11,color:"#64748b",margin:0}}>재고 연결만 해제해. 와이스 원본 판매 및 매출 기록은 유지해.</p>
+        {viewError&&<p role="alert" style={{color:"#b91c1c",fontSize:12}}>{viewError}</p>}
+        <div style={{overflowY:"auto",border:"1px solid #e2e8f0",borderRadius:8,minHeight:60}}>
+          {viewLoading?<p style={{padding:12}}>조회 중…</p>:!viewLinks.length?<p style={{padding:12,color:"#64748b"}}>연결된 판매가 없어.</p>:
+            viewLinks.map(row=><div key={row.id} style={{display:"flex",alignItems:"center",gap:8,padding:9,borderBottom:"1px solid #f1f5f9",fontSize:12}}>
+              <input type="checkbox" checked={viewChecked.includes(Number(row.id))} disabled={viewSaving} onChange={e=>setViewChecked(p=>e.target.checked?[...p,Number(row.id)]:p.filter(x=>x!==Number(row.id)))}/>
+              {row.image_url&&<img src={row.image_url} alt="" style={{width:38,height:38,objectFit:"contain"}}/>}
+              <div style={{flex:1,minWidth:0}}>
+                <b>{row.item_name}</b>
+                <div style={{color:"#64748b"}}>{row.buyer_nickname||"구매자 미확인"} · {row.sold_at?new Date(row.sold_at).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"}):"판매일 미확인"}</div>
+                <div>판매가 {won(Number(row.item_price))} · 연결 {row.allocated_units}개 · 차감 {row.applied_units}개 · ID {row.wise_stock_id}{row.target_type==="inventory_group"?" · 재고풀 연결":""}</div>
+              </div>
+              <button type="button" style={{...btn,color:"#b91c1c"}} disabled={viewSaving} onClick={()=>void unlinkCandidateLinks([Number(row.id)])}>해제</button>
+            </div>)}
+        </div>
+      </section>
     </div>}
     {videoIds.length === 0 && <section style={{ ...panel, color: "#64748b" }}>월 전체 선택 또는 개별 방송 추가로 실제 판매기록을 한 번에 불러와. 기존 매출관리 페이지는 추가 데이터를 불러오지 않아.</section>}
   </main>;
