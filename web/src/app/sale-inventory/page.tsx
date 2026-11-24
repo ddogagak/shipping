@@ -13,7 +13,7 @@ function seriesFilterLabel(value:unknown){
 
 const input:CSSProperties={height:36,border:"1px solid #d1d5db",borderRadius:7,padding:"0 9px",boxSizing:"border-box",background:"#fff"};
 function won(v:any){const n=Number(v||0);return Number.isFinite(n)&&n!==0?Math.round(n).toLocaleString("ko-KR")+"원":"-";}
-function stockLabel(item:any){const count=Math.max(1,Number(item.component_count||1)),remain=Math.max(0,Number(item.remaining_units??Number(item.remaining_quantity||0)*count));const boxes=Math.floor(remain/count),pieces=remain%count;return count===1?`${remain}개`:pieces?`${boxes?boxes+"박스 + ":""}${pieces}개`:`${boxes}박스`;}
+function stockLabel(item:any){if(item.is_random_box)return `${Math.max(0,Number(item.remaining_units||0))}개`;const count=Math.max(1,Number(item.component_count||1)),remain=Math.max(0,Number(item.remaining_units??Number(item.remaining_quantity||0)*count));const boxes=Math.floor(remain/count),pieces=remain%count;return count===1?`${remain}개`:pieces?`${boxes?boxes+"박스 + ":""}${pieces}개`:`${boxes}박스`;}
 function ActualSales({item,onEdit}:{item:any;onEdit:(id:string,key:string,value:any)=>void}){const n=Number(item.actual_sales_units||0),revenue=Number(item.actual_sales_revenue||0);if(!n&&item.view_status!=="completed"&&item.actual_sale_price_override==null)return null;const average=Number(item.actual_average_sale_price||0),cost=Number(item.unit_cost_price||0),profit=revenue*DEFAULT_PRICING_SETTINGS.salesRetentionRate-cost*n;return <div style={{marginTop:7,padding:8,borderRadius:7,background:"#ecfdf5",fontSize:11,color:"#065f46"}}><b>와이스 실판매 · {n}개</b><div>자동 평균 {n?won(average):"-"} · 실매출 {won(revenue)}</div>{cost>0&&n>0&&<div>추정 실이익 {won(profit)} · 마진 {revenue>0?(100*profit/revenue).toFixed(1)+"%":"-"}</div>}<label style={{display:"block",marginTop:5}}>판매완료가 수동 수정 <input type="number" min={0} value={item.actual_sale_price_override??""} placeholder={n?String(Math.round(average)):String(item.sale_price??"")} onChange={e=>onEdit(item.id,"actual_sale_price_override",e.target.value)} style={{...input,width:100,height:28}}/></label><small>비우면 자동 평균 · 원본 실매출과 설정 판매가는 유지</small></div>;}
 function pricing(item:any){
  const count=Math.max(0,Math.trunc(Number(item.component_count||0)));
@@ -134,7 +134,7 @@ function RandomBoxCard({item,onEdit,onSave,saving,inventoryById}:{
     {item.image_url&&<a href={item.image_url} target="_blank" rel="noreferrer" style={{fontSize:10,color:"#92400e"}}>기존 합성 이미지</a>}
    </div>
    {members.length?<RandomBoxMemberGrid members={members} inventoryById={inventoryById}/>:<div style={imageWrap}>{item.image_url?<img src={item.image_url} alt="" style={image}/>:<div style={noImage}>NO IMAGE</div>}</div>}
-   <div style={{marginTop:6,fontSize:10,color:"#92400e"}}>랜덤박스 공용 잔여 {stockLabel(item)} · 구성품별 수량은 각 매입상품 기준</div>
+   <div style={{marginTop:6,fontSize:10,color:"#92400e"}}>랜덤박스 공용 잔여 {stockLabel(item)} / 총 {Number(item.stock_capacity_units??0).toLocaleString("ko-KR")}개 · 구성품별 수량은 매입상품 기준</div>
   </div>
   <div style={body}>
    <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap"}}>
@@ -143,7 +143,7 @@ function RandomBoxCard({item,onEdit,onSave,saving,inventoryById}:{
    </div>
    <label style={fieldLabel}>제목<input value={item.display_name||""} onChange={e=>onEdit(item.id,"display_name",e.target.value)} style={{...input,width:"100%",fontWeight:800}}/></label>
    <div style={{...profitBox,marginTop:10}}>
-    <div style={metric}><small style={metricLabel}>박스당 구성품 수</small><b>{count}개</b></div>
+    <div style={metric}><small style={metricLabel}>구성 디자인</small><b>{count}종</b></div>
     <label style={editableMetric}><small style={metricLabel}>판매가격</small><input type="text" inputMode="numeric" value={item.sale_price??""} onChange={e=>{if(/^\d*$/.test(e.target.value))onEdit(item.id,"sale_price",e.target.value)}} placeholder="원" style={miniInput}/></label>
    </div>
    <OverseasPricingGuide boxCost={cost} count={count} basicBoxPrice={basic}/>
@@ -152,7 +152,7 @@ function RandomBoxCard({item,onEdit,onSave,saving,inventoryById}:{
    </div>
    <div style={profitBox}><Metric label="총 수익" value={profit===null?"-":won(profit)} strong compact/><Metric label="개당 수익" value={profit===null?"-":won(profit/count)} strong compact/></div>
    <ActualSales item={item} onEdit={onEdit}/>
-   <div style={{...numbers,marginTop:8}}><label>입고 박스 <small style={{color:"#1d4ed8",fontWeight:700}}>총 {Math.max(0,Number(item.purchase_quantity||0)*Math.max(1,Number(item.component_count||1))).toLocaleString("ko-KR")}개 · 잔여 {Math.max(0,Number(item.remaining_units||0)).toLocaleString("ko-KR")}개</small><input type="text" inputMode="numeric" value={item.purchase_quantity??1} onChange={e=>{if(/^\d*$/.test(e.target.value))onEdit(item.id,"purchase_quantity",Number(e.target.value))}} style={{...input,width:"100%"}}/></label><label>판매 낱개<input type="number" min={0} value={item.sold_units??0} onChange={e=>onEdit(item.id,"sold_units",Number(e.target.value))} style={{...input,width:"100%"}}/></label></div>
+   <div style={{...numbers,marginTop:8}}><label>입고 박스 <small style={{color:"#1d4ed8",fontWeight:700}}>총 {Math.max(0,Number(item.stock_capacity_units??Number(item.purchase_quantity||0)*Math.max(1,Number(item.component_count||1)))).toLocaleString("ko-KR")}개 · 잔여 {Math.max(0,Number(item.remaining_units||0)).toLocaleString("ko-KR")}개</small><input type="text" inputMode="numeric" value={item.purchase_quantity??1} onChange={e=>{if(/^\d*$/.test(e.target.value))onEdit(item.id,"purchase_quantity",Number(e.target.value))}} style={{...input,width:"100%"}}/></label><label>판매 낱개<input type="number" min={0} value={item.sold_units??0} onChange={e=>onEdit(item.id,"sold_units",Number(e.target.value))} style={{...input,width:"100%"}}/></label></div>
    <textarea value={item.sale_memo||""} onChange={e=>onEdit(item.id,"sale_memo",e.target.value)} placeholder="판매 메모" style={memo}/>
    <label style={{display:"block",marginTop:8,fontSize:11,fontWeight:700}}>빵.store 공개 댓글<input value={item.public_comment||""} onChange={e=>onEdit(item.id,"public_comment",e.target.value)} maxLength={100} style={{...input,width:"100%",marginTop:4}}/></label>
    <div style={{fontSize:10,color:"#64748b",marginTop:7}}>구성품 {members.length}종 · 개별 매칭 {item.linked_member_units??0}개 + 랜덤박스 매칭 {item.linked_box_units??0}개 = 총 {item.linked_total_units??0}개 차감</div>
