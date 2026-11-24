@@ -77,9 +77,10 @@ async function linksForStock(sb: ReturnType<typeof createServiceRoleClient>, typ
 }
 
 async function stockExists(sb: ReturnType<typeof createServiceRoleClient>, type: StockType, id: string) {
-  const table = type === "purchase_item" ? "purchase_items" :
-    type === "random_box" ? "sale_random_boxes" : "sale_inventory_groups";
-  const { data, error } = await sb.from(table).select("id").eq("id", id).maybeSingle();
+  const result = type === "purchase_item" ? await sb.from("purchase_items").select("id").eq("id", id).maybeSingle()
+    : type === "random_box" ? await sb.from("sale_random_boxes").select("id").eq("id", id).maybeSingle()
+    : await sb.from("sale_inventory_groups").select("id").eq("id", id).maybeSingle();
+  const { data, error } = result;
   if (error) throw error;
   return Boolean(data);
 }
