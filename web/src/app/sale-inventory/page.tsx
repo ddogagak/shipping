@@ -124,8 +124,9 @@ function RandomBoxCard({item,onEdit,onSave,saving,inventoryById}:{
  item:any;onEdit:(id:string,key:string,value:any)=>void;onSave:(item:any)=>void;saving:boolean;inventoryById:Map<string,any>
 }){
  const cost=Number(item.box_cost_price||0),count=Number(item.component_count||0);
+ const totalUnits=Math.max(1,Number(item.stock_capacity_units??count));
  const basic=Math.ceil((cost+Math.max(DEFAULT_PRICING_SETTINGS.minimumProfit,cost*DEFAULT_PRICING_SETTINGS.targetProfitRate))/DEFAULT_PRICING_SETTINGS.salesRetentionRate);
- const actual=Number(item.sale_price||0),profit=actual>0?actual*count*.84-cost:null;
+ const actual=Number(item.sale_price||0),profit=actual>0?actual*totalUnits*.84-cost:null;
  const members=Array.isArray(item.members)?item.members:[];
  return <article style={{...card,border:"1px solid #eab308",opacity:item.view_status==="completed"?.7:1}}>
   <div style={{padding:9,background:"#fffbeb",borderBottom:"1px solid #fde68a"}}>
@@ -150,7 +151,7 @@ function RandomBoxCard({item,onEdit,onSave,saving,inventoryById}:{
    <div style={{...actualCost,display:"flex",alignItems:"center",justifyContent:"space-between",gap:6}}>
     <span>개당 매입가</span><b>{randomBoxPurchaseUnitPrice(members)}</b>
    </div>
-   <div style={profitBox}><Metric label="총 수익" value={profit===null?"-":won(profit)} strong compact/><Metric label="개당 수익" value={profit===null?"-":won(profit/count)} strong compact/></div>
+   <div style={profitBox}><Metric label="총 수익" value={profit===null?"-":won(profit)} strong compact/><Metric label="개당 수익" value={profit===null?"-":won(profit/totalUnits)} strong compact/></div>
    <ActualSales item={item} onEdit={onEdit}/>
    <div style={{...numbers,marginTop:8}}><label>구성품 총재고 <small style={{color:"#1d4ed8",fontWeight:700}}>잔여 {Math.max(0,Number(item.remaining_units||0)).toLocaleString("ko-KR")}개</small><input type="text" readOnly value={Math.max(0,Number(item.stock_capacity_units??0)).toLocaleString("ko-KR")+"개"} style={{...input,width:"100%",background:"#f8fafc"}}/></label><label>판매 낱개<input type="number" min={0} value={item.sold_units??0} onChange={e=>onEdit(item.id,"sold_units",Number(e.target.value))} style={{...input,width:"100%"}}/></label></div>
    <textarea value={item.sale_memo||""} onChange={e=>onEdit(item.id,"sale_memo",e.target.value)} placeholder="판매 메모" style={memo}/>
