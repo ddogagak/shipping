@@ -396,6 +396,7 @@ export default function DomesticOrdersPage() {
   const [logenReceiptBusy, setLogenReceiptBusy] = useState(false);
   const registrationLock = useRef(false);
   const [loading, setLoading] = useState(false);
+  const [ordersReady, setOrdersReady] = useState(false);
   const [savingRowId, setSavingRowId] = useState<string | null>(null);
   const [memoModalRow, setMemoModalRow] = useState<Row | null>(null);
   const [memoModalValue, setMemoModalValue] = useState("");
@@ -438,6 +439,7 @@ export default function DomesticOrdersPage() {
   }, []);
 
   async function load() {
+    setOrdersReady(false);
     setLoading(true);
     setMessage("");
 
@@ -456,6 +458,7 @@ export default function DomesticOrdersPage() {
           selected: false,
         }))
       );
+      setOrdersReady(Array.isArray(json.orders));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "알 수 없는 오류");
     } finally {
@@ -1865,7 +1868,7 @@ export default function DomesticOrdersPage() {
           </div>
         </div>
 
-        <WiseDeadlineBoard orders={rows.map(row => ({order_id:row.order_id,nickname:row.nickname || "",wise_user_id:row.wise_user_id,wise_order_ids:row.wise_order_ids||[],platform:row.platform,first_order_date:row.first_order_date,order_status:row.order_status,request_status:row.request_status,tracking_registered:Boolean(shipping(row)?.tracking_registered)}))} />
+        <WiseDeadlineBoard ordersReady={ordersReady && !loading} orders={rows.map(row => ({order_id:row.order_id,nickname:row.nickname || "",wise_user_id:row.wise_user_id,wise_order_ids:row.wise_order_ids||[],platform:row.platform,first_order_date:row.first_order_date,order_status:row.order_status,request_status:row.request_status,tracking_registered:Boolean(shipping(row)?.tracking_registered)}))} />
       </section>
 
       <section style={checkBoardStyle}>
