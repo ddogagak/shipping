@@ -52,7 +52,7 @@ export function buildInvestmentReport(input:{orders:any[];inventory:any[];boxes:
  const asOf=purchaseDay(input.now)||input.now;
  const rows=[...input.inventory.filter(i=>!i.is_random_member&&activeIds.has(String(i.order_id))),...input.boxes];
  const lots:InvestmentLot[]=rows.map(i=>{
-  const random=Boolean(i.is_random_box),totalUnits=qty(i.purchase_quantity)*Math.max(1,qty(i.component_count));
+  const random=Boolean(i.is_random_box),totalUnits=random?qty(i.stock_capacity_units??qty(i.purchase_quantity)*Math.max(1,qty(i.component_count))):qty(i.purchase_quantity)*Math.max(1,qty(i.component_count));
   const remaining=i.view_status==="completed"||i.stock_status==="soldout"?0:qty(i.remaining_units);
   const count=Math.max(1,qty(i.component_count));
   // Random pools have a recorded composition cost; use member purchase prices
@@ -61,10 +61,10 @@ export function buildInvestmentReport(input:{orders:any[];inventory:any[];boxes:
   if(random){
    const members=Array.isArray(i.members)?i.members:[];
    const costs=members.map((m:any)=>({cost:analysisBoxCost(m.unit_purchase_price,m.currency),boxes:qty(m.original_box_quantity),units:qty(m.original_box_quantity)*Math.max(1,qty(m.component_count))}));
-   if(costs.length&&costs.every((m:any)=>m.cost!==null)&&costs.reduce((s:number,m:any)=>s+m.units,0)===totalUnits&&totalUnits>0)boxCost=costs.reduce((s:number,m:any)=>s+m.cost*m.boxes,0)/Math.max(1,qty(i.purchase_quantity));
+   if(costs.length&&costs.every((m:any)=>m.cost!==null)&&costs.reduce((s:number,m:any)=>s+m.units,0)===totalUnits&&totalUnits>0)boxCost=costs.reduce((s:number,m:any)=>s+m.cost*m.boxes,0);
    else boxCost=validCost(i.box_cost_price)?num(i.box_cost_price):null;
   }
-  const unitCost=boxCost===null?null:boxCost/count;
+  const unitCost=boxCost===null?null:boxCost/(random?Math.max(1,totalUnits):count);
   const price=validCost(i.sale_price)?num(i.sale_price):null;
   const date=purchaseDay(i.ordered_at);const name=String(i.display_name||i.product_name||"(상품명 없음)");
   const series=random&&Array.isArray(i.series_tags)&&i.series_tags.length>1?"혼합 랜덤박스":resolveAnalysisSeries(name,i.series_name,input.rules).series;
