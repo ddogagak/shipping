@@ -15,7 +15,7 @@ function daysSince(date:string|null){
  const now=new Date();
  return Math.floor((Date.UTC(now.getFullYear(),now.getMonth(),now.getDate())-d)/86400000);
 }
-export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
+export default function WiseDeadlineBoard({orders,ordersReady=false}:{orders:Order[];ordersReady?:boolean}){
  const [open,setOpen]=useState(false);
  const popupRef=useRef<Window|null>(null);
  const snapshotRequestedRef=useRef(false);
@@ -108,7 +108,7 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
  const confirmed=unique(rows.filter(r=>r.status==="confirmed"));
  const urgent=unique(rows.filter(r=>(r.status==="urgent"||r.status==="unshipped")&&r.days>=13));
  const listDiff=useMemo(()=>{
-  const ready=rows.some(row=>row.status==="listed"&&row.order_id===WISE_LIST_COMPLETE);
+  const ready=ordersReady&&!busy&&rows.some(row=>row.status==="listed"&&row.order_id===WISE_LIST_COMPLETE);
   const wiseById=new Map<string,{userId:string;nickname:string;wiseOrderIds:string[]}>();
   if(ready){
    for(const row of rows){
@@ -152,7 +152,7 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
     .sort((a,b)=>a.nickname.localeCompare(b.nickname,"ko"));
   const noId=missingIds.map((order,index)=>({...order,nickname:missingNames[index]}));
   return {ready,wiseOnly,ddogaOnly,noId,total:wiseOnly.length+ddogaOnly.length+noId.length};
- },[rows,orders]);
+ },[rows,orders,ordersReady,busy]);
  function refresh(){
   if(busy)return;
   snapshotRequestedRef.current=false;
@@ -229,7 +229,7 @@ export default function WiseDeadlineBoard({orders}:{orders:Order[]}){
   <section style={{marginTop:10,padding:10,borderRadius:8,border:"1px solid #d1d5db",background:"#fff",fontSize:13}}>
    <strong>리스트 확인 필요 {listDiff.ready?listDiff.wiseOnly.length+listDiff.ddogaOnly.length+"명":"· 비교 대기"}:</strong>{" "}
    {!listDiff.ready
-    ? <span>최근 업데이트를 눌러줘.</span>
+    ? <span>{!ordersReady?"DDOGA 리스트 조회 완료 대기 중":busy?"와이스 조회 중":"최근 업데이트를 눌러줘."}</span>
     : <>
        {listDiff.wiseOnly.length===0&&listDiff.ddogaOnly.length===0
         ? "차이 없음"
