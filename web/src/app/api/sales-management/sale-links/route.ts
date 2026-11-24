@@ -136,9 +136,14 @@ async function getInventory() {
   if (exclusionsResult.error) throw exclusionsResult.error;
   if (sourcingResult.error) throw sourcingResult.error;
   if (groupsResult.error) throw groupsResult.error;
-  const {data:sharedStock,error:sharedError}=await sb.rpc("wise_random_box_shared_stock");
+  const [{data:sharedStock,error:sharedError},{data:linkUsage,error:usageError}]=await Promise.all([
+    sb.rpc("wise_random_box_shared_stock"),
+    sb.rpc("wise_inventory_link_usage")
+  ]);
   if(sharedError)throw sharedError;
+  if(usageError)throw usageError;
   const sharedById=new Map((sharedStock||[]).map((x:any)=>[String(x.random_box_id),x]));
+  const usageByKey=new Map((linkUsage||[]).map((x:any)=>[String(x.target_type)+"|"+String(x.target_id),x]));
   const sourcing = new Map((sourcingResult.data || []).map(x=>[String(x.id),x]));
   const members = new Set((membersResult.data || []).map(x => String(x.purchase_item_id)));
   const excluded = new Set((exclusionsResult.data || []).map(x => String(x.purchase_item_id)));
@@ -196,7 +201,11 @@ async function getInventory() {
     const referencePrices=[...new Set(lots.map(c=>c.sale_price).filter((p):p is number=>typeof p==='number'&&Number.isFinite(p)&&p>0))].sort((a,b)=>a-b);
     groupCandidates.push({...first,id:group.id,type:'inventory_group',name:group.title,option:group.group_kind==='sale_pool'?`판매용 재고풀 · ${lots.length}종`:`동일상품 묶음 · ${lots.length}차수`,remaining_units:remaining,stock_status:remaining?'active':'soldout',sale_price:group.group_kind==='sale_pool'&&group.sale_price!=null?Number(group.sale_price):null,reference_prices:group.group_kind==='sale_pool'&&group.sale_price!=null?[Number(group.sale_price)]:referencePrices,random_member:false});
   }
-  return NextResponse.json({ ok: true, candidates:[...groupCandidates,...candidates.filter(c=>!hiddenIds.has(c.id))], names });
+  const visible=[...groupCandidates,...candidates.filter(c=>!hiddenIds.has(c.id))].map(c=>{
+    const usage:any=usageByKey.get(c.type+"|"+c.id);
+    return {...c,stock_capacity:Number(usage?.capacity??0),linked_units:Number(usage?.linked??0)};
+  });
+  return NextResponse.json({ ok: true, candidates:visible, names });
 }
 
 export async function GET(request: Request) {
