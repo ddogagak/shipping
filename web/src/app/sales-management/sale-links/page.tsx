@@ -97,7 +97,7 @@ export default function WiseInventoryLinkPage() {
     const requestId = ++showsRequest.current;
     ++salesRequest.current;
     setLoadingShows(true); setError("");
-    setShows([]); setVideoId(""); setVideoIds([]); setSales([]); setSelected({}); setTargets({}); setRemember(false); setTargets({}); setRemember(false);
+    setShows([]); setVideoId(""); setVideoIds([]); setSales([]); setSelected({}); setTargets({}); setRemember(false);
     try {
       const data = await requestJson("/api/sales-management/sale-links?mode=shows&month=" + encodeURIComponent(month));
       if (requestId !== showsRequest.current) return;
@@ -109,7 +109,7 @@ export default function WiseInventoryLinkPage() {
 
   const loadSales = useCallback(async (ids: string[]) => {
     const requestId = ++salesRequest.current;
-    setSales([]); setSelected({});
+    setSales([]); setSelected({}); setTargets({}); setRemember(false);
     if (!ids.length) { setLoadingSales(false); return; }
     setLoadingSales(true); setError("");
     try {
