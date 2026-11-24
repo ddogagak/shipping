@@ -50,8 +50,8 @@ export async function GET() {
       }
     }
     const items = (data || []).map((row: any) => {
-      const totalUnits=Number(row.purchase_quantity||1)*Math.max(1,Number(row.component_count||1));
       const shared:any=sharedById.get(String(row.id));
+      const totalUnits=Number(shared?.capacity??row.stock_capacity_units??(row.purchase_quantity||1)*Math.max(1,Number(row.component_count||1)));
       const remainingUnits=shared?Number(shared.remaining_units):row.view_status==="completed"?0:Number(row.remaining_units??totalUnits);
       const actual:any=salesById.get(String(row.id));
       return ({
@@ -68,6 +68,7 @@ export async function GET() {
       sale_memo: row.sale_memo,
       public_comment: row.public_comment,
       component_count: row.component_count,
+      stock_capacity_units:totalUnits,
       purchase_quantity: Number(row.purchase_quantity || 1),
       sold_quantity: Math.floor((totalUnits-remainingUnits)/Math.max(1,Number(row.component_count||1))),
       remaining_quantity: Math.ceil(remainingUnits/Math.max(1,Number(row.component_count||1))),
@@ -77,7 +78,7 @@ export async function GET() {
       actual_average_sale_price:actual?.average_price??null,actual_sales_revenue:Number(actual?.revenue??0),actual_sales_units:Number(actual?.sold_units??0),
       actual_sale_price_override:row.actual_sale_price_override??null,
       box_cost_price: Number(row.total_cost_krw),
-      unit_cost_price: Math.ceil(Number(row.total_cost_krw) / Number(row.component_count)),
+      unit_cost_price: Math.ceil(Number(row.total_cost_krw) / Math.max(1,totalUnits)),
       actual_purchase_currency: "KRW",
       actual_purchase_unit_price: Number(row.total_cost_krw),
       sale_price: row.sale_price,
@@ -201,8 +202,8 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ok:false,message:"다른 작업에서 랜덤박스 재고가 변경됐어. 새로고침해줘."},{status:409});
     if(body.sold_units!=null||current.remaining_units!=null){
       const count=Math.max(1,Number(current.component_count||1));
-      const capacity=qty*count;
-      const oldSold=current.view_status==="completed"?Number(current.purchase_quantity)*count:Math.max(0,Number(current.purchase_quantity)*count-Number(current.remaining_units??Number(current.purchase_quantity)*count));
+      const capacity=Number(current.stock_capacity_units??qty*count);
+      const oldSold=current.view_status==="completed"?capacity:Math.max(0,capacity-Number(current.remaining_units??capacity));
       const sold=Number(body.sold_units??oldSold);
       const status=String(body.view_status||"display");
       if(!["display","hidden","completed"].includes(status)||!Number.isSafeInteger(sold)||sold<0||sold>capacity)throw Error("랜덤박스 판매 낱개 수량 또는 상태를 확인해줘.");
@@ -210,8 +211,14 @@ export async function PATCH(req: Request) {
       const {data:shared,error:sharedError}=await sb.rpc("wise_random_box_shared_stock");
       if(sharedError)throw sharedError;
       const linked=Number((shared||[]).find((row:any)=>String(row.random_box_id)===String(body.id))?.total_matched||0);
-      if(capacity<linked)throw Error("랜덤박스 전체 매칭 수량보다 입고 수량을 작게 설정할 수 없어.");
-      const remaining=status==="completed"?0:Math.min(capacity-sold,capacity-linked);
+      if(capacity<linked)throw Error("랜덤박스 전체 매칭 수량보다 총재고가 작아.");
+      // Displayed sales already include unmatched (link-only) sales. Keep
+      // physical deductions separate to avoid subtracting those links twice.
+      const visibleRemaining=Number((shared||[]).find((row:any)=>String(row.random_box_id)===String(body.id))?.remaining_units??capacity);
+      const storedRemaining=Number(current.remaining_units??capacity);
+      const pending=Math.max(0,storedRemaining-visibleRemaining);
+      if(sold<linked)throw Error("기존 연결 수량보다 판매 수량을 적게 설정할 수 없어.");
+      const remaining=status==="completed"?0:capacity-sold+pending;
       const price=body.sale_price===""||body.sale_price==null?null:Number(body.sale_price);
       const actualPrice=body.actual_sale_price_override===""||body.actual_sale_price_override==null?null:Number(body.actual_sale_price_override);
       const title=String(body.title||"").trim().slice(0,200);
