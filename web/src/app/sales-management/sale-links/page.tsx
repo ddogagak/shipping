@@ -10,7 +10,7 @@ import {manualSeriesForSale,wiseListingId} from "@/lib/item-analysis-series";
 type LinkRow = { id: number; wise_stock_id: number | string; purchase_item_id: string | null; random_box_id: string | null; inventory_group_id: string | null; quantity: number; applied_units: number };
 type Sale = { id: string; video_id: string; wise_user_id: string | null; buyer_nickname: string; item_name: string; item_price: number; sale_units: number; image_url: string | null; sold_at: string | null; links: LinkRow[]; manual_series?:string|null };
 type Show = { video_id: string; first_sale: string; last_sale: string; revenue: number; count: number; buyer_count: number };
-type Candidate = { type: "purchase_item" | "random_box" | "inventory_group"; id: string; name: string; option: string; image_url: string | null; series: string; unit_price: number; currency: string; component_count: number; sale_price: number | null; reference_prices?:number[]; stock_status: string; purchase_date: string; item_type: string; remaining_units: number; random_member: boolean };
+type Candidate = { type: "purchase_item" | "random_box" | "inventory_group"; id: string; name: string; option: string; image_url: string | null; series: string; unit_price: number; currency: string; component_count: number; sale_price: number | null; reference_prices?:number[]; stock_status: string; purchase_date: string; item_type: string; remaining_units: number; stock_capacity: number; linked_units: number; random_member: boolean };
 type Family = { key: string; title: string; count: number; price:number; revenue: number; linked: number; image: string | null; broadcastAt:string|null; items: Sale[] };
 
 const panel: CSSProperties = { border: "1px solid #e2e8f0", borderRadius: 13, padding: 16, background: "#fff" };
@@ -224,8 +224,20 @@ export default function WiseInventoryLinkPage() {
     const candidate = candidates.find(c => c.type + "|" + c.id === key);
     return candidate ? { ...candidate, quantity } : null;
   }).filter((value): value is Candidate & { quantity: number } => value !== null), [candidates, targets]);
-  const previews=selectedTargets.map(c=>({c,delta:applicableSales.reduce((sum,s)=>sum+c.quantity-(s.links.find(l=>targetKey(l)===c.type+"|"+c.id)?.applied_units||0),0)}));
-  const insufficient=previews.some(({c,delta})=>delta>c.remaining_units);
+  // A manual stock completion cannot cause a link overmatch.
+  const previews=selectedTargets.map(c=>{
+    const newLinks=selectedSales.reduce((sum,s)=>{
+      const existing=s.links.find(l=>targetKey(l)===c.type+"|"+c.id);
+      return sum+c.quantity-(existing?.quantity||0);
+    },0);
+    const capacity=Math.max(0,Number(c.stock_capacity||0));
+    const linked=Math.max(0,Number(c.linked_units||0));
+    const exceeds=linked+newLinks>capacity;
+    const physicalDeduct=applicableSales.reduce((sum,s)=>
+      sum+Math.max(0,c.quantity-(s.links.find(l=>targetKey(l)===c.type+"|"+c.id)?.applied_units||0)),0);
+    return {c,newLinks,capacity,linked,exceeds,physicalDeduct,after:Math.max(0,c.remaining_units-physicalDeduct)};
+  });
+  const insufficient=previews.some(x=>x.exceeds);
   async function editUnits(ids:string[], units:number){
     if(busy||!ids.length)return;
     if(!window.confirm(ids.length+"건의 실제 판매 수량을 건당 "+units+"개로 저장할까? 이미 차감한 단일 재고 연결은 차이만 반영해."))return;
@@ -261,7 +273,7 @@ export default function WiseInventoryLinkPage() {
     const ids = single ? [single.saleId] : selectedIds;
     if (!videoIds.length || !ids.length || busy || loadingSales || loadingShows) return;
     if (action === "link" && !selectedTargets.length) { setError("오른쪽에서 연결할 방송판매재고를 체크해줘."); return; }
-    if (action === "link" && insufficient) { setError("잔여 재고가 부족해. 건당 수량과 선택 건수를 확인해줘."); return; }
+    if (action === "link" && insufficient) { setError("연결 수량이 총재고를 초과해. 수동 판매완료 수량은 과매칭 판정에 포함되지 않아."); return; }
     if (action === "link" && selectedSales.some(s=>s.sale_units!==selectedTargets.reduce((sum,c)=>sum+c.quantity,0)+s.links.filter(l=>!selectedTargets.some(c=>targetKey(l)===c.type+"|"+c.id)).reduce((sum,l)=>sum+l.quantity,0)) && !window.confirm("연결하려는 낱개 수량이 기존 실제 판매 수량과 달라. 연결 수량으로 실제 판매 수량을 변경할까?")) return;
     if(action==='link'&&selectedTargets.some(c=>c.type==='inventory_group')&&selectedTargets.length!==1){setError('동일상품 묶음은 한 번에 하나만 선택해줘.');return;}
     if(action==="link" && deductionMode==="historical" && !window.confirm("과거 판매도 실제 차감합니다. 이미 수동으로 차감한 판매는 중복될 수 있어. 미리보기 수량을 확인했나요?"))return;
@@ -418,14 +430,17 @@ export default function WiseInventoryLinkPage() {
           <select value={deductionMode} onChange={e=>setDeductionMode(e.target.value as typeof deductionMode)} style={field}>
             <option value="future">신규 판매만 자동 차감 (과거 연결만)</option><option value="link_only">연결만 · 수량 변화 없음</option><option value="historical">과거 포함 실제 차감</option><option value="reset_reconcile">초기화한 재고 재정산 · 기존 연결 포함 차감</option>
           </select>
-          {previews.map(({c,delta})=><div key={c.id} style={{color:delta>c.remaining_units?"#b91c1c":"#334155"}}><b>{c.name}</b><br/>{delta>c.remaining_units?"재고 부족: 잔여 "+c.remaining_units+"개 / 실제 차감 "+delta+"개 (부족 "+(delta-c.remaining_units)+"개)":"잔여 "+c.remaining_units+"개 → "+(c.remaining_units-delta)+"개 · "+(delta>0?"차감 "+delta+"개":delta<0?"복원 "+(-delta)+"개":"차감 없음")}</div>)}
+          {previews.map(({c,newLinks,capacity,linked,exceeds,physicalDeduct,after})=><div key={c.id} style={{color:exceeds?"#b91c1c":"#334155"}}><b>{c.name}</b><br/>
+            {exceeds?"연결 과매칭: 총 "+capacity+"개 / 기존 연결 "+linked+"개 / 추가 "+newLinks+"개":"총재고 "+capacity+"개 · 기존 연결 "+linked+"개 → 연결 후 "+(linked+newLinks)+"개"}
+            <br/>{exceeds?"연결 수량이 총재고를 초과해.":physicalDeduct>c.remaining_units?"수동 판매와 연결 수량이 중복돼 남은 재고는 0개(판매완료)로 처리돼.":"실물 잔여 "+c.remaining_units+"개 → "+after+"개"}
+          </div>)}
           {deductionMode==="reset_reconcile"&&<div style={{color:"#92400e",fontWeight:700}}>수동 초기화한 재고용이야. 기존 연결도 재고풀로 이전하고 FIFO 차감해. 이전 차감이 실제로 초기화됐는지 확인한 후 처리해.</div>}
           <label><input type="checkbox" checked={remember&&canRemember} disabled={!canRemember} onChange={e=>setRemember(e.target.checked)}/> 같은 상품명·이미지·가격을 다음 판매부터 자동 연결 및 차감</label>
           {!canRemember&&<span style={{color:"#64748b"}}>한 상품군(이미지 포함)을 선택하면 자동 연결을 기억할 수 있어.</span>}
         </div>
         {error&&<div role="alert" style={{marginTop:10,padding:9,border:"1px solid #fca5a5",background:"#fef2f2",color:"#991b1b",fontSize:12,whiteSpace:"pre-wrap"}}>{error}</div>}
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-          <button style={{ ...btn, flex: 1, background: insufficient?"#94a3b8":"#1d4ed8", color: "#fff", borderColor: "#1d4ed8" }} disabled={busy || insufficient || selectedIds.length === 0 || selectedTargets.length === 0 || selectedTargets.length > 16} onClick={() => void save("link")}>{busy ? "저장 중..." : insufficient?"재고 부족":selectedIds.length + "건 · 전체 " + selectedTargets.reduce((s,c)=>s+c.quantity*selectedIds.length,0) + "개 연결"}</button>
+          <button style={{ ...btn, flex: 1, background: insufficient?"#94a3b8":"#1d4ed8", color: "#fff", borderColor: "#1d4ed8" }} disabled={busy || insufficient || selectedIds.length === 0 || selectedTargets.length === 0 || selectedTargets.length > 16} onClick={() => void save("link")}>{busy ? "저장 중..." : insufficient?"연결 수량 초과":selectedIds.length + "건 · 전체 " + selectedTargets.reduce((s,c)=>s+c.quantity*selectedIds.length,0) + "개 연결"}</button>
           <button style={{ ...btn, color: "#991b1b" }} disabled={busy || selectedIds.length === 0} onClick={() => { if (window.confirm("선택한 실제 판매기록의 재고 연결만 해제할까?")) void save("unlink"); }}>연결 해제</button>
         </div>
         <p style={{ fontSize: 12, color: "#64748b" }}>기존 연결은 차감하지 않아. 차감한 연결을 해제하면 그 수량만 복원돼. 배송·실매출 원본은 변경하지 않아.</p>
