@@ -3,7 +3,7 @@ import { createServiceRoleClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-type Platform = "wise" | "x" | "bunjang";
+type Platform = "wise" | "x" | "bunjang" | "manual";
 
 type ParsedRow = {
   selected: boolean;
@@ -26,12 +26,14 @@ type ParsedRow = {
   sourceOrderDates: string[];
   items: { item_text: string; price: number }[];
   shippingType: string;
+  memo?: string;
 };
 
 const PLATFORM_PREFIX: Record<Platform, string> = {
   wise: "W",
   x: "X",
   bunjang: "B",
+  manual: "M",
 };
 
 function safeText(value: unknown) {
@@ -628,6 +630,7 @@ export async function POST(req: Request) {
       item_summary: row.itemSummary || null,
       item_total_price: numberFromWon(row.itemTotalPrice),
       order_status: "accepted",
+      ...(row.platform === "manual" ? { memo: safeText(row.memo) || null } : {}),
     }));
 
     const shippingPayload = freshRows.map((row: ParsedRow) => ({
@@ -635,7 +638,7 @@ export async function POST(req: Request) {
       carrier: "우체국택배",
       shipping_type: row.shippingType || "일반택배",
       tracking_number: null,
-      shipping_status: "start",
+      shipping_status: row.platform === "manual" ? "ready" : "start",
     }));
 
     const itemPayload = freshRows.flatMap((row: ParsedRow) =>
