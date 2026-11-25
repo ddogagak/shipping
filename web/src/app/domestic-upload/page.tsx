@@ -5,7 +5,7 @@ import * as XLSX from "xlsx";
 import Link from "next/link";
 import WiseJsonImport from "./WiseJsonImport";
 
-type Platform = "wise" | "x" | "bunjang";
+type Platform = "wise" | "x" | "bunjang" | "manual";
 
 type DomesticRow = {
   selected: boolean;
@@ -35,6 +35,7 @@ const PLATFORM_TABS: { value: Platform; label: string }[] = [
   { value: "wise", label: "Wise" },
   { value: "x", label: "X" },
   { value: "bunjang", label: "번개장터" },
+  { value: "manual", label: "수기 입력" },
 ];
 
 const HEADERS = [
@@ -258,6 +259,7 @@ export default function DomesticUploadPage() {
           ))}
         </div>
 
+        {platform === "manual" ? <ManualEntry /> : <>
         <div style={{ marginTop: 18 }}>
           <label style={labelStyle}>배송정보 붙여넣기</label>
           <textarea
@@ -310,6 +312,7 @@ export default function DomesticUploadPage() {
         </div>
 
         {message ? <p style={{ marginBottom: 0 }}>{message}</p> : null}
+        </>}
       </section>
 
       {fresh.length ? (
@@ -502,3 +505,38 @@ const tdStyle: CSSProperties = {
   padding: "10px 8px",
   verticalAlign: "top",
 };
+
+function ManualEntry() {
+  const fields = [
+    ["recipientName","수령인 이름",true], ["nickname","구매자 닉네임",false],
+    ["phone","전화번호",true], ["postalCode","우편번호",true],
+    ["address","기본주소",true], ["detail","상세주소",false],
+    ["product","상품명",false], ["quantity","수량",false], ["memo","배송메모",false],
+  ] as const;
+  const [values,setValues] = useState<Record<string,string>>({quantity:"1"});
+  const [busy,setBusy] = useState(false);
+  const [notice,setNotice] = useState("");
+  const [orderKey,setOrderKey] = useState("");
+  return <form style={{marginTop:18}} onSubmit={async e=>{
+    e.preventDefault();
+    if(busy) return;
+    if(!values.recipientName?.trim() || !values.address?.trim() || !/^\d{5}$/.test(values.postalCode || "") || !/^\d{9,12}$/.test((values.phone || "").replace(/[-\s]/g,""))) {setNotice("이름, 주소, 전화번호, 5자리 우편번호를 확인해 주세요.");return;}
+    const key=orderKey || "M"+crypto.randomUUID();
+    setOrderKey(key);setBusy(true);setNotice("");
+    const date=new Date().toLocaleDateString("sv-SE",{timeZone:"Asia/Seoul"}).replace(/-/g,".");
+    const nickname=values.nickname?.trim() || values.recipientName.trim();
+    const summary=values.product?.trim() ? values.product.trim()+" × "+(values.quantity || "1") : "";
+    try {
+      const res=await fetch("/api/domestic/upload",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rows:[{selected:true,platform:"manual",recipientName:values.recipientName.trim(),nickname,postalCode:values.postalCode,phone:values.phone,address:[values.address,values.detail].filter(Boolean).join(" "),customerOrderNo:key,firstOrderDate:date,sourceOrderDates:[date],orderCount:"1",itemSummary:summary,itemTotalPrice:"",items:summary?[{item_text:summary,price:0}]:[],shippingType:"일반택배",memo:values.memo || ""}]})});
+      const json=await res.json();
+      if(!res.ok || !json.saved) throw new Error(json.detail || json.error || "저장되지 않았습니다. 국내 주문에서 중복 여부를 확인해 주세요.");
+      setValues({quantity:"1"});setOrderKey("");setNotice("등록 완료 — 국내 주문 준비 상태에서 확인하세요.");
+    } catch(err){setNotice(err instanceof Error ? err.message : "저장 실패");} finally{setBusy(false);}
+  }}>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:12}}>
+      {fields.map(([key,label,required])=><label key={key} style={labelStyle}>{label}{required?" *":""}<input required={required} disabled={busy} value={values[key] || ""} onChange={e=>setValues(prev=>({...prev,[key]:e.target.value}))} type={key==="quantity"?"number":key==="phone"?"tel":"text"} min={key==="quantity"?1:undefined} style={{display:"block",width:"100%",boxSizing:"border-box",padding:10,border:"1px solid #d1d5db",borderRadius:8,marginTop:6}} /></label>)}
+    </div>
+    <button type="submit" disabled={busy} style={primaryButtonStyle}>{busy?"등록 중...":"국내 주문 등록"}</button>
+    {notice && <p role="status">{notice}</p>}
+  </form>;
+}
