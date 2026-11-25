@@ -88,6 +88,7 @@ const PLATFORM_OPTIONS = [
   { value: "x", label: "X" },
   { value: "bunjang", label: "번개장터" },
   { value: "Kuji", label: "Kuji" },
+  { value: "manual", label: "수기 입력" },
 ];
 
 const ORDER_STATUS_OPTIONS = [
