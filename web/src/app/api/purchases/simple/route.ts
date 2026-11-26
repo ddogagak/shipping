@@ -111,7 +111,6 @@ export async function PATCH(req: Request) {
       if (isConverted(row) && body.purchase_registered === false) return bad("정식 매입으로 전환된 건은 N으로 되돌릴 수 없어.", 409);
       const update: Record<string, unknown> = {};
       if (body.total_amount !== undefined || body.paid_at !== undefined) {
-        if (isConverted(row) || Array.isArray(row.raw_data?.simple_merge_payments)) return bad("전환 또는 합치기 완료 건의 금액·날짜는 원본 이력 보호를 위해 수정할 수 없어.", 409);
         if (body.total_amount !== undefined) {
           const amount = parseAmount(body.total_amount);
           if (amount === null) return bad("총금액은 0보다 큰 숫자로 입력해줘.");
