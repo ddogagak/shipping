@@ -204,9 +204,20 @@ export default function TextImportPanel({
   const basePrompt = mode === "japan" ? JAPAN_PROMPT : KOREA_PROMPT;
   const invoiceUrls: string[] = simpleEntry?.image_lists?.invoice || (simpleEntry?.images?.invoice ? [simpleEntry.images.invoice] : []);
   const paymentUrls: string[] = simpleEntry?.image_lists?.payment || (simpleEntry?.images?.payment ? [simpleEntry.images.payment] : []);
-  const prompt = invoiceUrls.length
-    ? `${basePrompt}\n\n[이번 전환 대상 명세서]\n아래 외부 이미지 링크를 모두 열어 모든 상품행을 확인해줘. 링크를 읽을 수 없다면 추측하지 말고 사진 첨부를 요청해줘.\n${invoiceUrls.join("\n")}`
-    : basePrompt;
+  const simpleContext = simpleEntry ? [
+    "[기존 간이 매입등록 정보]",
+    "거래처: " + (simpleEntry.shop_name || "미입력"),
+    "입금 날짜: " + (simpleEntry.ordered_at ? new Intl.DateTimeFormat("sv-SE", {timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(simpleEntry.ordered_at)) : "미입력"),
+    "등록 금액(KRW): " + (simpleEntry.paid_amount ?? "미입력"),
+    "분류: " + (simpleEntry.category || "매입"),
+    "기존 메모: " + (simpleEntry.memo || "없음"),
+    "계산서 확인필요: " + (simpleEntry.invoice_check_needed ? "Y" : "N"),
+    "위 거래처, 입금 날짜, 등록 금액 및 메모를 PURCHASE 작성에 활용한다. 기존 등록 금액은 TOTAL_AMOUNT의 기준으로 사용하되 명세서 또는 실제 결제 증빙과 차이가 있으면 MEMO에 차액 및 확인 필요 사유를 기록한다. 기존 등록 금액 자체를 결제 증빙으로 단정하지 않는다. 간이 내부 주문번호를 실제 명세서번호로 사용하지 않는다. 기존 메모와 명세서에서 확인되지 않은 상품행은 추측하지 않는다."
+  ].join("\n") : "";
+  const prompt = [basePrompt, simpleContext,
+    invoiceUrls.length ? "[이번 전환 대상 명세서]\n아래 외부 이미지 링크를 모두 열어 모든 상품행을 확인해줘. 링크를 읽을 수 없다면 추측하지 말고 사진 첨부를 요청해줘.\n" + invoiceUrls.join("\n") : "",
+    paymentUrls.length ? "[이번 전환 대상 입금내역]\n아래 입금 증빙을 확인하여 실제 결제액과 날짜를 검증해줘.\n" + paymentUrls.join("\n") : ""
+  ].filter(Boolean).join("\n\n");
   const runText = async (action: string) => {
     if(action==="preview"&&!ready)return setMsg("유형 키워드를 불러오는 중이야. 잠시 후 다시 시도해줘.");
     if (action === "preview" && !text.trim())
