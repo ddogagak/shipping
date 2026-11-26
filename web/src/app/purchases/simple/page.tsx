@@ -17,6 +17,8 @@ type Entry = {
   images: { invoice: string | null; payment: string | null };
   image_lists?: { invoice: string[]; payment: string[] };
   merged_count?: number;
+  split_kind?: "remaining" | "partial" | null;
+  original_amount?: number | null;
   local_shipping?: number;
 };
 
@@ -265,7 +267,7 @@ export default function SimplePurchasesPage() {
       <div style={{display:"grid",gap:12}}>
       {entries.map(entry=><article key={entry.id} style={card}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",gap:12}}>
-          <div style={{display:"flex",gap:10,alignItems:"start"}}><input type="checkbox" aria-label="합칠 간이 매입 선택" checked={selectedIds.includes(entry.id)} disabled={busy || !mergeable(entry) || (!!selectedSupplier && entry.shop_name.trim()!==selectedSupplier)} onChange={e=>setSelectedIds(prev=>e.target.checked?[...prev,entry.id]:prev.filter(id=>id!==entry.id))} style={{width:19,height:19}}/><div><strong style={{fontSize:20}}>{money(entry.paid_amount)}원</strong>{(entry.merged_count||1)>1&&<span style={{marginLeft:8,fontSize:12,color:"#047857",fontWeight:700}}>합친 매입 {entry.merged_count}건</span>}<p style={{fontSize:13,color:"#6b7280",margin:"5px 0 0"}}>{entry.ordered_at ? new Intl.DateTimeFormat("ko-KR",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(entry.ordered_at)) : "날짜 없음"}</p></div></div>
+          <div style={{display:"flex",gap:10,alignItems:"start"}}><input type="checkbox" aria-label="합칠 간이 매입 선택" checked={selectedIds.includes(entry.id)} disabled={busy || !mergeable(entry) || (!!selectedSupplier && entry.shop_name.trim()!==selectedSupplier)} onChange={e=>setSelectedIds(prev=>e.target.checked?[...prev,entry.id]:prev.filter(id=>id!==entry.id))} style={{width:19,height:19}}/><div><strong style={{fontSize:20}}>{money(entry.paid_amount)}원</strong>{entry.split_kind&&<span style={{display:"inline-block",marginLeft:8,fontSize:12,color:"#92400e",background:"#fef3c7",borderRadius:6,padding:"3px 7px",fontWeight:700}}>분할 · {entry.split_kind==="remaining"?"잔여 주문":"부분입고"}</span>}{entry.split_kind&&entry.original_amount!=null&&<div style={{marginTop:5,fontSize:13,color:"#374151",fontWeight:700}}>원본 총액 {money(entry.original_amount)}원</div>}{(entry.merged_count||1)>1&&<span style={{marginLeft:8,fontSize:12,color:"#047857",fontWeight:700}}>합친 매입 {entry.merged_count}건</span>}<p style={{fontSize:13,color:"#6b7280",margin:"5px 0 0"}}>{entry.ordered_at ? new Intl.DateTimeFormat("ko-KR",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(entry.ordered_at)) : "날짜 없음"}</p></div></div>
           <div style={{display:"flex",gap:6}}>
           <button type="button" disabled={busy} onClick={()=>setEdit({id:entry.id,amount:String(entry.paid_amount),date:entry.ordered_at?new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(entry.ordered_at)):"",memo:entry.memo||""})} style={{...field,width:"auto",padding:"6px 9px",cursor:"pointer"}}>수정</button>
           <button disabled={busy || entry.converted || (entry.merged_count||1)>1} onClick={()=>void remove(entry.id)} style={{padding:"6px 9px",border:"1px solid #fecdd3",background:"#fff1f2",color:"#be123c",borderRadius:7,cursor:"pointer"}}>삭제</button></div>
