@@ -105,11 +105,25 @@ export async function PATCH(req: Request) {
       }
       const id = String(body.id ?? "");
       if (body.category !== undefined && !validCategory(body.category)) return bad("분류는 매입, 비용, 세금 중 하나여야 해.");
-      if (!id || (typeof body.invoice_check_needed !== "boolean" && typeof body.shop_name !== "string" && body.category === undefined && typeof body.purchase_registered !== "boolean")) return bad("수정할 정보를 확인해줘.");
+      if (!id || (typeof body.invoice_check_needed !== "boolean" && typeof body.shop_name !== "string" && body.category === undefined && typeof body.purchase_registered !== "boolean" && body.total_amount === undefined && body.paid_at === undefined && typeof body.memo !== "string")) return bad("수정할 정보를 확인해줘.");
       const { data: row, error: readError } = await sb.from("purchase_orders").select("id,raw_data,updated_at").eq("id", id).single();
       if (readError || !isSimpleHistory(row)) return bad("간이 매입을 찾을 수 없어.", 404);
       if (isConverted(row) && body.purchase_registered === false) return bad("정식 매입으로 전환된 건은 N으로 되돌릴 수 없어.", 409);
       const update: Record<string, unknown> = {};
+      if (body.total_amount !== undefined || body.paid_at !== undefined) {
+        if (isConverted(row) || Array.isArray(row.raw_data?.simple_merge_payments)) return bad("전환 또는 합치기 완료 건의 금액·날짜는 원본 이력 보호를 위해 수정할 수 없어.", 409);
+        if (body.total_amount !== undefined) {
+          const amount = parseAmount(body.total_amount);
+          if (amount === null) return bad("총금액은 0보다 큰 숫자로 입력해줘.");
+          update.paid_amount = amount;
+        }
+        if (body.paid_at !== undefined) {
+          const date = body.paid_at ? parseDate(body.paid_at) : null;
+          if (!date) return bad("입금 날짜를 확인해줘.");
+          update.ordered_at = date;
+        }
+      }
+      if (typeof body.memo === "string") update.memo = body.memo.slice(0, 5000) || null;
       if (typeof body.invoice_check_needed === "boolean") {
         update.raw_data = { ...row.raw_data, invoice_check_needed: body.invoice_check_needed };
       }
