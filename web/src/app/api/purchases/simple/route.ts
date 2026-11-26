@@ -48,6 +48,7 @@ export async function GET() {
     if (convertedError) throw convertedError;
     const rows = [...(simpleRows??[]),...(convertedRows??[])].filter(isSimpleHistory)
       .sort((a:any,b:any)=>new Date(b.created_at).getTime()-new Date(a.created_at).getTime());
+    const splitParents = new Set(rows.map(row => row.raw_data?.split_from_order_id).filter(Boolean));
     const entries = await Promise.all(rows.map(async (row: any) => {
       const images: Record<string, string | null> = { invoice: null, payment: null };
       const image_lists: Record<string, string[]> = { invoice: [], payment: [] };
@@ -59,7 +60,7 @@ export async function GET() {
         image_lists[kind] = signedUrls.filter((url): url is string => !!url);
         images[kind] = image_lists[kind][0] ?? null;
       }));
-      return { id: row.id, order_number: row.order_number, ordered_at: row.ordered_at, paid_amount: row.paid_amount, local_shipping: row.local_shipping, memo: row.memo, shop_name: row.shop_name === "간이 매입" ? "" : (row.shop_name || ""), invoice_check_needed: row.raw_data?.invoice_check_needed === true, purchase_registered: isConverted(row) || row.raw_data?.purchase_registered === true, converted: isConverted(row), category: validCategory(row.raw_data?.purchase_category) ? row.raw_data.purchase_category : "매입", images, image_lists, merged_count: Array.isArray(row.raw_data?.simple_merge_payments) ? row.raw_data.simple_merge_payments.length : 1 };
+      return { split_kind: row.raw_data?.split_from_order_id ? "remaining" : splitParents.has(row.id) ? "partial" : null, original_amount: row.raw_data?.previous_simple_snapshot?.paid_amount ?? null, id: row.id, order_number: row.order_number, ordered_at: row.ordered_at, paid_amount: row.paid_amount, local_shipping: row.local_shipping, memo: row.memo, shop_name: row.shop_name === "간이 매입" ? "" : (row.shop_name || ""), invoice_check_needed: row.raw_data?.invoice_check_needed === true, purchase_registered: isConverted(row) || row.raw_data?.purchase_registered === true, converted: isConverted(row), category: validCategory(row.raw_data?.purchase_category) ? row.raw_data.purchase_category : "매입", images, image_lists, merged_count: Array.isArray(row.raw_data?.simple_merge_payments) ? row.raw_data.simple_merge_payments.length : 1 };
     }));
     return NextResponse.json({ ok: true, entries });
   } catch(e) {
