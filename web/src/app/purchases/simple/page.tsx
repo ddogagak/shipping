@@ -26,6 +26,7 @@ const card: CSSProperties = { background: "#fff", border: "1px solid #e5e7eb", b
 const money = (v: unknown) => Number(v || 0).toLocaleString("ko-KR");
 
 export default function SimplePurchasesPage() {
+  const [edit, setEdit] = useState<{id:string; amount:string; date:string; memo:string} | null>(null);
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState("");
   const [memo, setMemo] = useState("");
@@ -178,6 +179,21 @@ export default function SimplePurchasesPage() {
     finally { setBusy(false); }
   }
 
+  async function saveEdit(entry: Entry) {
+    if (!edit || edit.id !== entry.id) return;
+    const locked = entry.converted || (entry.merged_count || 1) > 1;
+    const total = Number(edit.amount.replace(/,/g,"").trim());
+    if (!locked && (!Number.isFinite(total) || total <= 0 || !edit.date)) { setMessage("금액과 입금 날짜를 확인해줘."); return; }
+    setBusy(true); setMessage("");
+    try {
+      const res = await fetch("/api/purchases/simple", {method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:entry.id,memo:edit.memo,...(!locked?{total_amount:total,paid_at:edit.date}:{})})});
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.message || "수정 실패");
+      setEdit(null); await load(); setMessage("간이 매입 수정 완료");
+    } catch(e) { setMessage(e instanceof Error ? e.message : "수정 실패"); }
+    finally { setBusy(false); }
+  }
+
   async function remove(id: string) {
     if (!confirm("이 간이 매입 기록과 첨부사진을 삭제할까?")) return;
     setBusy(true); setMessage("");
@@ -251,8 +267,17 @@ export default function SimplePurchasesPage() {
       {entries.map(entry=><article key={entry.id} style={card}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",gap:12}}>
           <div style={{display:"flex",gap:10,alignItems:"start"}}><input type="checkbox" aria-label="합칠 간이 매입 선택" checked={selectedIds.includes(entry.id)} disabled={busy || !mergeable(entry) || (!!selectedSupplier && entry.shop_name.trim()!==selectedSupplier)} onChange={e=>setSelectedIds(prev=>e.target.checked?[...prev,entry.id]:prev.filter(id=>id!==entry.id))} style={{width:19,height:19}}/><div><strong style={{fontSize:20}}>{money(entry.paid_amount)}원</strong>{(entry.merged_count||1)>1&&<span style={{marginLeft:8,fontSize:12,color:"#047857",fontWeight:700}}>합친 매입 {entry.merged_count}건</span>}<p style={{fontSize:13,color:"#6b7280",margin:"5px 0 0"}}>{entry.ordered_at ? new Intl.DateTimeFormat("ko-KR",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(entry.ordered_at)) : "날짜 없음"}</p></div></div>
-          <button disabled={busy || entry.converted || (entry.merged_count||1)>1} onClick={()=>void remove(entry.id)} style={{padding:"6px 9px",border:"1px solid #fecdd3",background:"#fff1f2",color:"#be123c",borderRadius:7,cursor:"pointer"}}>삭제</button>
+          <div style={{display:"flex",gap:6}}>
+          <button type="button" disabled={busy} onClick={()=>setEdit({id:entry.id,amount:String(entry.paid_amount),date:entry.ordered_at?new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(entry.ordered_at)):"",memo:entry.memo||""})} style={{...field,width:"auto",padding:"6px 9px",cursor:"pointer"}}>수정</button>
+          <button disabled={busy || entry.converted || (entry.merged_count||1)>1} onClick={()=>void remove(entry.id)} style={{padding:"6px 9px",border:"1px solid #fecdd3",background:"#fff1f2",color:"#be123c",borderRadius:7,cursor:"pointer"}}>삭제</button></div>
         </div>
+        {edit?.id===entry.id&&<div style={{display:"grid",gap:10,marginTop:12,padding:12,border:"1px solid #d1d5db",borderRadius:9}}>
+          <label>총금액 (원)<input style={field} inputMode="decimal" value={edit.amount} disabled={busy||entry.converted||(entry.merged_count||1)>1} onChange={e=>setEdit({...edit,amount:e.target.value})}/></label>
+          <label>입금 날짜<input style={field} type="date" value={edit.date} disabled={busy||entry.converted||(entry.merged_count||1)>1} onChange={e=>setEdit({...edit,date:e.target.value})}/></label>
+          {(entry.converted||(entry.merged_count||1)>1)&&<small>전환 또는 합치기 완료 건은 원본 이력 보호를 위해 금액·날짜 수정이 제한돼.</small>}
+          <label>메모<textarea style={field} value={edit.memo} disabled={busy} onChange={e=>setEdit({...edit,memo:e.target.value})}/></label>
+          <div style={{display:"flex",gap:8}}><button type="button" style={button} disabled={busy} onClick={()=>void saveEdit(entry)}>수정 저장</button><button type="button" style={{...field,width:"auto"}} disabled={busy} onClick={()=>setEdit(null)}>취소</button></div>
+        </div>}
         <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap",marginTop:12}}>
           <SupplierAutocomplete label="거래처 수정" value={editingSuppliers[entry.id] ?? entry.shop_name ?? ""} onChange={value=>setEditingSuppliers(prev=>({...prev,[entry.id]:value}))} placeholder="거래처 없음" suppliers={suppliers} loading={loading} disabled={busy} style={{...field,width:"min(100%,240px)",fontSize:13,padding:"8px 10px"}}/>
           <button type="button" disabled={busy || (editingSuppliers[entry.id] ?? entry.shop_name ?? "") === (entry.shop_name ?? "")} onClick={()=>void saveSupplier(entry)} style={{...button,padding:"9px 12px",fontSize:12}}>거래처 저장</button>
