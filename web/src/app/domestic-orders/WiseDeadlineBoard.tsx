@@ -6,6 +6,7 @@ type Snapshot={userId:string;nickname:string;orders:{id:number;status:number;cre
 const CACHE_KEY="ddoga:wise-deadline-snapshot:v1";
 type WiseRow={nickname:string;wise_user_id?:string|null;order_id:string;days:number;status:"unshipped"|"pending"|"confirmed"|"urgent"|"listed";source:"ddoga"|"wise"};
 const WISE_LIST_COMPLETE="__wise_buyer_list_complete__";
+const COMPARISON_MAX_AGE_MS=10*60*1000;
 const PREPARING_STATUSES=new Set(["accepted","checked","packaged"]);
 function daysSince(date:string|null){
  if(!date)return -1;
@@ -22,6 +23,14 @@ export default function WiseDeadlineBoard({orders,ordersReady=false}:{orders:Ord
  const snapshotHandledRef=useRef(false);
  const [wiseRows,setWiseRows]=useState<WiseRow[]|null>(null);
  const [busy,setBusy]=useState(false);
+ // Cached deadline cards are useful, but cached buyer lists must not be compared with live DDOGA orders.
+ const [comparisonAt,setComparisonAt]=useState<number|null>(null);
+ const refreshStartedRef=useRef(false);
+ useEffect(()=>{
+  if(comparisonAt===null)return;
+  const timer=window.setTimeout(()=>setComparisonAt(null),Math.max(0,comparisonAt+COMPARISON_MAX_AGE_MS-Date.now()));
+  return()=>window.clearTimeout(timer);
+ },[comparisonAt]);
  const [updatedAt,setUpdatedAt]=useState<string|null>(null);
  const [notice,setNotice]=useState("");
  const [acting,setActing]=useState<string|null>(null);
@@ -30,12 +39,12 @@ export default function WiseDeadlineBoard({orders,ordersReady=false}:{orders:Ord
   fetch("/api/domestic/wise-snapshot",{cache:"no-store"}).then(async res=>{
    const data=await res.json();
    if(!res.ok)throw Error(data.error||"DB 조회 실패");
-   if(active&&data.snapshot&&Array.isArray(data.snapshot.rows)){
+   if(active&&!refreshStartedRef.current&&data.snapshot&&Array.isArray(data.snapshot.rows)){
     setWiseRows(data.snapshot.rows);
     setUpdatedAt(data.snapshot.updated_at);
     localStorage.setItem(CACHE_KEY,JSON.stringify({rows:data.snapshot.rows,updatedAt:data.snapshot.updated_at}));
    }
-  }).catch(error=>{if(active)setNotice("DB 조회 실패 · 브라우저 저장본 표시 중: "+String(error.message||error));});
+  }).catch(error=>{if(active&&!refreshStartedRef.current)setNotice("DB 조회 실패 · 브라우저 저장본 표시 중: "+String(error.message||error));});
   return()=>{active=false;};
  },[]);
  useEffect(()=>{
@@ -66,8 +75,8 @@ export default function WiseDeadlineBoard({orders,ordersReady=false}:{orders:Ord
     if(snapshotHandledRef.current)return;
     snapshotHandledRef.current=true;
     if(event.data.error){setBusy(false);setNotice(String(event.data.error));return;}
-    if((event.data.records||[]).some((r:Snapshot & {error?:string})=>r.error)){setBusy(false);setNotice("와이스 일부 주문 조회 실패 · 이전 기록 유지");return;}
-    const buyers:Snapshot[]=Array.isArray(event.data.records)?event.data.records:[];
+    if(!Array.isArray(event.data.records)||event.data.records.some((r:Snapshot & {error?:string})=>!r||r.error||!String(r.userId||"").trim()||!Array.isArray(r.orders))){setBusy(false);setNotice("와이스 구매자 목록 또는 일부 주문 조회 실패 · 비교 중단, 이전 기록 유지");return;}
+    const buyers:Snapshot[]=event.data.records;
     // Keep actual undelivered-buyer-list membership even if a buyer has no
     // eligible orderChains. The sentinel distinguishes a fresh empty list
     // from old snapshots which did not record list membership.
@@ -84,6 +93,7 @@ export default function WiseDeadlineBoard({orders,ordersReady=false}:{orders:Ord
      next.push({nickname:buyer.nickname,wise_user_id:buyer.userId||null,order_id:String(order.id),days,status:pending?"pending":days>=13?"urgent":"unshipped",source:"wise"});
     }
     const time=new Date().toISOString();
+    setComparisonAt(Date.parse(time));
     try{localStorage.setItem(CACHE_KEY,JSON.stringify({rows:next,updatedAt:time}));}
     catch{setNotice("동기화 완료. 다만 브라우저 저장에 실패했어.");}
     setWiseRows(next);
@@ -108,7 +118,7 @@ export default function WiseDeadlineBoard({orders,ordersReady=false}:{orders:Ord
  const confirmed=unique(rows.filter(r=>r.status==="confirmed"));
  const urgent=unique(rows.filter(r=>(r.status==="urgent"||r.status==="unshipped")&&r.days>=13));
  const listDiff=useMemo(()=>{
-  const ready=ordersReady&&!busy&&rows.some(row=>row.status==="listed"&&row.order_id===WISE_LIST_COMPLETE);
+  const ready=ordersReady&&!busy&&comparisonAt!==null&&rows.some(row=>row.status==="listed"&&row.order_id===WISE_LIST_COMPLETE);
   const wiseById=new Map<string,{userId:string;nickname:string;wiseOrderIds:string[]}>();
   if(ready){
    for(const row of rows){
@@ -152,9 +162,11 @@ export default function WiseDeadlineBoard({orders,ordersReady=false}:{orders:Ord
     .sort((a,b)=>a.nickname.localeCompare(b.nickname,"ko"));
   const noId=missingIds.map((order,index)=>({...order,nickname:missingNames[index]}));
   return {ready,wiseOnly,ddogaOnly,noId,total:wiseOnly.length+ddogaOnly.length+noId.length};
- },[rows,orders,ordersReady,busy]);
+ },[rows,orders,ordersReady,busy,comparisonAt]);
  function refresh(){
   if(busy)return;
+  refreshStartedRef.current=true;
+  setComparisonAt(null);
   snapshotRequestedRef.current=false;
   snapshotHandledRef.current=false;
   setBusy(true);setNotice("와이스 응답을 기다리는 중...");
@@ -164,7 +176,8 @@ export default function WiseDeadlineBoard({orders,ordersReady=false}:{orders:Ord
   popup.focus();
   let tries=0;
   const timer=window.setInterval(()=>{
-   if(popup.closed||tries++>=30){window.clearInterval(timer);if(tries>=30){setBusy(false);setNotice("와이스 응답 시간 초과. 몽키 스크립트를 확인해줘.");}return;}
+   if(snapshotRequestedRef.current){window.clearInterval(timer);return;}
+   if(popup.closed||tries++>=30){window.clearInterval(timer);setBusy(false);setNotice(popup.closed?"와이스 창이 닫혔어. 다시 조회해줘.":"와이스 응답 시간 초과. 몽키 스크립트를 확인해줘.");return;}
    popup.postMessage({type:"DDOGA_WISE_SHIP_PING"},"https://wyyyes.com");
   },600);
   window.setTimeout(()=>window.clearInterval(timer),19000);
@@ -229,14 +242,15 @@ export default function WiseDeadlineBoard({orders,ordersReady=false}:{orders:Ord
   <section style={{marginTop:10,padding:10,borderRadius:8,border:"1px solid #d1d5db",background:"#fff",fontSize:13}}>
    <strong>리스트 확인 필요 {listDiff.ready?listDiff.wiseOnly.length+listDiff.ddogaOnly.length+"명":"· 비교 대기"}:</strong>{" "}
    {!listDiff.ready
-    ? <span>{!ordersReady?"DDOGA 리스트 조회 완료 대기 중":busy?"와이스 조회 중":"최근 업데이트를 눌러줘."}</span>
+    ? <span>{!ordersReady?"DDOGA 리스트 조회 완료 대기 중":busy?"와이스 최신 목록 조회 중":"와이스 최신 목록 비교 필요 · 오른쪽 새로고침을 눌러줘. (저장된 목록은 비교하지 않음)"}</span>
     : <>
        {listDiff.wiseOnly.length===0&&listDiff.ddogaOnly.length===0
         ? "차이 없음"
         : <span style={{display:"inline-flex",flexWrap:"wrap",gap:"4px 10px",verticalAlign:"middle"}}>
-           {listDiff.ddogaOnly.map(buyer=><span key={"wise:"+buyer.userId}>{buyer.userId}(와이스누락)</span>)}
-           {listDiff.wiseOnly.map(buyer=><span key={"ddoga:"+buyer.userId}>{buyer.userId}(ddoga누락)</span>)}
+           {listDiff.ddogaOnly.map(buyer=><span key={"wise:"+buyer.userId} title={buyer.userId} style={nicknameStyle}>{buyer.nickname||"닉네임 없음"} <span style={{fontSize:11,fontWeight:600}}>(와이스누락)</span></span>)}
+           {listDiff.wiseOnly.map(buyer=><span key={"ddoga:"+buyer.userId} title={buyer.userId} style={nicknameStyle}>{buyer.nickname||"닉네임 없음"} <span style={{fontSize:11,fontWeight:600}}>(DDOGA누락)</span></span>)}
           </span>}
+       <span style={{marginLeft:8,color:"#6b7280",fontSize:11}}>· 와이스 최신 조회 {new Date(comparisonAt!).toLocaleTimeString("ko-KR",{timeZone:"Asia/Seoul",hour12:false})} 기준</span>
        {listDiff.noId.length>0&&<span style={{marginLeft:8,color:"#92400e"}}>· ID 없는 주문 {listDiff.noId.length}건 비교 제외</span>}
       </>}
   </section>
